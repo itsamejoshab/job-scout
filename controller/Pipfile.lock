@@ -1,0 +1,45 @@
+[[source]]
+name = "pypi"
+url = "https://pypi.org/simple"
+verify_ssl = true
+
+[dev-packages]
+black = "*"
+flake8 = "*"
+pytest = "*"
+isort = "*"
+autopep8 = "*"
+mypy = "*"
+ruff = "*"
+aiosqlite = "*"
+
+[packages]
+fastapi = "*"
+sqlalchemy = "*"
+psycopg2-binary = "*"
+python-dotenv = "*"
+pydantic = "*"
+uvicorn = "*"
+pydantic-settings = "*"
+aio-pika = "*"
+asyncpg = "*"
+greenlet = "*"
+pytest = "*"
+pytest-asyncio = "*"
+pytest-cov = "*"
+pytest-mock = "*"
+httpx = "*"
+croniter = "*"
+pandas = "*"
+backoff = "*"
+aioredis = "*"
+flake8 = "*"
+prometheus-fastapi-instrumentator = "*"
+temporalio = "*"
+boto3 = "*"
+python-multipart = "*"
+tenacity = "*"
+aiohttp = "*"
+
+[requires]
+python_version = "3.12"

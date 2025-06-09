@@ -1,0 +1,140 @@
+# Common environment variables
+x-common-env: &common-env
+  DATABASE_URL: postgresql://${POSTGRES_USER:-defaultx}:${POSTGRES_PASSWORD:-defaultx}@postgres:5432/${POSTGRES_DB:-defaultx}
+  TEMPORAL_ADDRESS: temporal:7233
+
+# Default logging configuration for all services
+x-default-logging: &default-logging
+  driver: "json-file"
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+# Base configuration for all Python services
+x-python-service: &python-service
+  restart: unless-stopped
+  env_file: [ ./controller/.env ]          # centralised env variables
+  environment: *common-env                 # Add common environment variables
+  networks: 
+    - backend
+  depends_on: [ temporal ]
+  healthcheck:
+    test: ["CMD", "curl", "-f", "http://localhost:8000/docs"]
+    interval: 30s
+    timeout: 10s
+    retries: 5
+  logging: *default-logging
+  volumes:
+    - ./shared:/app/shared:ro  # Mount shared package as read-only
+
+services:
+  # --- core data stores ---
+  postgres:
+    image: postgres:16-alpine
+    container_name: postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-defaultx}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-defaultx}
+      POSTGRES_DB: ${POSTGRES_DB:-defaultx}
+      POSTGRES_HOST: postgres
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data/pgdata:rw
+    networks: 
+      - backend
+    ports:
+      - 5432:5432
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U defaultx -d defaultx"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    shm_size: '256mb'
+    logging: *default-logging
+
+  # --- orchestration ---
+  controller: &service-defaults # Base service configuration
+    container_name: controller
+    build:
+      context: .
+      dockerfile: controller/Dockerfile
+    command: ["./setup.sh"]
+    environment: *common-env # Common environment variables
+    depends_on:
+      temporal:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8001:8000"
+    healthcheck: &default-healthcheck
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+    volumes:
+      - ./shared:/app/shared:ro  # Mount shared package as read-only
+    networks:
+      - backend
+    logging: *default-logging
+  temporal:
+    container_name: temporal
+    image: temporalio/auto-setup:latest
+    restart: unless-stopped
+    environment:
+      - DB=postgres12
+      - DB_PORT=5432
+      - AUTO_SETUP=true
+      - ENABLE_ES=false
+      - POSTGRES_USER=${POSTGRES_PASSWORD:-defaultx}
+      - POSTGRES_PWD=${POSTGRES_PASSWORD:-defaultx}
+      - POSTGRES_SEEDS=postgres
+      - DYNAMIC_CONFIG_FILE_PATH=config/dynamicconfig/development.yaml
+      - TEMPORAL_ADDRESS=temporal:7233
+      - TEMPORAL_CLI_ADDRESS=temporal:7233
+    volumes:
+      - ./config/dynamicconfig:/etc/temporal/config/dynamicconfig
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "7233:7233" # temporal frontend
+      - "7234:7234" # temporal history
+      - "7235:7235" # temporal matching
+      - "7236:7236" # temporal worker
+    networks: 
+      - backend
+    healthcheck:
+      test: ["CMD", "temporal", "operator", "cluster", "health", "--address", "temporal:7233"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  temporal-ui:
+    container_name: temporal-ui
+    image: temporalio/ui:2.21.3
+    restart: unless-stopped
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+      - TEMPORAL_CORS_ORIGINS=http://localhost:3000
+    depends_on:
+      - temporal
+    ports: [ "8082:8080" ]
+    networks: 
+      - backend
+
+  # --- micro‑service workers (build‑time ARG picks the folder) ---
+
+networks:
+  backend:
+    name: job-scout-backend
+    driver: bridge
+
+volumes:
+  job-store:
+  
