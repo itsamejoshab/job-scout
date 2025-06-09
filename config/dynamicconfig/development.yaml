@@ -1,0 +1,115 @@
+frontend.enableClientVersionCheck:
+  - value: false
+    constraints: {}
+
+frontend.enableClientVersionCheckData:
+  - value: false
+    constraints: {}
+
+frontend.enableClientVersionCheckDataStores:
+  - value: false
+    constraints: {}
+
+frontend.enableClientVersionCheckWorkflow:
+  - value: false
+    constraints: {}
+
+frontend.enableClientVersionCheckTask:
+  - value: false
+    constraints: {}
+
+frontend.enableClientVersionCheckWorker:
+  - value: false
+    constraints: {}
+
+frontend.enableClientVersionCheckNamespace:
+  - value: false
+    constraints: {}
+
+frontend.enableClientVersionCheckHistory:
+  - value: false
+    constraints: {}
+
+frontend.enableClientVersionCheckMatching:
+  - value: false
+    constraints: {}
+
+frontend.enableClientVersionCheckHistoryArchival:
+  - value: false
+    constraints: {}
+
+frontend.enableClientVersionCheckVisibility:
+  - value: false
+    constraints: {}
+
+frontend.enableClientVersionCheckWorkerVersioningData:
+  - value: false
+    constraints: {}
+
+frontend.enableClientVersionCheckWorkerVersioningWorkflow:
+  - value: false
+    constraints: {}
+
+frontend.enableClientVersionCheckWorkerVersioningTask:
+  - value: false
+    constraints: {}
+
+frontend.enableClientVersionCheckWorkerVersioningWorker:
+  - value: false
+    constraints: {}
+
+frontend.enableClientVersionCheckWorkerVersioningNamespace:
+  - value: false
+    constraints: {}
+
+frontend.enableClientVersionCheckWorkerVersioningHistory:
+  - value: false
+    constraints: {}
+
+frontend.enableClientVersionCheckWorkerVersioningMatching:
+  - value: false
+    constraints: {}
+
+frontend.enableClientVersionCheckWorkerVersioningHistoryArchival:
+  - value: false
+    constraints: {}
+
+frontend.enableClientVersionCheckWorkerVersioningVisibility:
+  - value: false
+    constraints: {}
+
+frontend.enableClientVersionCheckWorkerVersioningWorkerVersioningData:
+  - value: false
+    constraints: {}
+
+frontend.enableClientVersionCheckWorkerVersioningWorkerVersioningWorkflow:
+  - value: false
+    constraints: {}
+
+frontend.enableClientVersionCheckWorkerVersioningWorkerVersioningTask:
+  - value: false
+    constraints: {}
+
+frontend.enableClientVersionCheckWorkerVersioningWorkerVersioningWorker:
+  - value: false
+    constraints: {}
+
+frontend.enableClientVersionCheckWorkerVersioningWorkerVersioningNamespace:
+  - value: false
+    constraints: {}
+
+frontend.enableClientVersionCheckWorkerVersioningWorkerVersioningHistory:
+  - value: false
+    constraints: {}
+
+frontend.enableClientVersionCheckWorkerVersioningWorkerVersioningMatching:
+  - value: false
+    constraints: {}
+
+frontend.enableClientVersionCheckWorkerVersioningWorkerVersioningHistoryArchival:
+  - value: false
+    constraints: {}
+
+frontend.enableClientVersionCheckWorkerVersioningWorkerVersioningVisibility:
+  - value: false
+    constraints: {} 
