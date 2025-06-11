@@ -3,37 +3,15 @@ import time
 import asyncio
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
-import os
+from app.core.config import settings
 
 # Configure logging
 logger = logging.getLogger(__name__)
 
-
 async def wait_for_db(max_retries=30, retry_interval=1):
-    """Wait for database to be ready.
 
-    Args:
-        max_retries (int): Maximum number of connection attempts
-        retry_interval (int): Seconds to wait between attempts
-
-    Returns:
-        None
-
-    Raises:
-        Exception: If database connection fails after max_retries
-    """
-    # Ensure we're using asyncpg driver
-    usr = os.getenv("POSTGRES_USER", "defaultx")
-    pwd = os.getenv("POSTGRES_PASSWORD", "defaultx")
-    hst = os.getenv("POSTGRES_HOST", "postgres-db")
-    prt = os.getenv("POSTGRES_PORT", 5432)
-    dbb = os.getenv("POSTGRES_DB", "dbx")
-
-    db_url = f"postgresql+asyncpg://{usr}:{pwd}@{hst}:{prt}/{dbb}"
-
-    if not db_url.startswith("postgresql+asyncpg"):
-        db_url = db_url.replace("postgresql://", "postgresql+asyncpg://")
-
+    db_url = settings.DATABASE_URL_ASYNC
+    
     engine = create_async_engine(db_url)
 
     for attempt in range(max_retries):
