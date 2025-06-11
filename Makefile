@@ -113,7 +113,7 @@ ruff:
 
 
 connect-db:
-	docker compose exec -it postgres psql -U $(POSTGRES_USER) -d $(POSTGRES_PASSWORD)
+	docker compose exec -it postgres psql -U $(POSTGRES_USER) -d $(POSTGRES_DB)
 
 # Helper function to make curl requests
 define curl_request

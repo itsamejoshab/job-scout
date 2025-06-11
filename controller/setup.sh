@@ -23,7 +23,7 @@ FASTAPI_PID=$!
 
 # Start the Temporal worker
 echo "Starting the Temporal worker..."
-#python -m app.worker
+python -m app.worker
 
 # If the worker exits, kill the FastAPI server
 kill $FASTAPI_PID

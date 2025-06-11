@@ -63,8 +63,8 @@ services:
     command: ["./setup.sh"]
     environment: *common-env # Common environment variables
     depends_on:
-      #temporal:
-      #  condition: service_healthy
+      temporal:
+        condition: service_healthy
       postgres:
         condition: service_healthy
     ports:
