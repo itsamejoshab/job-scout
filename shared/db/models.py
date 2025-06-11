@@ -31,9 +31,9 @@ class Jobs(Base):
     promising = Column(Boolean, default=False)
     notified = Column(Boolean, default=False)
     
-
+    #representation
     def __repr__(self):
-        return f"<Scraped Job '{self.title}' ({self.job_url})>"
+        return f"<Job '{self.title}' ({self.job_url})>"
 
     def to_dict(self):
         """Convert SQLAlchemy model instance to a dictionary."""

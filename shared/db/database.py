@@ -9,25 +9,14 @@ from datetime import datetime
 from sqlalchemy.exc import DBAPIError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import (AsyncSession, async_sessionmaker,
                                     create_async_engine)
-from sqlalchemy.orm import DeclarativeBase, MappedAsDataclass
+from sqlalchemy.orm import declarative_base, MappedAsDataclass
 from sqlalchemy.sql import text
+from config import settings
 
 logger = logging.getLogger(__name__)
 
-# Environment variables for database connection with fallback values
-POSTGRES_USER = os.getenv("POSTGRES_USER", "defaultx")
-POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "defaultx")
-POSTGRES_DB = os.getenv("POSTGRES_DB", "dbx")
-POSTGRES_HOST = os.getenv("POSTGRES_HOST", "postgres-db")
-POSTGRES_PORT = os.getenv("POSTGRES_PORT", "5432")
-
 # Asynchronous Database URL
-SQLALCHEMY_DATABASE_URL = (
-    f"postgresql+asyncpg://"
-    f"{POSTGRES_USER}:{POSTGRES_PASSWORD}"
-    f"@{POSTGRES_HOST}:{POSTGRES_PORT}"
-    f"/{POSTGRES_DB}"
-)
+SQLALCHEMY_DATABASE_URL = settings.DATABASE_URL_ASYNC
 
 # Create engine with optimized configurations
 engine = create_async_engine(
