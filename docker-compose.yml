@@ -36,7 +36,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-defaultx}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-defaultx}
       POSTGRES_DB: ${POSTGRES_DB:-defaultx}
-      POSTGRES_HOST: postgres
+      POSTGRES_HOST: ${POSTGRES_HOST:-defaultx}
       PGDATA: /var/lib/postgresql/data/pgdata
     volumes:
       - ./data/postgres:/var/lib/postgresql/data/pgdata:rw
@@ -45,7 +45,7 @@ services:
     ports:
       - 5432:5432
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U defaultx -d defaultx"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-defaultx} -d ${POSTGRES_DB:-defaultx}"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -63,8 +63,8 @@ services:
     command: ["./setup.sh"]
     environment: *common-env # Common environment variables
     depends_on:
-      temporal:
-        condition: service_healthy
+      #temporal:
+      #  condition: service_healthy
       postgres:
         condition: service_healthy
     ports:
@@ -87,10 +87,10 @@ services:
     restart: unless-stopped
     environment:
       - DB=postgres12
-      - DB_PORT=5432
+      - DB_PORT=${POSTGRES_PORT:-5342}
       - AUTO_SETUP=true
       - ENABLE_ES=false
-      - POSTGRES_USER=${POSTGRES_PASSWORD:-defaultx}
+      - POSTGRES_USER=${POSTGRES_USER:-defaultx}
       - POSTGRES_PWD=${POSTGRES_PASSWORD:-defaultx}
       - POSTGRES_SEEDS=postgres
       - DYNAMIC_CONFIG_FILE_PATH=config/dynamicconfig/development.yaml
@@ -127,9 +127,6 @@ services:
     ports: [ "8082:8080" ]
     networks: 
       - backend
-
-  # --- micro‑service workers (build‑time ARG picks the folder) ---
-
 networks:
   backend:
     name: job-scout-backend

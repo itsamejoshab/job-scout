@@ -10,8 +10,8 @@ APP_ENV=${APP_ENV:-development}
 echo "Running in $APP_ENV environment"
 
 # Add the app directory and root directory to PYTHONPATH
-export PYTHONPATH=/app:/app/..:$PYTHONPATH
-
+export PYTHONPATH=/app:/app/core:/app/utils:$PYTHONPATH
+echo $PYTHONPATH
 # Wait for database to be ready
 echo "Waiting for database to be ready..."
 python -m app.utils.wait_for_db
@@ -23,7 +23,7 @@ FASTAPI_PID=$!
 
 # Start the Temporal worker
 echo "Starting the Temporal worker..."
-python -m app.worker
+#python -m app.worker
 
 # If the worker exits, kill the FastAPI server
 kill $FASTAPI_PID
