@@ -14,12 +14,7 @@ export PYTHONPATH=/app:/app/..:$PYTHONPATH
 
 # Wait for database to be ready
 echo "Waiting for database to be ready..."
-# Use python -c to run the wait_for_db function directly
-python -c "
-import asyncio
-from app.utils.wait_for_db import wait_for_db
-asyncio.run(wait_for_db())
-"
+python -m app.utils.wait_for_db
 
 # Start the FastAPI server in the background
 echo "Starting the FastAPI application..."

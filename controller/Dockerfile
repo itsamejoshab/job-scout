@@ -20,8 +20,6 @@ RUN pip install --no-cache-dir pipenv
 # First copy setup.py and __init__.py to create the package structure
 COPY shared/setup.py shared/__init__.py /app/shared/
 # Then copy only the Python modules that are actually used
-COPY shared/schemas /app/shared/schemas/
-COPY shared/models /app/shared/models/
 COPY shared/db /app/shared/db/
 
 # Install shared package in editable mode for development
