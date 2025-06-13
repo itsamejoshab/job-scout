@@ -17,6 +17,7 @@ echo "Waiting for database to be ready..."
 python -m app.utils.wait_for_db
 
 # migrate database
+echo "Migrate database as required..."
 alembic upgrade head
 
 # Start the FastAPI server in the background
