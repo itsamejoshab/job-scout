@@ -20,8 +20,6 @@ RUN pip install --no-cache-dir pipenv
 # First copy setup.py and __init__.py to create the package structure
 COPY shared/setup.py shared/__init__.py /app/shared/
 # Then copy only the Python modules that are actually used
-COPY shared/schemas /app/shared/schemas/
-COPY shared/models /app/shared/models/
 COPY shared/db /app/shared/db/
 
 # Install shared package in editable mode for development
@@ -39,6 +37,8 @@ COPY controller/app ./app
 COPY controller/workflows ./workflows
 COPY controller/setup.sh ./
 COPY controller/.env ./
+COPY controller/alembic.ini ./
+COPY controller/alembic ./alembic
 
 # Make setup script executable
 RUN chmod +x setup.sh
@@ -61,6 +61,8 @@ COPY --from=builder /app/app ./app
 COPY --from=builder /app/workflows ./workflows
 COPY --from=builder /app/setup.sh ./
 COPY --from=builder /app/.env ./
+COPY --from=builder /app/alembic.ini ./
+COPY --from=builder /app/alembic ./
 
 # Make setup script executable
 RUN chmod +x setup.sh

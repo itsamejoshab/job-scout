@@ -10,16 +10,14 @@ APP_ENV=${APP_ENV:-development}
 echo "Running in $APP_ENV environment"
 
 # Add the app directory and root directory to PYTHONPATH
-export PYTHONPATH=/app:/app/..:$PYTHONPATH
+export PYTHONPATH=/app:/app/core:/app/utils:$PYTHONPATH
 
 # Wait for database to be ready
 echo "Waiting for database to be ready..."
-# Use python -c to run the wait_for_db function directly
-python -c "
-import asyncio
-from app.utils.wait_for_db import wait_for_db
-asyncio.run(wait_for_db())
-"
+python -m app.utils.wait_for_db
+
+# migrate database
+alembic upgrade head
 
 # Start the FastAPI server in the background
 echo "Starting the FastAPI application..."

@@ -9,11 +9,11 @@ persistence:
   datastores:
     temporal:
       sql:
-        user: test
-        password: password123
+        user: ${POSTGRES_USER}
+        password: ${POSTGRES_PASSWORD}
         pluginName: postgres12_pgx
         databaseName: temporal
-        connectAddr: db:5432
+        connectAddr: db:${POSTGRES_PORT}
         connectProtocol: tcp
         maxConns: 20
         maxIdleConns: 20
@@ -21,11 +21,11 @@ persistence:
         schemaName: public
     visibility:
       sql:
-        user: test
-        password: password123
+        user: ${POSTGRES_USER}
+        password: ${POSTGRES_PASSWORD}
         pluginName: postgres12_pgx
         databaseName: temporal_visibility
-        connectAddr: db:5432
+        connectAddr: db:${POSTGRES_PORT}
         connectProtocol: tcp
         maxConns: 20
         maxIdleConns: 20

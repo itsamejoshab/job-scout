@@ -14,6 +14,7 @@ ruff = "*"
 aiosqlite = "*"
 
 [packages]
+alembic = "*"
 fastapi = "*"
 sqlalchemy = "*"
 psycopg2-binary = "*"

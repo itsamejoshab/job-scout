@@ -1,3 +1,7 @@
+# Load the .env file
+include controller/.env
+export $(shell sed 's/=.*//' .env)
+
 # ---------- variables ----------
 SERVICES = scrape compare alert
 CONTROLLER = controller
@@ -8,6 +12,7 @@ API_BASE_URL = http://$(API_HOST)/api/v0
 
 # Default target
 .DEFAULT_GOAL := help
+
 
 # ---------- helper targets ----------
 help:
@@ -26,7 +31,7 @@ help:
 
 
 up:
-	docker compose up -d --build
+	docker compose --env-file ./controller/.env up -d --build
 
 down:
 	docker compose down
@@ -35,7 +40,7 @@ restart:
 	docker compose restart
 
 build:
-	docker compose build
+	docker compose --env-file ./controller/.env build
 
 logs:
 	docker compose logs -f
@@ -108,7 +113,7 @@ ruff:
 
 
 connect-db:
-	docker compose exec -it postgres psql -U default_user -d default_pass
+	docker compose exec -it postgres psql -U $(POSTGRES_USER) -d $(POSTGRES_DB)
 
 # Helper function to make curl requests
 define curl_request
