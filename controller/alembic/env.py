@@ -10,7 +10,6 @@ from sqlalchemy import engine_from_config, pool
 from alembic import context
 from shared.db.database import Base
 from shared.db.models import *  # noqa: F403
-from config import settings
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -21,7 +20,12 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-db_url = settings.DATABASE_URL
+POSTGRES_USER='default_user'
+POSTGRES_PASSWORD='default_pass'
+POSTGRES_HOST='postgres'
+POSTGRES_PORT=5432
+POSTGRES_DB='jobdb'
+db_url = f"postgresql://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}"
 
 config.set_main_option("sqlalchemy.url", db_url)
 

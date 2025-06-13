@@ -11,12 +11,18 @@ from sqlalchemy.ext.asyncio import (AsyncSession, async_sessionmaker,
                                     create_async_engine)
 from sqlalchemy.orm import declarative_base, MappedAsDataclass
 from sqlalchemy.sql import text
-from config import settings
+
 
 logger = logging.getLogger(__name__)
 
 # Asynchronous Database URL
-SQLALCHEMY_DATABASE_URL = settings.DATABASE_URL_ASYNC
+POSTGRES_USER='default_user'
+POSTGRES_PASSWORD='default_pass'
+POSTGRES_HOST='postgres'
+POSTGRES_PORT=5432
+POSTGRES_DB='jobdb'
+
+SQLALCHEMY_DATABASE_URL =f"postgresql+asyncpg://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}"
 
 # Create engine with optimized configurations
 engine = create_async_engine(

@@ -11,10 +11,13 @@ echo "Running in $APP_ENV environment"
 
 # Add the app directory and root directory to PYTHONPATH
 export PYTHONPATH=/app:/app/core:/app/utils:$PYTHONPATH
-echo $PYTHONPATH
+
 # Wait for database to be ready
 echo "Waiting for database to be ready..."
 python -m app.utils.wait_for_db
+
+# migrate database
+alembic upgrade head
 
 # Start the FastAPI server in the background
 echo "Starting the FastAPI application..."

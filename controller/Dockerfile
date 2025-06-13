@@ -37,6 +37,8 @@ COPY controller/app ./app
 COPY controller/workflows ./workflows
 COPY controller/setup.sh ./
 COPY controller/.env ./
+COPY controller/alembic.ini ./
+COPY controller/alembic ./alembic
 
 # Make setup script executable
 RUN chmod +x setup.sh
@@ -59,6 +61,8 @@ COPY --from=builder /app/app ./app
 COPY --from=builder /app/workflows ./workflows
 COPY --from=builder /app/setup.sh ./
 COPY --from=builder /app/.env ./
+COPY --from=builder /app/alembic.ini ./
+COPY --from=builder /app/alembic ./
 
 # Make setup script executable
 RUN chmod +x setup.sh

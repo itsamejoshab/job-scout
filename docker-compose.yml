@@ -78,6 +78,7 @@ services:
     restart: unless-stopped
     volumes:
       - ./shared:/app/shared:ro  # Mount shared package as read-only
+      - ./controller/alembic:/app/alembic  # Mount alembic directory
     networks:
       - backend
     logging: *default-logging
