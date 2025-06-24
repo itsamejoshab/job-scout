@@ -29,53 +29,37 @@ class WorkflowState:
 
 class WorkflowResult(TypedDict, total=False):
     """Result type for workflow operations."""
-
     status: str
-
-
-class PipelineResult(TypedDict, total=False):
-    """Result type for the entire pipeline."""
-
-    status: str
-    error: Optional[str]
-
-
-@runtime_checkable
-class WorkflowProtocol(Protocol):
-    """Protocol defining required workflow methods."""
-
-    def get_progress(self) -> Dict[str, Any]: ...
-    async def approve_segmenter(self) -> None: ...
-    async def retry_segmenter(self) -> None: ...
-    async def run(self, input_data: Dict[str, Any]) -> PipelineResult: ...
-
 
 @workflow.defn
-class MainPipelineWorkflow:
-    """Main pipeline workflow"""
+class MainWorkflow:
+    """Main workflow"""
 
     def __init__(self) -> None:
         """Initialize workflow state."""
+        logger.info("MainWorkflow Initializing...")
         self._state = WorkflowState()
 
     @workflow.query
     def get_progress(self) -> Dict[str, Any]:
         """Get current workflow progress."""
         return {
-            "state": self._state.current_video_index,
+            "state": "testing in get_progress",
         }
 
     @workflow.run
-    async def run(self, input_data: Dict[str, Any]) -> PipelineResult:
+    async def run(self) -> WorkflowResult:
         """Run the main pipeline workflow."""
         try:
-            logger.info("The main workflow is running")
+            logger.info("workflow.py: The main workflow is running")
 
-            return await True
+            return await {
+                "status": "test pass"
+                }
 
         except Exception as e:
             logger.error(f"Workflow error: {e}")
-            return {
-                "status": "error",
-                "error": str(e),
+
+            return await {
+                "status": "error"
             }

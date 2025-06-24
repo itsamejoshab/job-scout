@@ -1,29 +1,40 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+import logging
+from contextlib import asynccontextmanager
 import asyncio
 from temporalio.client import Client
+from app.api import router
+from app.core.config import settings
+from prometheus_fastapi_instrumentator import Instrumentator
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy import text
+from typing import Dict
+from shared.db.database import async_session_maker
 
-app = FastAPI()
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# Connect to Temporal server (make sure it's running locally)
-async def get_temporal_client():
-    return await Client.connect("localhost:7233")
+app = FastAPI(
+    title=settings.PROJECT_NAME,
+    version=settings.VERSION,
+    description="Controller Service API",
+    docs_url="/controller/docs",
+    redoc_url="/controller/redoc",
+    openapi_url="/controller/openapi.json",
+)
 
-@app.get("/")
-async def root():
-    return {"message": "FastAPI is running!"}
 
-@app.post("/trigger-workflow")
-async def trigger_workflow():
-    # Connect to Temporal server
-    client = await get_temporal_client()
+###############
+# include routers
+app.include_router(router, prefix="/api/v0", tags=["controller"])
+###############
 
-    # Start the workflow
-    handle = await client.start_workflow(
-        workflow_class="DummyWorkflow",  # Workflow name to trigger
-        task_queue="test-task-queue",   # Task queue your worker is listening on
-        args=[],                        # Arguments to pass to the workflow (empty for now)
-        id="dummy-workflow-id",         # Workflow ID (must be unique)
-    )
 
-    return {"workflow_id": handle.id, "run_id": handle.run_id}
 
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run(app, host="0.0.0.0", port=8000, log_level=settings.LOG_LEVEL)
