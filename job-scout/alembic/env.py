@@ -8,8 +8,8 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../.
 from sqlalchemy import engine_from_config, pool
 
 from alembic import context
-from shared.db.database import Base
-from shared.db.models import *  # noqa: F403
+from db.database import Base
+from db.models import *
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

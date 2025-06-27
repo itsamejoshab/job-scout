@@ -15,7 +15,7 @@ APP_ENV=${APP_ENV:-development}
 echo "$(timestamp) - setup.sh - ECHO => Running in $APP_ENV environment"
 
 # Add the app directory and root directory to PYTHONPATH
-export PYTHONPATH=/app:/app/core:/app/utils:$PYTHONPATH
+export PYTHONPATH=/app/app:/app/app/db:$PYTHONPATH
 
 # Wait for database to be ready
 echo "$(timestamp) - setup.sh - ECHO ==> Waiting for database to be ready..."

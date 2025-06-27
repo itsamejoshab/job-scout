@@ -12,7 +12,6 @@ from sqlalchemy.ext.asyncio import (AsyncSession, async_sessionmaker,
 from sqlalchemy.orm import declarative_base, MappedAsDataclass
 from sqlalchemy.sql import text
 
-
 logger = logging.getLogger(__name__)
 
 # Asynchronous Database URL
@@ -143,4 +142,6 @@ async def get_session() -> AsyncIterator[AsyncSession]:
         _log_db_err(e)
     finally:
         await session.close()
+
+
 

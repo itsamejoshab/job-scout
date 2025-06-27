@@ -13,7 +13,7 @@ x-default-logging: &default-logging
 # Base configuration for all Python services
 x-python-service: &python-service
   restart: unless-stopped
-  env_file: [ ./controller/.env ]          # centralised env variables
+  env_file: [ ./job-scout/.env ]          # centralised env variables
   environment: *common-env                 # Add common environment variables
   networks: 
     - backend
@@ -25,7 +25,7 @@ x-python-service: &python-service
     retries: 5
   logging: *default-logging
   volumes:
-    - ./shared:/app/shared:ro  # Mount shared package as read-only
+#    - ./shared:/app/shared:ro  # Mount shared package as read-only
 
 services:
   # --- core data stores ---
@@ -55,11 +55,11 @@ services:
     logging: *default-logging
 
   # --- orchestration ---
-  controller: &service-defaults # Base service configuration
-    container_name: controller
+  job-scout: &service-defaults # Base service configuration
+    container_name: job-scout
     build:
       context: .
-      dockerfile: controller/Dockerfile
+      dockerfile: job-scout/Dockerfile
     command: ["./setup.sh"]
     environment: *common-env # Common environment variables
     depends_on:
@@ -77,8 +77,8 @@ services:
       start_period: 30s
     restart: unless-stopped
     volumes:
-      - ./shared:/app/shared:ro  # Mount shared package as read-only
-      - ./controller/alembic:/app/alembic  # Mount alembic directory
+#      - ./job-scout/alembic:/app/alembic  # Mount alembic directory
+      - ./job-scout/:/app #! DEV ONLY mount the app files
     networks:
       - backend
     logging: *default-logging

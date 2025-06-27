@@ -20,12 +20,9 @@ logger = logging.getLogger(__name__)
 
 
 # Type definitions
-@dataclass
-class WorkflowState:
+class WorkflowState(TypedDict, total=False):
     """State for the workflow."""
-
     status: str
-
 
 class WorkflowResult(TypedDict, total=False):
     """Result type for workflow operations."""
@@ -40,26 +37,19 @@ class MainWorkflow:
         logger.info("MainWorkflow Initializing...")
         self._state = WorkflowState()
 
-    @workflow.query
-    def get_progress(self) -> Dict[str, Any]:
-        """Get current workflow progress."""
-        return {
-            "state": "testing in get_progress",
-        }
-
     @workflow.run
     async def run(self) -> WorkflowResult:
         """Run the main pipeline workflow."""
         try:
             logger.info("workflow.py: The main workflow is running")
 
-            return await {
+            return {
                 "status": "test pass"
                 }
 
         except Exception as e:
             logger.error(f"Workflow error: {e}")
 
-            return await {
+            return {
                 "status": "error"
             }

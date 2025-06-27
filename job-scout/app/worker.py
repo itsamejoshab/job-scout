@@ -23,7 +23,7 @@ from app.activities import (
     smart_filter,
     notifier
 )
-from workflows.workflow import MainWorkflow
+from app.workflow import MainWorkflow
 
 # Configure logging
 logging.basicConfig(

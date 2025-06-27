@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException
 import logging
-from workflows.workflow import MainWorkflow
-from .client import start_workflow
+from app.workflow import MainWorkflow
+from app.client import start_workflow
 
 #from typing import List, Optional, Dict, Any, Tuple
 #from sqlalchemy import select
@@ -24,13 +24,11 @@ router = APIRouter()
 async def run():
     """Test the endpoint to prove its running."""
     try:
-        logger.info(f"RUN attempting...")
+        logger.info(f"{'-' * 10} RUN attempting {'-' * 10}")
         
-        result = await start_workflow(MainWorkflow, workflow_id=1, task_queue="main-workflow", args=None)
+        result = await start_workflow(MainWorkflow, workflow_id="a", task_queue="main-task-queue")
 
-        logger.info(f"RUN was successful")
-
-        return result
+        return 1
 
     except Exception as e:
         # Handle errors and update run status

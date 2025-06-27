@@ -18,27 +18,26 @@ RUN pip install --no-cache-dir pipenv
 
 # Copy only the necessary shared package files
 # First copy setup.py and __init__.py to create the package structure
-COPY shared/setup.py shared/__init__.py /app/shared/
+#COPY shared/setup.py shared/__init__.py /app/shared/
 # Then copy only the Python modules that are actually used
-COPY shared/db /app/shared/db/
+#COPY shared/db /app/shared/db/
 
 # Install shared package in editable mode for development
-RUN pip install -e /app/shared
+#RUN pip install -e /app/shared
 
 # Copy service dependencies
-COPY controller/Pipfile controller/Pipfile.lock ./
-COPY controller/setup.py ./
+COPY job-scout/Pipfile job-scout/Pipfile.lock ./
+COPY job-scout/setup.py ./
 
 # Install dependencies
 RUN pipenv install --system --deploy --ignore-pipfile
 
 # Copy application code, migrations, workflows, and setup script
-COPY controller/app ./app
-COPY controller/workflows ./workflows
-COPY controller/setup.sh ./
-COPY controller/.env ./
-COPY controller/alembic.ini ./
-COPY controller/alembic ./alembic
+COPY job-scout/app ./app
+COPY job-scout/setup.sh ./
+COPY job-scout/.env ./
+COPY job-scout/alembic.ini ./
+COPY job-scout/alembic ./alembic
 
 # Make setup script executable
 RUN chmod +x setup.sh
@@ -48,7 +47,7 @@ FROM python:3.12-slim-bookworm
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONPATH=/app
+    PYTHONPATH=/app:/app/app:/app/app/db
 
 WORKDIR /app
 
@@ -58,7 +57,6 @@ COPY --from=builder /usr/local/bin/ /usr/local/bin/
 
 # Copy application code, migrations, workflows, and setup script
 COPY --from=builder /app/app ./app
-COPY --from=builder /app/workflows ./workflows
 COPY --from=builder /app/setup.sh ./
 COPY --from=builder /app/.env ./
 COPY --from=builder /app/alembic.ini ./
