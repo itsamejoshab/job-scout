@@ -1,10 +1,8 @@
 # Load the .env file
-include controller/.env
+include job-scout/.env
 export $(shell sed 's/=.*//' .env)
 
 # ---------- variables ----------
-SERVICES = scrape compare alert
-CONTROLLER = controller
 
 # API endpoint configuration
 API_HOST ?= localhost:8001
@@ -31,7 +29,7 @@ help:
 
 
 up:
-	docker compose --env-file ./controller/.env up -d --build
+	docker compose --env-file ./job-scout/.env up -d --build
 
 down:
 	docker compose down
@@ -40,7 +38,7 @@ restart:
 	docker compose restart
 
 build:
-	docker compose --env-file ./controller/.env build
+	docker compose --env-file ./job-scout/.env build
 
 logs:
 	docker compose logs -f
@@ -51,14 +49,14 @@ clean:
 
 # ---------- per‑service pipenv ----------
 install-%:
-	@if [ "$*" = "controller" ]; then \
+	@if [ "$*" = "job-scout" ]; then \
 		cd $* && pipenv install --dev; \
 	else \
 		cd services/$* && pipenv install --dev; \
 	fi
 
 shell-%:
-	@if [ "$*" = "controller" ]; then \
+	@if [ "$*" = "job-scout" ]; then \
 		cd $* && pipenv shell; \
 	else \
 		cd services/$* && pipenv shell; \
@@ -66,9 +64,9 @@ shell-%:
 
 # ---------- package installation ----------
 pkg-install-%-%:
-	@if [ "$(word 1,$(subst -, ,$*))" = "controller" ]; then \
-		echo "Installing $(word 2,$(subst -, ,$*)) in controller"; \
-		cd controller && pipenv install $(word 2,$(subst -, ,$*)); \
+	@if [ "$(word 1,$(subst -, ,$*))" = "job-scout" ]; then \
+		echo "Installing $(word 2,$(subst -, ,$*)) in job-scout"; \
+		cd job-scout && pipenv install $(word 2,$(subst -, ,$*)); \
 	elif [ -d "services/$(word 1,$(subst -, ,$*))" ]; then \
 		echo "Installing $(word 2,$(subst -, ,$*)) in service $(word 1,$(subst -, ,$*))"; \
 		cd services/$(word 1,$(subst -, ,$*)) && pipenv install $(word 2,$(subst -, ,$*)); \
@@ -78,8 +76,8 @@ pkg-install-%-%:
 	fi
 
 pkg-install-all-%:
-	@echo "Installing $* in controller"
-	cd controller && pipenv install $*
+	@echo "Installing $* in job-scout"
+	cd job-scout && pipenv install $*
 	@for svc in $(SERVICES); do \
 		echo "Installing $* in $$svc"; \
 		cd services/$$svc && pipenv install $* && cd ../..; \
@@ -93,8 +91,8 @@ pkg-install-all-%:
 
 # ---------- bulk ----------
 install-all:
-	@echo "Installing controller"
-	$(MAKE) install-controller
+	@echo "Installing contjob-scoutroller"
+	$(MAKE) install-job-scout
 	@for svc in $(SERVICES); do \
 		echo "Installing $$svc"; \
 		$(MAKE) install-$$svc; \
@@ -102,9 +100,9 @@ install-all:
 
 # ---------- run ruff for all services locally ----------
 ruff:
-	@echo "Running ruff for controller"
-	ruff format controller
-	ruff check controller --fix
+	@echo "Running ruff for job-scout"
+	ruff format job-scout
+	ruff check job-scout --fix
 	@for svc in $(SERVICES); do \
 		echo "Running ruff for $$svc"; \
 		ruff format services/$$svc; \

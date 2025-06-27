@@ -7,7 +7,7 @@ logger = logging.getLogger(__name__)
 
 async def connect_with_retry(max_retries=5, retry_delay=5):
     """Connect to Temporal server with retry logic."""
-    logger.info("Connecting to Temporal server")
+    logger.info("[Client] Connecting to Temporal server")
     for attempt in range(max_retries):
         try:
             return await Client.connect("temporal:7233")
@@ -25,8 +25,6 @@ async def connect_with_retry(max_retries=5, retry_delay=5):
 
 async def start_workflow(workflow_type, workflow_id, task_queue, args=None):
     """Start a workflow with the given parameters."""
-    logger.info(f"Starting workflow: {workflow_id}")
+    logger.info(f"[Start Workflow] Starting workflow: {workflow_id}")
     client = await connect_with_retry()
-    return await client.start_workflow(
-        workflow_type, id=workflow_id, task_queue=task_queue, args=args or []
-    )
+    return await client.start_workflow(workflow_type, id=workflow_id, task_queue=task_queue, args=args or [])

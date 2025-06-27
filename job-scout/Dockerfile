@@ -18,32 +18,36 @@ RUN pip install --no-cache-dir pipenv
 
 # Copy only the necessary shared package files
 # First copy setup.py and __init__.py to create the package structure
-COPY shared/setup.py shared/__init__.py /app/shared/
+#COPY shared/setup.py shared/__init__.py /app/shared/
 # Then copy only the Python modules that are actually used
-COPY shared/clients /app/shared/clients/
-COPY shared/schemas /app/shared/schemas/
-COPY shared/models /app/shared/models/
-COPY shared/db /app/shared/db/
+#COPY shared/db /app/shared/db/
 
 # Install shared package in editable mode for development
-RUN pip install -e /app/shared
+#RUN pip install -e /app/shared
 
 # Copy service dependencies
-COPY services/ai_intro/Pipfile services/ai_intro/Pipfile.lock ./
-COPY services/ai_intro/setup.py ./
+COPY job-scout/Pipfile job-scout/Pipfile.lock ./
+COPY job-scout/setup.py ./
 
 # Install dependencies
 RUN pipenv install --system --deploy --ignore-pipfile
 
-# Copy application code
-COPY services/ai_intro/app ./app
+# Copy application code, migrations, workflows, and setup script
+COPY job-scout/app ./app
+COPY job-scout/setup.sh ./
+COPY job-scout/.env ./
+COPY job-scout/alembic.ini ./
+COPY job-scout/alembic ./alembic
+
+# Make setup script executable
+RUN chmod +x setup.sh
 
 # Final stage
 FROM python:3.12-slim-bookworm
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONPATH=/app
+    PYTHONPATH=/app:/app/app:/app/app/db
 
 WORKDIR /app
 
@@ -51,8 +55,15 @@ WORKDIR /app
 COPY --from=builder /usr/local/lib/python3.12/site-packages/ /usr/local/lib/python3.12/site-packages/
 COPY --from=builder /usr/local/bin/ /usr/local/bin/
 
-# Copy application code
+# Copy application code, migrations, workflows, and setup script
 COPY --from=builder /app/app ./app
+COPY --from=builder /app/setup.sh ./
+COPY --from=builder /app/.env ./
+COPY --from=builder /app/alembic.ini ./
+COPY --from=builder /app/alembic ./
 
-# Run the worker
-CMD ["python", "-m", "app.worker"]
+# Make setup script executable
+RUN chmod +x setup.sh
+
+# Run the setup script
+CMD ["./setup.sh"]

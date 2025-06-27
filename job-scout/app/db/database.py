@@ -12,7 +12,6 @@ from sqlalchemy.ext.asyncio import (AsyncSession, async_sessionmaker,
 from sqlalchemy.orm import declarative_base, MappedAsDataclass
 from sqlalchemy.sql import text
 
-
 logger = logging.getLogger(__name__)
 
 # Asynchronous Database URL
@@ -118,3 +117,31 @@ async def init_db():
 
 async def close_db():
     await engine.dispose()
+
+# ---------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------
+def _log_db_err(e: Exception) -> None:
+    logger.error("Database error: %s", e, exc_info=True)
+    if isinstance(e, DBAPIError):
+        logger.error("Connection invalidated: %s", e.connection_invalidated)
+    raise
+
+
+@backoff.on_exception(
+    backoff.expo, (SQLAlchemyError, ConnectionError), max_tries=3, max_time=30
+)
+@contextlib.asynccontextmanager
+async def get_session() -> AsyncIterator[AsyncSession]:
+    session = async_session_maker()
+    try:
+        yield session
+        await session.commit()
+    except SQLAlchemyError as e:
+        await session.rollback()
+        _log_db_err(e)
+    finally:
+        await session.close()
+
+
+
