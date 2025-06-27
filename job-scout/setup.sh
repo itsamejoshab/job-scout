@@ -25,13 +25,17 @@ python -m app.utils.wait_for_db
 echo "$(timestamp) - setup.sh - ECHO ===> Migrate database as required..."
 alembic upgrade head
 
+# Loading database
+echo "$(timestamp) - setup.sh - ECHO ======> Loading initial database..."
+python -m app.db.load
+
 # Start the FastAPI server in the background
-echo "$(timestamp) - setup.sh - ECHO ====> Starting the FastAPI application..."
+echo "$(timestamp) - setup.sh - ECHO =======> Starting the FastAPI application..."
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload &
 FASTAPI_PID=$!
 
 # Start the Temporal worker
-echo "$(timestamp) - setup.sh - ECHO =====> Starting the Temporal worker..."
+echo "$(timestamp) - setup.sh - ECHO ========> Starting the Temporal worker..."
 python -m app.worker
 
 # If the worker exits, kill the FastAPI server
