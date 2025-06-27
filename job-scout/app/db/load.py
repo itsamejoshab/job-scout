@@ -36,8 +36,8 @@ async def load_initial_data():
                 timespan=data["timespan"],
                 pages_to_scrape=data["pages_to_scrape"],
                 rounds=data["rounds"],
-                created_at=datetime.fromisoformat(data["created_at"]),
-                updated_at=datetime.fromisoformat(data["updated_at"])
+                created_at=datetime.now(),
+                updated_at=datetime.now()
             )
 
             session.add(defaults)
@@ -47,3 +47,9 @@ async def load_initial_data():
         logger.error(f"Invalid JSON format in file: \n\n {data} \n\n")
     except Exception as e:
         logger.error(f"Error inserting SearchSettings data: {e}")
+
+async def main():
+    await load_initial_data()
+
+if __name__ == "__main__":
+    asyncio.run(main())
