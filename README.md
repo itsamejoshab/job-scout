@@ -19,13 +19,13 @@ The system consists of several key components:
 
 ### Core Services
 
-- **Controller**: The main API and workflow orchestrator
+- **Job-Scout**: The main API and workflow orchestrator is in `job-scout/app`
 - **Temporal**: Workflow orchestration and state management
 - **PostgreSQL**: Primary data store
 
 ### Processing Services
 
-1. **Finder**: Scrapes sites for job postings, mainly high level information: e.g. Company, Title, Location, URL
+1. **Scraper**: Scrapes sites for job postings, mainly high level information: e.g. Company, Title, Location, URL
 2. **Duplicate Remover**: Dedupes jobs that may be cross posted or repeated results
 3. **Basic Filter**: Eliminates jobs based on obvious filters such as keyword matching in Title or Company
 4. **Job Detailer**: Scrapes more detail about each job, gets the entire description
@@ -37,20 +37,24 @@ The system consists of several key components:
 
 ```bash
 .
-├── controller/           # Main API and workflow orchestrator
-│   ├── app/              # FastAPI application
-│   ├── workflows/        # Temporal workflow definitions
-│   └── tests/            # Test suite
-├── services/             # Microservices
-│   ├── finder/           # Scrapes sites for job postings (Finder service)
-│   ├── duplicate_remover/ # Dedupes jobs (Duplicate Remover service)
-│   ├── basic_filter/     # Filters jobs based on basic criteria (Basic Filter service)
-│   ├── job_detailer/     # Scrapes detailed job descriptions (Job Detailer service)
-│   ├── advanced_filter/  # Filters jobs based on description (Advanced Filter service)
-│   ├── smart_filter/     # AI-powered filtering (Smart Filter service)
-│   ├── notifier/         # Sends notifications to webhooks (Notifier service)
-├── config/               # Configuration files
-└── docker-compose.yml    # Service orchestration
+├── data/                            # data folder containing the local database (Postgres)
+├── job-scout/                       # Main API and workflow orchestrator
+│   ├── app/                         # Main Job-Scout App
+|   │   ├── services/                # Modular services that run via workflow/activities with Temporal
+|   |   │   ├── scrapers/            # Custom scrapers for each job source (LINKEDIN, INDEED, etc)
+|   |   │   ├── duplicate_remover/   # Custom scrapers for each job source (LINKEDIN, INDEED, etc)
+|   |   │   ├── duplicate_remover/   # Dedupes jobs (Duplicate Remover service)
+|   |   │   ├── basic_filter/        # Filters jobs based on basic criteria (Basic Filter service)
+|   |   │   ├── job_detailer/        # Scrapes detailed job descriptions (Job Detailer service)
+|   |   │   ├── advanced_filter/     # Filters jobs based on description (Advanced Filter service)
+|   |   │   ├── smart_filter/        # AI-powered filtering (Smart Filter service)
+|   |   │   ├── notifier/            # Sends notifications to webhooks (Notifier service)
+|   │   ├── db/                      # Database layer - schemas, models, etc
+|   │   ├── workflow.py              # Main workflow logic (Temporal)
+|   │   ├── activities.py            # Main activities logic (Temporal)
+|   │   └── api.py                   # Fast-API server for routing requests
+├── config/                          # Configuration files
+└── docker-compose.yml               # Service orchestration
 ```
 
 ## Prerequisites
@@ -59,7 +63,21 @@ The system consists of several key components:
 - Python 3.12+
 - Make (for using Makefile commands)
 
-## Quick Start
+## Quick Start (User)
+
+1. Clone the repository
+
+2. Configure the search settings manually (would love to develop a UI to manage the database)
+   a. Universal Search Settings: `app/db/search_settings.json`
+   b. Scraper specific search settings: `get_default_settings()` class in each scraper `.py` file
+
+3. Configure `.env` file with personal settings, like notifier webhook, etc.
+
+4. Run the app with `make up` 
+
+5. Externally hit `localhost:8001/api/v0/run` whenever you want the search to happen (i.e. every 5 mins, etc)
+
+## Quick Start (Developer)
 
 1. Clone the repository
 
@@ -202,20 +220,12 @@ You can customize the API endpoint by setting the API_HOST variable:
 ```bash
 make API_HOST=other-host:8001 <workflow>
 ```
-### Service Development
-
-Each service follows a similar structure:
-- `app/activities.py`: Temporal activity definitions
-- `app/workflows/`: Workflow definitions
-- `app/pipeline.py`: Service-specific pipeline logic
-- `app/worker.py`: Temporal worker configuration
-
 ### Adding a New Service
 
 1. Create a new service directory in `services/`
 2. Copy the service template structure
 3. Add the service to `docker-compose.yml`
-4. Update the controller workflows if needed
+4. Update the controller workflow and activities as needed
 
 ## API Documentation
 
