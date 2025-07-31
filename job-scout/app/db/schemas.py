@@ -12,7 +12,7 @@ class SearchQueryKeys(PyEnum):
 
 class JobBase(BaseModel):
     id = Optional[int] = None
-    job_source = JobSource = JobSource.LINKEDIN
+    job_source = JobSource = Field(default=JobSource.LINKEDIN)
     title = str
     company = str
     description = Optional[str]
@@ -35,21 +35,34 @@ class JobBase(BaseModel):
     
 class SettingBase(BaseModel):
     id: Optional[int] = None  # Optional ID
-    search_queries: List[Dict[SearchQueryKeys, str]]  # List of dicts with keys defined in SearchQueryKeys
     desc_include_words: List[str]  # List of strings
     desc_exclude_words: List[str]  # List of strings
     title_include: List[str]  # List of strings
     title_exclude: List[str]  # List of strings
     company_exclude: List[str]  # List of strings
     non_remote_phrases: List[str]  # List of strings
-    timespan: str  # String (e.g., "last week", "last month")
-    pages_to_scrape: int  # Number of pages to scrape
-    rounds: int  # Number of rounds to perform
     created_at: datetime  # Timestamp for creation
     updated_at: datetime  # Timestamp for updates
 
     class Config:
         orm_mode = True  # Enables compatibility with SQLAlchemy models
+
+    def to_dict(self):
+        return self.model_dump()
+
+class ScraperSettings(BaseModel):
+    id: Optional[int] = None
+    job_source = JobSource = Field(default=JobSource.LINKEDIN)
+    search_queries: List[Dict[str, Any]]
+    hardcoded_urls: Optional[List[Dict[str, Any]]]
+    timespan_code: str
+    pages_to_scrape: int
+    rounds: int
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        orm_mode = True
 
     def to_dict(self):
         return self.model_dump()
