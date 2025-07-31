@@ -44,7 +44,7 @@ class IndeedScraper(BaseScraper):
                 {"keywords": "Application Support", "location": "United States"}
             ],
             "hardcoded_urls": [],
-            "timespan_code": "24h",
+            "timespan_code": "r86400",
             "pages_to_scrape": 1,
             "rounds": 1
         } 
