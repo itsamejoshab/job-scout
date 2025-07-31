@@ -15,6 +15,8 @@ from temporalio.client import Client
 from temporalio import workflow
 import os
 from app.activities import (
+    test_scrape_activity,
+    scraper,
     finder,
     duplicate_remover,
     basic_filter,
@@ -55,7 +57,9 @@ async def register_worker():
         client,
         task_queue=TASK_QUEUE,
         workflows=[MainWorkflow],
-        activities=[
+        activities=[    
+            test_scrape_activity,
+            scraper,
             finder,
             duplicate_remover,
             basic_filter,
