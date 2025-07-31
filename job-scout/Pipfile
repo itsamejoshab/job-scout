@@ -41,6 +41,7 @@ boto3 = "*"
 python-multipart = "*"
 tenacity = "*"
 aiohttp = "*"
+beautifulsoup4 = "*"
 
 [requires]
 python_version = "3.12"

@@ -1,7 +1,7 @@
 
 import logging
-from app.api import router
-from app.core.config import settings
+from api import router
+from core.config import settings
 from fastapi import FastAPI
 
 # Configure logging

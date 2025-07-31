@@ -1,55 +1,69 @@
 import asyncio
 import json
-from database import get_session
 import logging
-from datetime import datetime
-from sqlalchemy import (ARRAY, Boolean, Column, DateTime, Enum, Float,
-                        ForeignKey, Integer, Interval, PrimaryKeyConstraint,
-                        String, Text, JSON, select)
 import os
-from db.models import SearchSettings
+from pathlib import Path
+from sqlalchemy import select
+from app.db.database import get_session
+from app.db.models import SearchSettings, ScraperSettings, JobSource
+from app.services.scrapers.providers.linkedin import LinkedInScraper
+from app.services.scrapers.providers.indeed import IndeedScraper
 
 logger = logging.getLogger(__name__)
 
-async def load_initial_data():
+def load_json_file(file_path: str) -> dict:
+    """Load data from a JSON file."""
     try:
-        file_path = os.path.join(os.path.dirname(__file__), "search_settings.json")
-        with open(file_path, "r") as file:
-            data = json.load(file)
+        with open(file_path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        logger.error(f"JSON file not found: {file_path}")
+        raise
+    except json.JSONDecodeError as e:
+        logger.error(f"Invalid JSON in file {file_path}: {e}")
+        raise
 
+async def load_search_settings():
+    """Load initial search settings into the database from JSON files and provider classes."""
+    
+    current_dir = Path(__file__).parent
+    
+    universal_settings_path = current_dir / "search_settings.json"
+    universal_settings = load_json_file(str(universal_settings_path))
+    
+    valid_search_settings_fields = {
+        "desc_include_words",
+        "desc_exclude_words",
+        "title_include",
+        "title_exclude",
+        "company_exclude",
+        "non_remote_phrases",
+        "created_at",
+        "updated_at"
+    }
+    universal_settings = {
+        key: value for key, value in universal_settings.items() if key in valid_search_settings_fields
+    }
+        
+    try:
         async with get_session() as session:
+
             result = await session.execute(select(SearchSettings))
-            existing_entry = result.scalars().first()
-            if existing_entry:
-                logging.info("Search Settings already have data... skipping.")
-                return
+            existing_universal = result.scalar_one_or_none()
             
-            # Create a new SearchSettings instance
-            defaults = SearchSettings(
-                search_queries=data["search_queries"],
-                desc_include_words=data["desc_include_words"],
-                desc_exclude_words=data["desc_exclude_words"],
-                title_include=data["title_include"],
-                title_exclude=data["title_exclude"],
-                company_exclude=data["company_exclude"],
-                non_remote_phrases=data["non_remote_phrases"],
-                timespan=data["timespan"],
-                pages_to_scrape=data["pages_to_scrape"],
-                rounds=data["rounds"],
-                created_at=datetime.now(),
-                updated_at=datetime.now()
-            )
-
-            session.add(defaults)
-            await session.flush()
-            logger.info("Search Settings successfully initialized.")
-    except json.JSONDecodeError:
-        logger.error(f"Invalid JSON format in file: \n\n {data} \n\n")
+            if not existing_universal:
+                new_universal = SearchSettings(**universal_settings)
+                session.add(new_universal)
+                logger.info("Created universal search settings from JSON")
+            else:
+                logger.info("Universal search settings already exist in database")
+             
+            await session.commit()
+            logger.info("Successfully loaded all search settings from JSON files and provider classes")
+            
     except Exception as e:
-        logger.error(f"Error inserting SearchSettings data: {e}")
-
-async def main():
-    await load_initial_data()
+        logger.error(f"Error loading search settings: {str(e)}")
+        raise
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(load_search_settings())
