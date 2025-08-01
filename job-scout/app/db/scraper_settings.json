@@ -1,0 +1,44 @@
+[
+    {
+        "job_source": "LINKEDIN",
+        "search_queries": [
+            {"keywords": "IT Help Desk", "location": "101076143", "f_WT": ""},
+            {"keywords": "IT Help Desk", "location": "102252967", "f_WT": ""},
+            {"keywords": "IT Help Desk", "location": "102570379", "f_WT": ""},
+            {"keywords": "IT Help Desk", "location": "104198807", "f_WT": ""},
+            {"keywords": "IT Help Desk", "location": "104779438", "f_WT": ""},
+            {"keywords": "IT Help Desk", "location": "105135351", "f_WT": "3"},
+            {"keywords": "IT Help Desk", "location": "105142029", "f_WT": "3"},
+            {"keywords": "IT Help Desk", "location": "106362955", "f_WT": "3"},
+            {"keywords": "IT Help Desk", "location": "105135351", "f_WT": "2"},
+            {"keywords": "IT Help Desk", "location": "105142029", "f_WT": "2"},
+            {"keywords": "IT Help Desk", "location": "106362955", "f_WT": "2"},
+            {"keywords": "Application Support", "location": "101076143", "f_WT": ""},
+            {"keywords": "Application Support", "location": "102252967", "f_WT": ""},
+            {"keywords": "Application Support", "location": "102570379", "f_WT": ""},
+            {"keywords": "Application Support", "location": "104198807", "f_WT": ""},
+            {"keywords": "Application Support", "location": "104779438", "f_WT": ""},
+            {"keywords": "Application Support", "location": "105135351", "f_WT": "3"},
+            {"keywords": "Application Support", "location": "105142029", "f_WT": "3"},
+            {"keywords": "Application Support", "location": "106362955", "f_WT": "3"},
+            {"keywords": "Application Support", "location": "105135351", "f_WT": "2"},
+            {"keywords": "Application Support", "location": "105142029", "f_WT": "2"},
+            {"keywords": "Application Support", "location": "106362955", "f_WT": "2"}
+        ],
+        "hardcoded_urls": [
+            {
+                "url": "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords=IT%20Help%20Desk&location=United%20States&&f_WT=2&geoId=&f_TPR=r84600",
+                "description": "IT Help Desk - Remote - United States",
+                "is_remote": true
+            },
+            {
+                "url": "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords=Application%20Support&location=United%20States&&f_WT=2&geoId=&f_TPR=r84600",
+                "description": "Application Support - Remote - United States",
+                "is_remote": true
+            }
+        ],
+        "timespan_code": "r84600",
+        "pages_to_scrape": 1,
+        "rounds": 1
+    }
+]

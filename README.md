@@ -68,8 +68,8 @@ The system consists of several key components:
 1. Clone the repository
 
 2. Configure the search settings manually (would love to develop a UI to manage the database)
-   a. Universal Search Settings: `app/db/search_settings.json`
-   b. Scraper specific search settings: `get_default_settings()` class in each scraper `.py` file
+   a. Universal Search Settings: `app/db/universal_settings.json`
+   b. Scraper specific search settings: `app/db/scraper_settings.json`
 
 3. Configure `.env` file with personal settings, like notifier webhook, etc.
 
