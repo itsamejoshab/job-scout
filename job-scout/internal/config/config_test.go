@@ -34,7 +34,7 @@ func TestLoad_NotifyAndWebhookKnobDefaults(t *testing.T) {
 	if cfg.NotifyClaimTimeoutSeconds != 0 {
 		t.Errorf("NOTIFY_CLAIM_TIMEOUT_SECONDS default = %d, want 0 (no auto-unstick)", cfg.NotifyClaimTimeoutSeconds)
 	}
-		if cfg.HTTPTimeoutSeconds != 30 {
+	if cfg.HTTPTimeoutSeconds != 30 {
 		t.Errorf("HTTP_TIMEOUT_SECONDS default = %d, want 30 (webhook client reuses this)", cfg.HTTPTimeoutSeconds)
 	}
 }
@@ -170,5 +170,31 @@ func TestLoad_ScheduleSecondsFromEnv(t *testing.T) {
 	}
 	if cfg.NotifyScheduleSeconds != 450 {
 		t.Errorf("NOTIFY_SCHEDULE_SECONDS = %d, want 450", cfg.NotifyScheduleSeconds)
+	}
+}
+
+func TestLoad_ScheduleSecondsFromProductEnv(t *testing.T) {
+	t.Setenv("SCRAPE_SCHEDULE_SECONDS", "60*5")
+	t.Setenv("NOTIFY_SCHEDULE_SECONDS", "60 * 10")
+
+	cfg := Load()
+	if cfg.ScrapeScheduleSeconds != 300 {
+		t.Errorf("SCRAPE_SCHEDULE_SECONDS 60*5 = %d, want 300 (must not fall back to 60)", cfg.ScrapeScheduleSeconds)
+	}
+	if cfg.NotifyScheduleSeconds != 600 {
+		t.Errorf("NOTIFY_SCHEDULE_SECONDS 60 * 10 = %d, want 600", cfg.NotifyScheduleSeconds)
+	}
+}
+
+func TestLoad_ScheduleSecondsInvalidProductUsesDefault(t *testing.T) {
+	t.Setenv("SCRAPE_SCHEDULE_SECONDS", "60*")
+	t.Setenv("NOTIFY_SCHEDULE_SECONDS", "60*0")
+
+	cfg := Load()
+	if cfg.ScrapeScheduleSeconds != 60 {
+		t.Errorf("invalid SCRAPE_SCHEDULE_SECONDS = %d, want default 60", cfg.ScrapeScheduleSeconds)
+	}
+	if cfg.NotifyScheduleSeconds != 300 {
+		t.Errorf("invalid NOTIFY_SCHEDULE_SECONDS = %d, want default 300", cfg.NotifyScheduleSeconds)
 	}
 }

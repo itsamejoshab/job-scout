@@ -18,6 +18,20 @@ import (
 
 var errScheduleCreate = errors.New("temporal schedule create failed")
 
+func TestEnsureSchedules_UsesProductScheduleEnv(t *testing.T) {
+	t.Setenv("SCRAPE_SCHEDULE_SECONDS", "60*5")
+	t.Setenv("NOTIFY_SCHEDULE_SECONDS", "60*10")
+	cfg := config.Load()
+
+	fake := newFakeSchedules()
+	if err := EnsureSchedules(context.Background(), fake, cfg); err != nil {
+		t.Fatalf("EnsureSchedules: %v", err)
+	}
+	byID := scheduleCreatesByID(t, fake.creates)
+	assertIntervalSchedule(t, byID["jobscout-scrape"], 300*time.Second)
+	assertIntervalSchedule(t, byID["jobscout-notify"], 600*time.Second)
+}
+
 func TestEnsureSchedules_CreatesUTCIntervalSchedulesWithSkip(t *testing.T) {
 	fake := newFakeSchedules()
 	cfg := config.Config{

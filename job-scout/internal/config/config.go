@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -70,8 +71,8 @@ func getenvInt(key string, def int) int {
 	if v == "" {
 		return def
 	}
-	n, err := strconv.Atoi(v)
-	if err != nil || n <= 0 {
+	n, ok := parseIntExpr(v)
+	if !ok || n <= 0 {
 		return def
 	}
 	return n
@@ -82,11 +83,40 @@ func getenvIntAllowZero(key string, def int) int {
 	if v == "" {
 		return def
 	}
-	n, err := strconv.Atoi(v)
-	if err != nil || n < 0 {
+	n, ok := parseIntExpr(v)
+	if !ok || n < 0 {
 		return def
 	}
 	return n
+}
+
+// parseIntExpr reads a decimal integer or a product of positive integers
+// such as 60*5 or 60 * 5. Invalid text is not an error here: callers use
+// the configured default.
+func parseIntExpr(v string) (int, bool) {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return 0, false
+	}
+	if !strings.Contains(v, "*") {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return 0, false
+		}
+		return n, true
+	}
+	product := 1
+	for _, part := range strings.Split(v, "*") {
+		n, err := strconv.Atoi(strings.TrimSpace(part))
+		if err != nil || n <= 0 {
+			return 0, false
+		}
+		if product > math.MaxInt/n {
+			return 0, false
+		}
+		product *= n
+	}
+	return product, true
 }
 
 func Load() Config {
