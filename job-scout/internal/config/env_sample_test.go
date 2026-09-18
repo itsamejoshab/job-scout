@@ -21,11 +21,12 @@ func TestEnvSample_DocumentsEveryRuntimeKnob(t *testing.T) {
 		"POSTGRES_PORT":                "5432",
 		"POSTGRES_DB":                  "jobsearch",
 		"TEMPORAL_ADDRESS":             "temporal:7233",
+		"TEMPORAL_UI_ADDRESS":          "http://localhost:8080",
+		"REPORTING_TIMEZONE":           "America/New_York",
 		"API_PORT":                     "8000",
 		"WEBHOOK_BASE":                 "https://hooks.example/api/webhook",
 		"WEBHOOK_ID":                   "example-hook",
-		"CLIENT_ID":                    "",
-		"CLIENT_SECRET":                "",
+		"PIPEDREAM_API_TOKEN":          "",
 		"SCRAPE_SCHEDULE_SECONDS":      "60",
 		"NOTIFY_SCHEDULE_SECONDS":      "300",
 		"SCRAPE_ERROR_BACKOFF_SECONDS": "300",
@@ -41,8 +42,17 @@ func TestEnvSample_DocumentsEveryRuntimeKnob(t *testing.T) {
 	if _, ok := knobs["WEBHOOK_URL"]; ok {
 		t.Error(".env.sample must not set WEBHOOK_URL as an active send-target knob")
 	}
-	if knobs["CLIENT_ID"] != "" || knobs["CLIENT_SECRET"] != "" {
-		t.Error(".env.sample CLIENT_ID and CLIENT_SECRET must be empty placeholders")
+	if knobs["PIPEDREAM_API_TOKEN"] != "" {
+		t.Error(".env.sample PIPEDREAM_API_TOKEN must be an empty placeholder")
+	}
+	if _, ok := knobs["CLIENT_ID"]; ok {
+		t.Error(".env.sample must not set CLIENT_ID")
+	}
+	if _, ok := knobs["CLIENT_SECRET"]; ok {
+		t.Error(".env.sample must not set CLIENT_SECRET")
+	}
+	if _, ok := knobs["OAUTH_TOKEN_URL"]; ok {
+		t.Error(".env.sample must not set OAUTH_TOKEN_URL")
 	}
 }
 

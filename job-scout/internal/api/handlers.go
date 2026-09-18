@@ -4,15 +4,18 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/jobscout/jobscout/internal/config"
 	"github.com/jobscout/jobscout/internal/db"
+	"github.com/jobscout/jobscout/internal/domain"
 	"github.com/jobscout/jobscout/internal/pipeline"
 	"github.com/jobscout/jobscout/internal/scraper"
 	"go.temporal.io/api/workflowservice/v1"
@@ -135,6 +138,34 @@ func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "healthy", "timestamp": now()})
 }
 
+type dependencyStatus struct {
+	OK    bool   `json:"ok"`
+	Error string `json:"error,omitempty"`
+}
+
+// GET /api/v0/status
+func (h *Handler) Status(w http.ResponseWriter, r *http.Request) {
+	databaseStatus := dependencyStatus{OK: true}
+	if err := h.DB.PingContext(r.Context()); err != nil {
+		databaseStatus.OK = false
+		databaseStatus.Error = err.Error()
+	}
+
+	temporalStatus := dependencyStatus{OK: true}
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+	defer cancel()
+	if _, err := h.Temporal.CheckHealth(ctx, &client.CheckHealthRequest{}); err != nil {
+		temporalStatus.OK = false
+		temporalStatus.Error = err.Error()
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":       databaseStatus.OK && temporalStatus.OK,
+		"database": databaseStatus,
+		"temporal": temporalStatus,
+	})
+}
+
 // GET /api/v0/db-test
 func (h *Handler) DBTest(w http.ResponseWriter, r *http.Request) {
 	settings, err := db.GetSearchSettings(r.Context(), h.DB)
@@ -165,6 +196,75 @@ func (h *Handler) SearchSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, settings)
+}
+
+type replaceSearchSettingsRequest struct {
+	DescIncludeWords *[]string `json:"desc_include_words"`
+	DescExcludeWords *[]string `json:"desc_exclude_words"`
+	TitleInclude     *[]string `json:"title_include"`
+	TitleExclude     *[]string `json:"title_exclude"`
+	CompanyExclude   *[]string `json:"company_exclude"`
+	NonRemotePhrases *[]string `json:"non_remote_phrases"`
+}
+
+func (in replaceSearchSettingsRequest) validate() error {
+	required := map[string]*[]string{
+		"desc_include_words": in.DescIncludeWords,
+		"desc_exclude_words": in.DescExcludeWords,
+		"title_include":      in.TitleInclude,
+		"title_exclude":      in.TitleExclude,
+		"company_exclude":    in.CompanyExclude,
+		"non_remote_phrases": in.NonRemotePhrases,
+	}
+	for field, value := range required {
+		if value == nil {
+			return fmt.Errorf("missing required field: %s", field)
+		}
+	}
+	return nil
+}
+
+func cloneList(in []string) []string {
+	return append([]string(nil), in...)
+}
+
+// PUT /api/v0/search-settings
+func (h *Handler) ReplaceSearchSettings(w http.ResponseWriter, r *http.Request) {
+	var in replaceSearchSettingsRequest
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&in); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid search-settings body: "+err.Error())
+		return
+	}
+	if err := in.validate(); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	stored, err := db.ReplaceSearchSettings(r.Context(), h.DB, db.SearchSettings{
+		DescIncludeWords: cloneList(*in.DescIncludeWords),
+		DescExcludeWords: cloneList(*in.DescExcludeWords),
+		TitleInclude:     cloneList(*in.TitleInclude),
+		TitleExclude:     cloneList(*in.TitleExclude),
+		CompanyExclude:   cloneList(*in.CompanyExclude),
+		NonRemotePhrases: cloneList(*in.NonRemotePhrases),
+	})
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, stored)
+}
+
+// POST /api/v0/search-settings/reset
+func (h *Handler) ResetSearchSettings(w http.ResponseWriter, r *http.Request) {
+	stored, err := db.ResetSearchSettings(r.Context(), h.DB)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, stored)
 }
 
 // GET /api/v0/scraper-settings
@@ -205,16 +305,313 @@ func (h *Handler) AllScraperSettings(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-// GET /api/v0/jobs
-func (h *Handler) Jobs(w http.ResponseWriter, r *http.Request) {
-	limit := queryInt(r, "limit", 10)
-	offset := queryInt(r, "offset", 0)
-	jobs, err := db.ListJobs(r.Context(), h.DB, limit, offset)
+type providerSearchQuery struct {
+	Keywords string `json:"keywords"`
+	Location string `json:"location"`
+	Remote   string `json:"f_WT"`
+}
+
+type providerHardcodedURL struct {
+	URL         string `json:"url"`
+	Description string `json:"description"`
+	IsRemote    *bool  `json:"is_remote"`
+}
+
+type replaceScraperSettingsRequest struct {
+	Enabled               *bool                   `json:"enabled"`
+	ScrapeIntervalSeconds *int                    `json:"scrape_interval_seconds"`
+	TimespanCode          *string                 `json:"timespan_code"`
+	PagesToScrape         *int                    `json:"pages_to_scrape"`
+	Rounds                *int                    `json:"rounds"`
+	SearchQueries         *[]providerSearchQuery  `json:"search_queries"`
+	HardcodedURLs         *[]providerHardcodedURL `json:"hardcoded_urls"`
+}
+
+func (in replaceScraperSettingsRequest) validate() error {
+	switch {
+	case in.Enabled == nil:
+		return errors.New("missing required field: enabled")
+	case in.ScrapeIntervalSeconds == nil:
+		return errors.New("missing required field: scrape_interval_seconds")
+	case *in.ScrapeIntervalSeconds < 60:
+		return errors.New("scrape_interval_seconds must be at least 60")
+	case in.TimespanCode == nil:
+		return errors.New("missing required field: timespan_code")
+	case strings.TrimSpace(*in.TimespanCode) == "":
+		return errors.New("timespan_code must not be empty")
+	case in.PagesToScrape == nil:
+		return errors.New("missing required field: pages_to_scrape")
+	case *in.PagesToScrape < 1:
+		return errors.New("pages_to_scrape must be at least 1")
+	case in.Rounds == nil:
+		return errors.New("missing required field: rounds")
+	case *in.Rounds < 1 || *in.Rounds > 3:
+		return errors.New("rounds must be between 1 and 3")
+	case in.SearchQueries == nil:
+		return errors.New("missing required field: search_queries")
+	case in.HardcodedURLs == nil:
+		return errors.New("missing required field: hardcoded_urls")
+	}
+	for i, query := range *in.SearchQueries {
+		if strings.TrimSpace(query.Keywords) == "" {
+			return fmt.Errorf("search_queries[%d].keywords must not be empty", i)
+		}
+		if strings.TrimSpace(query.Location) == "" {
+			return fmt.Errorf("search_queries[%d].location must not be empty", i)
+		}
+	}
+	for i, entry := range *in.HardcodedURLs {
+		parsed, err := url.Parse(strings.TrimSpace(entry.URL))
+		if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+			return fmt.Errorf("hardcoded_urls[%d].url must use http or https", i)
+		}
+		if entry.IsRemote == nil {
+			return fmt.Errorf("hardcoded_urls[%d].is_remote must be boolean", i)
+		}
+	}
+	return nil
+}
+
+func (in replaceScraperSettingsRequest) settings() db.ScraperSettings {
+	queries := make([]map[string]string, 0, len(*in.SearchQueries))
+	for _, query := range *in.SearchQueries {
+		queries = append(queries, map[string]string{
+			"keywords": strings.TrimSpace(query.Keywords),
+			"location": strings.TrimSpace(query.Location),
+			"f_WT":     query.Remote,
+		})
+	}
+	hardcoded := make([]map[string]any, 0, len(*in.HardcodedURLs))
+	for _, entry := range *in.HardcodedURLs {
+		hardcoded = append(hardcoded, map[string]any{
+			"url":         strings.TrimSpace(entry.URL),
+			"description": strings.TrimSpace(entry.Description),
+			"is_remote":   *entry.IsRemote,
+		})
+	}
+	return db.ScraperSettings{
+		Enabled:               *in.Enabled,
+		ScrapeIntervalSeconds: *in.ScrapeIntervalSeconds,
+		TimespanCode:          strings.TrimSpace(*in.TimespanCode),
+		PagesToScrape:         *in.PagesToScrape,
+		Rounds:                *in.Rounds,
+		SearchQueries:         queries,
+		HardcodedURLs:         hardcoded,
+	}
+}
+
+func scraperSourceFromPath(w http.ResponseWriter, r *http.Request) (db.JobSource, bool) {
+	source, err := db.ParseJobSource(r.PathValue("job_source"))
+	if err != nil {
+		writeErr(w, http.StatusNotFound, "job source not found")
+		return "", false
+	}
+	return source, true
+}
+
+// PUT /api/v0/scraper-settings/{job_source}
+func (h *Handler) ReplaceScraperSettings(w http.ResponseWriter, r *http.Request) {
+	source, ok := scraperSourceFromPath(w, r)
+	if !ok {
+		return
+	}
+	existing, err := db.GetScraperSettings(r.Context(), h.DB, source)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, jobs)
+	if existing == nil {
+		writeErr(w, http.StatusNotFound, "scraper settings not found")
+		return
+	}
+
+	var in replaceScraperSettingsRequest
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid scraper-settings body: "+err.Error())
+		return
+	}
+	if err := in.validate(); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if *in.Enabled && !isProviderImplemented(source) {
+		writeErr(w, http.StatusBadRequest, "provider scraper is not implemented")
+		return
+	}
+	stored, err := db.ReplaceScraperSettings(r.Context(), h.DB, source, in.settings())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if stored == nil {
+		writeErr(w, http.StatusNotFound, "scraper settings not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, stored)
+}
+
+// POST /api/v0/scraper-settings/{job_source}/reset
+func (h *Handler) ResetScraperSettings(w http.ResponseWriter, r *http.Request) {
+	source, ok := scraperSourceFromPath(w, r)
+	if !ok {
+		return
+	}
+	existing, err := db.GetScraperSettings(r.Context(), h.DB, source)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if existing == nil {
+		writeErr(w, http.StatusNotFound, "scraper settings not found")
+		return
+	}
+	stored, err := db.ResetScraperSettings(r.Context(), h.DB, source)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if stored == nil {
+		writeErr(w, http.StatusNotFound, "scraper settings seed not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, stored)
+}
+
+// GET /api/v0/jobs
+func (h *Handler) Jobs(w http.ResponseWriter, r *http.Request) {
+	limit := queryInt(r, "limit", 50)
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 200 {
+		limit = 200
+	}
+	offset := queryInt(r, "offset", 0)
+	if offset < 0 {
+		offset = 0
+	}
+
+	var source db.JobSource
+	var err error
+	if raw := r.URL.Query().Get("job_source"); raw != "" {
+		source, err = db.ParseJobSource(raw)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+	for _, key := range []string{"date_from", "date_to"} {
+		if raw := r.URL.Query().Get(key); raw != "" {
+			if _, err := time.Parse(time.DateOnly, raw); err != nil {
+				writeErr(w, http.StatusBadRequest, key+" must use YYYY-MM-DD")
+				return
+			}
+		}
+	}
+
+	var anchor time.Time
+	if raw := r.URL.Query().Get("as_of"); raw != "" {
+		anchor, err = time.Parse(time.RFC3339Nano, raw)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, "as_of must be an RFC3339 timestamp")
+			return
+		}
+	} else if err := h.DB.QueryRowContext(r.Context(), "SELECT CURRENT_TIMESTAMP").Scan(&anchor); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	timezone := h.Cfg.ReportingTimezone
+	if _, err := time.LoadLocation(timezone); err != nil {
+		timezone = "America/New_York"
+	}
+	jobs, total, err := db.ListJobsPage(r.Context(), h.DB, db.JobListFilter{
+		State:     strings.TrimSpace(r.URL.Query().Get("state")),
+		JobSource: source,
+		Query:     strings.TrimSpace(r.URL.Query().Get("q")),
+		DateFrom:  r.URL.Query().Get("date_from"),
+		DateTo:    r.URL.Query().Get("date_to"),
+		AsOf:      anchor,
+		Timezone:  timezone,
+		Limit:     limit,
+		Offset:    offset,
+	})
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	items := make([]jobListItem, 0, len(jobs))
+	for _, job := range jobs {
+		items = append(items, newJobListItem(job))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"items": items,
+		"total": total,
+		"as_of": anchor,
+	})
+}
+
+type jobListItem struct {
+	ID             int64        `json:"id"`
+	JobSource      db.JobSource `json:"job_source"`
+	Title          string       `json:"title"`
+	Company        string       `json:"company"`
+	HasDescription bool         `json:"has_description"`
+	Location       string       `json:"location"`
+	Date           time.Time    `json:"date"`
+	JobURL         string       `json:"job_url"`
+	CreatedAt      time.Time    `json:"created_at"`
+	UpdatedAt      time.Time    `json:"updated_at"`
+	New            bool         `json:"new"`
+	Duplicate      bool         `json:"duplicate"`
+	Relevant       bool         `json:"relevant"`
+	Promising      bool         `json:"promising"`
+	Notified       bool         `json:"notified"`
+	State          string       `json:"state"`
+	RejectReason   *string      `json:"reject_reason"`
+	IsRemote       bool         `json:"is_remote"`
+	DetailAttempts int          `json:"detail_attempts"`
+	StateChangedAt time.Time    `json:"state_changed_at"`
+}
+
+func newJobListItem(job db.Job) jobListItem {
+	return jobListItem{
+		ID: job.ID, JobSource: job.JobSource, Title: job.Title, Company: job.Company,
+		HasDescription: job.Description != nil && strings.TrimSpace(*job.Description) != "",
+		Location:       job.Location, Date: job.Date, JobURL: job.JobURL, CreatedAt: job.CreatedAt,
+		UpdatedAt: job.UpdatedAt, New: job.New, Duplicate: job.Duplicate,
+		Relevant: job.Relevant, Promising: job.Promising, Notified: job.Notified,
+		State: job.State, RejectReason: job.RejectReason, IsRemote: job.IsRemote,
+		DetailAttempts: job.DetailAttempts, StateChangedAt: job.StateChangedAt,
+	}
+}
+
+// GET /api/v0/jobs/{id}
+func (h *Handler) Job(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "job id must be numeric")
+		return
+	}
+	job, err := db.GetJob(r.Context(), h.DB, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeErr(w, http.StatusNotFound, "job not found")
+		return
+	}
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, job)
+}
+
+// POST /api/v0/jobs/re-evaluate
+func (h *Handler) ReEvaluateJobs(w http.ResponseWriter, r *http.Request) {
+	updated, err := db.ReEvaluateRejectedJobs(r.Context(), h.DB)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"updated": updated})
 }
 
 // GET /api/v0/jobs/stats
@@ -231,6 +628,94 @@ func (h *Handler) JobStats(w http.ResponseWriter, r *http.Request) {
 		"by_state":      stats.ByState,
 		"timestamp":     now(),
 	})
+}
+
+type dashboardProviderView struct {
+	JobSource             string         `json:"job_source"`
+	Implemented           bool           `json:"implemented"`
+	Enabled               bool           `json:"enabled"`
+	ScrapeIntervalSeconds int            `json:"scrape_interval_seconds"`
+	LastScrapedAt         *time.Time     `json:"last_scraped_at"`
+	NextEligibleAt        *time.Time     `json:"next_eligible_at"`
+	Status                string         `json:"status"`
+	TotalJobs             int            `json:"total_jobs"`
+	ByState               map[string]int `json:"by_state"`
+	ByRejectReason        map[string]int `json:"by_reject_reason"`
+}
+
+type dashboardDailyView struct {
+	Day       string `json:"day"`
+	JobSource string `json:"job_source"`
+	Count     int    `json:"count"`
+}
+
+// GET /api/v0/dashboard/stats
+func (h *Handler) DashboardStats(w http.ResponseWriter, r *http.Request) {
+	stats, err := db.GetDashboardStats(r.Context(), h.DB, h.Cfg.ReportingTimezone)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	nowTime := time.Now()
+	providers := make([]dashboardProviderView, 0, len(stats.Providers))
+	for _, provider := range stats.Providers {
+		status := "disabled"
+		if provider.Enabled {
+			cadence := domain.ProviderCadence{
+				Source:                string(provider.JobSource),
+				Enabled:               provider.Enabled,
+				ScrapeIntervalSeconds: provider.ScrapeIntervalSeconds,
+				LastScrapedAt:         provider.LastScrapedAt,
+				NextEligibleAt:        provider.NextEligibleAt,
+			}
+			if domain.IsDue(cadence, nowTime, false) {
+				status = "due"
+			} else {
+				status = "waiting"
+			}
+		}
+
+		providers = append(providers, dashboardProviderView{
+			JobSource:             string(provider.JobSource),
+			Implemented:           isProviderImplemented(provider.JobSource),
+			Enabled:               provider.Enabled,
+			ScrapeIntervalSeconds: provider.ScrapeIntervalSeconds,
+			LastScrapedAt:         provider.LastScrapedAt,
+			NextEligibleAt:        provider.NextEligibleAt,
+			Status:                status,
+			TotalJobs:             provider.TotalJobs,
+			ByState:               provider.ByState,
+			ByRejectReason:        provider.ByRejectReason,
+		})
+	}
+
+	daily := make([]dashboardDailyView, 0, len(stats.Daily))
+	for _, point := range stats.Daily {
+		daily = append(daily, dashboardDailyView{
+			Day:       point.Day,
+			JobSource: string(point.JobSource),
+			Count:     point.Count,
+		})
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"generated_at": now(),
+		"timezone":     stats.Timezone,
+		"providers":    providers,
+		"daily":        daily,
+	})
+}
+
+func isProviderImplemented(source db.JobSource) bool {
+	switch source {
+	case db.SourceLinkedIn:
+		return true
+	case db.SourceIndeed:
+		return false
+	default:
+		return false
+	}
 }
 
 // GET /api/v0/temporal-test
@@ -264,11 +749,13 @@ func (h *Handler) WorkflowStatus(w http.ResponseWriter, r *http.Request) {
 // GET /api/v0/config
 func (h *Handler) Config(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
-		"project_name":     h.Cfg.ProjectName,
-		"version":          h.Cfg.Version,
-		"database_url":     h.Cfg.RedactedDatabaseURL(),
-		"temporal_address": h.Cfg.TemporalAddress,
-		"log_level":        h.Cfg.LogLevel,
+		"project_name":        h.Cfg.ProjectName,
+		"version":             h.Cfg.Version,
+		"database_url":        h.Cfg.RedactedDatabaseURL(),
+		"temporal_address":    h.Cfg.TemporalAddress,
+		"temporal_ui_address": h.Cfg.TemporalUIAddress,
+		"reporting_timezone":  h.Cfg.ReportingTimezone,
+		"log_level":           h.Cfg.LogLevel,
 	})
 }
 

@@ -6,7 +6,7 @@ GitHub does not show tabs. Open **one** section below: Windows, macOS, or Linux 
 
 When the stack is up:
 
-- API: http://localhost:8001
+- Operator UI and API: http://localhost:8001
 - Temporal UI: http://localhost:8082
 
 ---
@@ -52,7 +52,7 @@ Open `job-scout\.env` in a text editor. Set at least:
 - `WEBHOOK_BASE` — base URL of your webhook (no trailing slash if the sample has none)
 - `WEBHOOK_ID` — id that your webhook expects
 
-Set `CLIENT_ID` and `CLIENT_SECRET` if you use OAuth. Do not set `WEBHOOK_URL`. That name is not the send target.
+Set `PIPEDREAM_API_TOKEN` if the webhook uses a static Bearer token. Do not set `WEBHOOK_URL`. That name is not the send target.
 
 The worker must open TCP to the host in `WEBHOOK_BASE`. A timeout or connect error is an environment failure.
 
@@ -70,7 +70,7 @@ This starts Postgres, Temporal, the API, and the worker. The first run can take 
 curl.exe http://localhost:8001/api/v0/health
 ```
 
-You must get a success response. Then open http://localhost:8082 in a browser for the Temporal UI.
+You must get a success response. Then open http://localhost:8001 for the operator UI. Open http://localhost:8082 for the Temporal UI.
 
 </details>
 
@@ -118,7 +118,7 @@ Open `job-scout/.env` in a text editor. Set at least:
 - `WEBHOOK_BASE` — base URL of your webhook (no trailing slash if the sample has none)
 - `WEBHOOK_ID` — id that your webhook expects
 
-Set `CLIENT_ID` and `CLIENT_SECRET` if you use OAuth. Do not set `WEBHOOK_URL`. That name is not the send target.
+Set `PIPEDREAM_API_TOKEN` if the webhook uses a static Bearer token. Do not set `WEBHOOK_URL`. That name is not the send target.
 
 The worker must open TCP to the host in `WEBHOOK_BASE`. A timeout or connect error is an environment failure.
 
@@ -144,7 +144,7 @@ This starts Postgres, Temporal, the API, and the worker. The first run can take 
 curl http://localhost:8001/api/v0/health
 ```
 
-You must get a success response. Then open http://localhost:8082 in a browser for the Temporal UI.
+You must get a success response. Then open http://localhost:8001 for the operator UI. Open http://localhost:8082 for the Temporal UI.
 
 </details>
 
@@ -227,7 +227,7 @@ Set at least:
 - `WEBHOOK_BASE` — base URL of your webhook (no trailing slash if the sample has none)
 - `WEBHOOK_ID` — id that your webhook expects
 
-Set `CLIENT_ID` and `CLIENT_SECRET` if you use OAuth. Do not set `WEBHOOK_URL`. That name is not the send target.
+Set `PIPEDREAM_API_TOKEN` if the webhook uses a static Bearer token. Do not set `WEBHOOK_URL`. That name is not the send target.
 
 The worker must open TCP to the host in `WEBHOOK_BASE`. A timeout or connect error is an environment failure. If Home Assistant runs on another device on your LAN, use that device IP in `WEBHOOK_BASE`. `localhost` on the Pi is the Pi itself, not your laptop.
 
@@ -258,7 +258,7 @@ hostname -I
 
 You must get a success response from `curl`. Then, on a computer on the same network, open:
 
-- API: `http://PI_IP:8001`
+- Operator UI and API: `http://PI_IP:8001`
 - Temporal UI: `http://PI_IP:8082`
 
 Replace `PI_IP` with the first address from `hostname -I`.
@@ -270,6 +270,10 @@ Replace `PI_IP` with the first address from `hostname -I`.
 ## Run a scrape and a notify (optional)
 
 Do this after the health check. This is a manual check. Automated tests must not POST to a live webhook.
+
+Open the operator UI at http://localhost:8001. On a Raspberry Pi, use `http://PI_IP:8001`. Use the dashboard buttons to start a forced scrape or a notify pass. The page shows the workflow ID and a direct Temporal UI link. It polls until the workflow finishes, then refreshes its statistics and jobs. A finished scrape workflow does not prove that every provider scrape succeeded. Check the provider card and its last-scraped value.
+
+You can also use the API:
 
 **Windows (PowerShell)**
 
@@ -319,6 +323,53 @@ make notify
 Confirm the downstream notify automation after the POST.
 
 Scheduled scrape (default 60 seconds) and notify (default 300 seconds) also run after the API starts.
+
+## Operator API
+
+The API base is `http://localhost:8001/api/v0`. On a Raspberry Pi, replace `localhost` with `PI_IP`.
+
+Read paths:
+
+- `GET /status` reads database and Temporal status.
+- `GET /config` reads the effective, redacted configuration.
+- `GET /dashboard/stats` reads provider totals, states, rejection reasons, and daily counts.
+- `GET /jobs` lists filtered jobs. `GET /jobs/{id}` reads one job with its description.
+- `GET /jobs/stats` reads state totals.
+- `GET /workflow/{id}` reads a workflow status and run ID.
+- `GET /search-settings`, `GET /scraper-settings`, and `GET /scraper-settings/all` read settings.
+
+Write and reset paths:
+
+- `POST /run?force=1` starts a forced scrape. `POST /notify` starts a notify pass.
+- `PUT /search-settings` replaces all filter lists. `POST /search-settings/reset` restores seed values.
+- `PUT /scraper-settings/{job_source}` replaces one provider configuration.
+- `POST /scraper-settings/{job_source}/reset` restores one provider from its seed.
+- `POST /jobs/re-evaluate` moves rejected jobs to `pending` after filter changes.
+
+`GET /jobs` returns an object with `items`, `total`, and `as_of`. It does not return a bare job array:
+
+```json
+{
+  "items": [{ "id": 1, "title": "Support Engineer", "state": "pending" }],
+  "total": 1,
+  "as_of": "2026-09-18T20:00:00Z"
+}
+```
+
+The list accepts `limit`, `offset`, `as_of`, `state`, `job_source`, `q`, `date_from`, and `date_to`.
+
+## Frontend development (optional)
+
+Docker builds the frontend in a Node stage and embeds it in the Go binary. You do not need Node.js to start the Docker stack. Install Node.js 20+ only if you want to run frontend tests or use Vite:
+
+```bash
+cd job-scout/webui
+npm ci
+npm test
+npm run dev
+```
+
+The Vite development server proxies `/api` to `http://localhost:8001`, the port the stack publishes. Start the stack with `make up` first. To proxy to a different API, set `VITE_API_PROXY_TARGET`.
 
 ## Stop the stack
 

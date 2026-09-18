@@ -20,7 +20,7 @@ Add PNG files in `docs/screenshots/` with these names. The slots below show thos
 
 | Part | Role |
 |------|------|
-| **API** (`internal/api`) | `net/http` server. Starts workflows. Exposes read endpoints. Runs migrations and seeds settings on startup. |
+| **API and UI** (`internal/api`, `webui`) | `net/http` server. Starts workflows, exposes the API, and serves the operator UI. Runs migrations and seeds settings on startup. |
 | **Worker** (`internal/pipeline`) | Temporal worker. Hosts the workflow and the activities. |
 | **Temporal** | Workflow orchestration and state. |
 | **PostgreSQL** | Primary data store. |
@@ -64,7 +64,8 @@ All other code uses the standard library (`net/http`, `database/sql`, `encoding/
 ├── QUICKSTART.md
 └── job-scout/                  # Go module
     ├── go.mod
-    ├── Dockerfile              # multi-stage Go build
+    ├── Dockerfile              # Node frontend stage, Go build stage, final image
+    ├── webui/                  # Vite, React, and TypeScript operator UI
     ├── cmd/jobscout/main.go    # entrypoint: "api" | "worker"
     └── internal/
         ├── config/             # env-based config (single source of truth)
@@ -76,7 +77,18 @@ All other code uses the standard library (`net/http`, `database/sql`, `encoding/
 
 ## Tools for local work
 
-You need Docker and Docker Compose to run the stack. You need Go 1.25+ only for local builds and tests. You need Make only if you use the `make` targets (macOS and Raspberry Pi). Windows can use `docker compose` as in [QUICKSTART.md](QUICKSTART.md).
+You need Docker and Docker Compose to run the stack. You need Go 1.25+ only for local Go builds and tests. Node.js 20+ is optional. Use it to run frontend tests or the Vite development server. You need Make only if you use the `make` targets (macOS and Raspberry Pi). Windows can use `docker compose` as in [QUICKSTART.md](QUICKSTART.md).
+
+The production container uses a Node stage to build `webui/dist`. The Go stage embeds that output in the binary. For frontend development:
+
+```bash
+cd job-scout/webui
+npm ci
+npm test
+npm run dev
+```
+
+Vite serves the development UI and proxies `/api` to `http://localhost:8001`, the port the stack publishes. Start the stack with `make up` first. Set `VITE_API_PROXY_TARGET` to proxy to a different API, such as `http://localhost:8000` for a local `jobscout api` process.
 
 ## Make commands
 
@@ -104,25 +116,45 @@ curl -X POST "http://localhost:8001/api/v0/run?force=1"
 make notify              # POST /api/v0/notify
 ```
 
+## Operator UI
+
+Open http://localhost:8001 after the stack starts. The dashboard shows provider and job statistics. It can start a forced scrape or a notify workflow. Each manual run shows its workflow ID and a link to the configured Temporal UI. The UI polls the workflow until it finishes. A finished workflow does not by itself mean that every provider scrape succeeded. Check each provider card and its last-scraped value.
+
 ## API endpoints
 
 Base path: `http://localhost:8001/api/v0`
 
-| Method | Path                     | Description                              |
-|--------|--------------------------|------------------------------------------|
-| POST   | `/run`                   | Start ScrapeTick (`?force=1` skips LinkedIn cadence) |
-| POST   | `/notify`                | Start NotifyTick (filters, claim, Home Assistant POST) |
-| POST   | `/scrape`                | Debug-only sync scrape (no Temporal); prefer `/run` |
-| GET    | `/health`                | Health check                             |
-| GET    | `/db-test`               | DB connectivity check                    |
-| GET    | `/temporal-test`         | Temporal connectivity check              |
-| GET    | `/search-settings`       | Universal search settings                |
-| GET    | `/scraper-settings`      | Per-source scraper settings              |
-| GET    | `/scraper-settings/all`  | All scraper settings                     |
-| GET    | `/jobs`                  | List jobs (`?limit&offset`), includes `state` |
-| GET    | `/jobs/stats`            | Job counts. `new_jobs` is the `pending` state count; `by_state` lists every state |
-| GET    | `/workflow/{id}`         | Workflow status                          |
-| GET    | `/config`                | Effective config                         |
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/run` | Start ScrapeTick. `?force=1` bypasses provider cadence. |
+| POST | `/notify` | Start NotifyTick. |
+| POST | `/scrape` | Run a synchronous debug scrape without Temporal. Prefer `/run`. |
+| GET | `/health`, `/db-test`, `/temporal-test` | Read service and dependency health. |
+| GET | `/status` | Read aggregate database and Temporal status. |
+| GET | `/config` | Read effective, redacted operator configuration. |
+| GET | `/dashboard/stats` | Read provider aggregates and daily job counts. |
+| GET | `/workflow/{id}` | Read workflow status and run ID. |
+| GET | `/jobs` | List jobs with filters, stable paging, and an `as_of` anchor. |
+| GET | `/jobs/{id}` | Read one job, including its description. |
+| GET | `/jobs/stats` | Read job counts. `new_jobs` is the `pending` count. |
+| POST | `/jobs/re-evaluate` | Move rejected jobs to `pending`. Returns the updated row count. |
+| GET, PUT | `/search-settings` | Read or replace universal search settings. |
+| POST | `/search-settings/reset` | Reset universal search settings to seed values. |
+| GET | `/scraper-settings`, `/scraper-settings/all` | Read one provider or all providers. |
+| PUT | `/scraper-settings/{job_source}` | Replace one provider configuration. |
+| POST | `/scraper-settings/{job_source}/reset` | Reset one provider to seed values. |
+
+`GET /jobs` returns an object, not a bare array:
+
+```json
+{
+  "items": [{ "id": 1, "title": "Support Engineer", "state": "pending" }],
+  "total": 1,
+  "as_of": "2026-09-18T20:00:00Z"
+}
+```
+
+It accepts `limit`, `offset`, `as_of`, `state`, `job_source`, `q`, `date_from`, and `date_to`.
 
 ## Monitoring
 
@@ -130,7 +162,6 @@ Base path: `http://localhost:8001/api/v0`
 
 ## Ideas
 
-- A UI
 - Custom LLM resume, customized for each job
 - LLM filtering step (not everything can be simple rules, though simple rules are _fast_)
 

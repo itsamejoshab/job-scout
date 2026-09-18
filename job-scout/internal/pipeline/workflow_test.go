@@ -118,6 +118,27 @@ func TestScrapeTick_LinkedInSearchActivityRunsOnce(t *testing.T) {
 	assertActivityNames(t, *started, "Scrape")
 }
 
+func TestScrapeTick_ScrapeActivityAllowsFortyFiveMinutes(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+	env.RegisterActivity(&activityProbe{})
+	var timeout time.Duration
+	env.SetOnActivityStartedListener(func(info *activity.Info, _ context.Context, _ converter.EncodedValues) {
+		if info.ActivityType.Name == "Scrape" {
+			timeout = info.StartToCloseTimeout
+		}
+	})
+
+	env.ExecuteWorkflow(ScrapeTick, scraper.TickInput{JobSource: "LINKEDIN"})
+
+	if err := env.GetWorkflowError(); err != nil {
+		t.Fatalf("ScrapeTick error: %v", err)
+	}
+	if timeout != 45*time.Minute {
+		t.Errorf("Scrape StartToCloseTimeout = %s, want 45m", timeout)
+	}
+}
+
 func TestNotifyTick_CompletesWithoutLinkedInSearchOrWebhook(t *testing.T) {
 	env, started, probe := newWorkflowEnv()
 

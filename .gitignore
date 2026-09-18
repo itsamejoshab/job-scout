@@ -119,3 +119,9 @@ data/
 
 # ruff
 .ruff_cache/
+
+# Operator web UI
+node_modules/
+!job-scout/webui/dist/
+job-scout/webui/dist/*
+!job-scout/webui/dist/index.html

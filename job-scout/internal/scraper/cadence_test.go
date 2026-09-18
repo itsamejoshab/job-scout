@@ -1,6 +1,7 @@
 package scraper
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"io"
@@ -10,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -271,6 +273,69 @@ func TestRunTick_PartialPageFailurePersistsJobsAndAppliesBackoff(t *testing.T) {
 	}
 }
 
+func TestRunTick_RoundsRepeatFullPassAndKeepPaging(t *testing.T) {
+	pool := cadencePool(t)
+	ctx := t.Context()
+	queries, err := json.Marshal([]map[string]string{
+		{"keywords": "IT Help Desk", "location": "101076143", "f_WT": "2"},
+		{"keywords": "Application Support", "location": "101076143", "f_WT": "2"},
+	})
+	if err != nil {
+		t.Fatalf("marshal queries: %v", err)
+	}
+	hardcoded, err := json.Marshal([]map[string]any{
+		{"url": "https://www.linkedin.com/hardcoded?start=0", "is_remote": true},
+	})
+	if err != nil {
+		t.Fatalf("marshal hardcoded urls: %v", err)
+	}
+	if _, err := pool.Exec(`
+		UPDATE scraper_settings
+		SET search_queries = $1::json, hardcoded_urls = $2::json,
+		    pages_to_scrape = 2, rounds = 1
+		WHERE job_source = 'LINKEDIN'
+	`, queries, hardcoded); err != nil {
+		t.Fatalf("configure rounds test: %v", err)
+	}
+
+	client, hits, restore := interceptLinkedIn(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/hardcoded" {
+			w.WriteHeader(http.StatusOK)
+			_, _ = io.WriteString(w, "<html></html>")
+			return
+		}
+		linkedInFixtureHandler(t, http.StatusOK)(w, r)
+	})
+	defer restore()
+
+	s := NewService(pool)
+	s.HTTPClient = client
+	if result, err := s.RunTick(ctx, TickInput{Force: true}); err != nil {
+		t.Fatalf("one-round RunTick: %v", err)
+	} else if result.Status != "success" {
+		t.Fatalf("one-round RunTick status = %q (%s), want success", result.Status, result.Error)
+	}
+	const requestsPerRound = 1 + 2*2 // one empty hardcoded URL, two queries, two pages each
+	if *hits != requestsPerRound {
+		t.Errorf("one round requests = %d, want %d", *hits, requestsPerRound)
+	}
+
+	if _, err := pool.Exec(`
+		UPDATE scraper_settings SET rounds = 3 WHERE job_source = 'LINKEDIN'
+	`); err != nil {
+		t.Fatalf("set three rounds: %v", err)
+	}
+	before := *hits
+	if result, err := s.RunTick(ctx, TickInput{Force: true}); err != nil {
+		t.Fatalf("three-round RunTick: %v", err)
+	} else if result.Status != "success" {
+		t.Fatalf("three-round RunTick status = %q (%s), want success", result.Status, result.Error)
+	}
+	if got, want := *hits-before, 3*requestsPerRound; got != want {
+		t.Errorf("three rounds requests = %d, want %d", got, want)
+	}
+}
+
 func TestRunTick_ForceDoesNotFetchIndeed(t *testing.T) {
 	pool := cadencePool(t)
 	ctx := t.Context()
@@ -378,6 +443,130 @@ func TestRunTick_SkipsWhenAdvisoryLockBusy(t *testing.T) {
 	}
 	if *hits != 0 {
 		t.Errorf("must skip LinkedIn HTTP when advisory lock is held, hits=%d status=%s", *hits, result.Status)
+	}
+}
+
+func TestRunFullScrape_CancelledContextReleasesAdvisoryLock(t *testing.T) {
+	pool := cadencePool(t)
+	started := make(chan struct{})
+	var once sync.Once
+	client, _, restore := interceptLinkedIn(t, func(_ http.ResponseWriter, r *http.Request) {
+		once.Do(func() { close(started) })
+		<-r.Context().Done()
+	})
+	defer restore()
+
+	s := NewService(pool)
+	s.HTTPClient = client
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = s.RunFullScrape(ctx, db.SourceLinkedIn)
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("scrape did not start")
+	}
+	probe, err := pool.Conn(t.Context())
+	if err != nil {
+		t.Fatalf("probe conn: %v", err)
+	}
+	defer probe.Close()
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("cancelled scrape did not return")
+	}
+
+	var locked bool
+	if err := probe.QueryRowContext(t.Context(),
+		`SELECT pg_try_advisory_lock(hashtext('LINKEDIN'))`).Scan(&locked); err != nil {
+		t.Fatalf("try lock after cancellation: %v", err)
+	}
+	if !locked {
+		t.Error("cancelled scrape left the provider advisory lock held")
+	}
+	if locked {
+		_, _ = probe.ExecContext(t.Context(),
+			`SELECT pg_catalog.pg_advisory_unlock(hashtext('LINKEDIN'))`)
+	}
+}
+
+func TestRunFullScrape_FailedUnlockDiscardsLockedConnection(t *testing.T) {
+	pool := cadencePool(t)
+	if _, err := pool.Exec(`
+		CREATE SEQUENCE public.unlock_attempts;
+		CREATE FUNCTION public.pg_advisory_unlock(integer) RETURNS boolean
+		LANGUAGE plpgsql AS $$
+		BEGIN
+			PERFORM nextval('public.unlock_attempts');
+			RAISE EXCEPTION 'forced unlock failure';
+		END
+		$$
+	`); err != nil {
+		t.Fatalf("install failing unlock function: %v", err)
+	}
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	client, _, restore := interceptLinkedIn(t, func(w http.ResponseWriter, r *http.Request) {
+		once.Do(func() { close(started) })
+		<-release
+		linkedInFixtureHandler(t, http.StatusOK)(w, r)
+	})
+	defer restore()
+
+	s := NewService(pool)
+	s.HTTPClient = client
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = s.RunFullScrape(t.Context(), db.SourceLinkedIn)
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("scrape did not start")
+	}
+	probe, err := pool.Conn(t.Context())
+	if err != nil {
+		t.Fatalf("probe conn: %v", err)
+	}
+	defer probe.Close()
+	close(release)
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("scrape did not return")
+	}
+
+	var unlockAttempted bool
+	if err := probe.QueryRowContext(t.Context(),
+		`SELECT is_called FROM public.unlock_attempts`).Scan(&unlockAttempted); err != nil {
+		t.Fatalf("read unlock attempt: %v", err)
+	}
+	if !unlockAttempted {
+		t.Fatal("test did not exercise the forced unlock failure")
+	}
+
+	var locked bool
+	if err := probe.QueryRowContext(t.Context(),
+		`SELECT pg_try_advisory_lock(hashtext('LINKEDIN'))`).Scan(&locked); err != nil {
+		t.Fatalf("try lock after failed unlock: %v", err)
+	}
+	if !locked {
+		t.Error("failed unlock returned a pooled connection with the provider lock held")
+	}
+	if locked {
+		_, _ = probe.ExecContext(t.Context(),
+			`SELECT pg_catalog.pg_advisory_unlock(hashtext('LINKEDIN'))`)
 	}
 }
 

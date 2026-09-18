@@ -19,7 +19,9 @@ type Config struct {
 	PostgresPort     string
 	PostgresDB       string
 
-	TemporalAddress string
+	TemporalAddress   string
+	TemporalUIAddress string
+	ReportingTimezone string
 
 	APIPort     string
 	ProjectName string
@@ -30,9 +32,7 @@ type Config struct {
 	WebhookURL  string
 	WebhookBase string
 
-	ClientID      string
-	ClientSecret  string
-	OAuthTokenURL string
+	PipedreamAPIToken string
 
 	HTTPTimeoutSeconds        int
 	ScrapeErrorBackoffSeconds int
@@ -52,12 +52,16 @@ func (c Config) WebhookNotify() string {
 	return strings.TrimLeft(c.WebhookID, "/")
 }
 
-const (
-	TaskQueue = "main-task-queue"
+const TaskQueue = "main-task-queue"
 
-	// DefaultOAuthTokenURL is the Pipedream client-credentials token endpoint.
-	DefaultOAuthTokenURL = "https://api.pipedream.com/v1/oauth/token"
-)
+func trimEnvQuotes(v string) string {
+	if len(v) >= 2 {
+		if (v[0] == '"' && v[len(v)-1] == '"') || (v[0] == '\'' && v[len(v)-1] == '\'') {
+			return v[1 : len(v)-1]
+		}
+	}
+	return v
+}
 
 func getenv(key, def string) string {
 	if v := os.Getenv(key); v != "" {
@@ -127,6 +131,8 @@ func Load() Config {
 		PostgresPort:              getenv("POSTGRES_PORT", "5432"),
 		PostgresDB:                getenv("POSTGRES_DB", "jobdb"),
 		TemporalAddress:           getenv("TEMPORAL_ADDRESS", "temporal:7233"),
+		TemporalUIAddress:         getenv("TEMPORAL_UI_ADDRESS", "http://localhost:8080"),
+		ReportingTimezone:         getenv("REPORTING_TIMEZONE", "America/New_York"),
 		APIPort:                   getenv("API_PORT", "8000"),
 		ProjectName:               getenv("PROJECT_NAME", "Job-Scout Service"),
 		Version:                   getenv("VERSION", "1.0.0"),
@@ -134,9 +140,7 @@ func Load() Config {
 		WebhookID:                 getenv("WEBHOOK_ID", ""),
 		WebhookURL:                getenv("WEBHOOK_URL", ""),
 		WebhookBase:               getenv("WEBHOOK_BASE", ""),
-		ClientID:                  getenv("CLIENT_ID", ""),
-		ClientSecret:              getenv("CLIENT_SECRET", ""),
-		OAuthTokenURL:             getenv("OAUTH_TOKEN_URL", DefaultOAuthTokenURL),
+		PipedreamAPIToken:         trimEnvQuotes(getenv("PIPEDREAM_API_TOKEN", "")),
 		HTTPTimeoutSeconds:        getenvInt("HTTP_TIMEOUT_SECONDS", 30),
 		ScrapeErrorBackoffSeconds: getenvInt("SCRAPE_ERROR_BACKOFF_SECONDS", 300),
 		NotifyMaxJobs:             getenvInt("NOTIFY_MAX_JOBS", 25),

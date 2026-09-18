@@ -81,6 +81,77 @@ func ListJobs(ctx context.Context, db *sql.DB, limit, offset int) ([]Job, error)
 	return jobs, rows.Err()
 }
 
+// JobListFilter defines the pinned, filtered set used by the operator list.
+type JobListFilter struct {
+	State     string
+	JobSource JobSource
+	Query     string
+	DateFrom  string
+	DateTo    string
+	AsOf      time.Time
+	Timezone  string
+	Limit     int
+	Offset    int
+}
+
+// ListJobsPage returns one page and the total from the same pinned result set.
+func ListJobsPage(ctx context.Context, database *sql.DB, filter JobListFilter) ([]Job, int, error) {
+	const where = `
+		FROM jobs
+		WHERE created_at <= ($1::timestamptz AT TIME ZONE 'UTC')
+		  AND ($2 = '' OR state = $2)
+		  AND ($3 = '' OR job_source::text = $3)
+		  AND ($4 = '' OR title ILIKE '%' || $4 || '%' OR company ILIKE '%' || $4 || '%')
+		  AND ($5 = '' OR ((created_at AT TIME ZONE 'UTC') AT TIME ZONE $7)::date >= $5::date)
+		  AND ($6 = '' OR ((created_at AT TIME ZONE 'UTC') AT TIME ZONE $7)::date <= $6::date)`
+	args := []any{
+		filter.AsOf,
+		filter.State,
+		string(filter.JobSource),
+		filter.Query,
+		filter.DateFrom,
+		filter.DateTo,
+		filter.Timezone,
+	}
+
+	var total int
+	if err := database.QueryRowContext(ctx, `SELECT COUNT(*)`+where, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	rows, err := database.QueryContext(
+		ctx,
+		`SELECT`+jobSelectColumns+where+`
+		ORDER BY created_at DESC, id DESC
+		LIMIT $8 OFFSET $9`,
+		append(args, filter.Limit, filter.Offset)...,
+	)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	jobs := []Job{}
+	for rows.Next() {
+		var job Job
+		if err := scanJob(rows, &job); err != nil {
+			return nil, 0, err
+		}
+		jobs = append(jobs, job)
+	}
+	return jobs, total, rows.Err()
+}
+
+// GetJob returns a complete job row by identifier.
+func GetJob(ctx context.Context, database *sql.DB, id int64) (Job, error) {
+	var job Job
+	err := scanJob(database.QueryRowContext(
+		ctx,
+		`SELECT`+jobSelectColumns+` FROM jobs WHERE id = $1`,
+		id,
+	), &job)
+	return job, err
+}
+
 // JobStats holds aggregate counts for the /jobs/stats endpoint.
 type JobStats struct {
 	TotalJobs    int            `json:"total_jobs"`
@@ -171,6 +242,25 @@ func UpdateJobNotifyState(ctx context.Context, db *sql.DB, id int64, state strin
 		WHERE id = $5
 	`, state, reason, description, detailAttempts, id)
 	return err
+}
+
+// ReEvaluateRejectedJobs sends rejected jobs back to pending so the next notify
+// pass applies the current filters. Attempts reset so an exhausted description
+// fetch is retried. Notified and eligible rows are never touched.
+func ReEvaluateRejectedJobs(ctx context.Context, database *sql.DB) (int64, error) {
+	res, err := database.ExecContext(ctx, `
+		UPDATE jobs SET
+			state = $1,
+			reject_reason = NULL,
+			detail_attempts = 0,
+			state_changed_at = now(),
+			updated_at = now()
+		WHERE state = $2
+	`, JobStatePending, JobStateRejected)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
 }
 
 const jobSelectColumns = `

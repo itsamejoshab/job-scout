@@ -28,7 +28,7 @@ func ScrapeTick(ctx workflow.Context, input scraper.TickInput) (scraper.Result, 
 	logger.Info("ScrapeTick starting", "force", input.Force, "jobSource", input.JobSource)
 
 	ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
-		StartToCloseTimeout: 30 * time.Minute,
+		StartToCloseTimeout: 45 * time.Minute,
 		RetryPolicy: &temporal.RetryPolicy{
 			MaximumAttempts: 1,
 		},

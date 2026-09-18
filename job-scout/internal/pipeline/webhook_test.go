@@ -64,7 +64,7 @@ func TestPostMessage_PostsJSONToWebhookBaseWithNotifyKey(t *testing.T) {
 		t.Errorf("Content-Type = %q, want application/json", gotCT)
 	}
 	if gotAuth != "" {
-		t.Errorf("Authorization = %q, want empty when CLIENT_ID and CLIENT_SECRET are unset", gotAuth)
+		t.Errorf("Authorization = %q, want empty when PIPEDREAM_API_TOKEN is unset", gotAuth)
 	}
 	var payload map[string]string
 	if err := json.Unmarshal(gotBody, &payload); err != nil {
@@ -154,116 +154,41 @@ func TestPostMessage_TransportErrorIsError(t *testing.T) {
 	}
 }
 
-func TestPostMessage_OAuthBearerFromClientCredentials(t *testing.T) {
+func TestPostMessage_BearerFromPipedreamAPIToken(t *testing.T) {
 	var (
-		tokenHits    int
-		gotTokenCT   string
-		gotTokenBody []byte
-		gotAuth      string
-		gotPath      string
-		gotBody      []byte
+		gotAuth string
+		gotPath string
+		gotBody []byte
 	)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/oauth/token":
-			tokenHits++
-			gotTokenCT = r.Header.Get("Content-Type")
-			gotTokenBody, _ = io.ReadAll(r.Body)
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{"access_token":"test-token","token_type":"Bearer","expires_in":3600}`))
-		case "/api/webhook":
-			gotAuth = r.Header.Get("Authorization")
-			gotPath = r.URL.Path
-			gotBody, _ = io.ReadAll(r.Body)
-			w.WriteHeader(http.StatusOK)
-		default:
-			w.WriteHeader(http.StatusNotFound)
-		}
+		gotAuth = r.Header.Get("Authorization")
+		gotPath = r.URL.Path
+		gotBody, _ = io.ReadAll(r.Body)
+		w.WriteHeader(http.StatusOK)
 	}))
 	defer srv.Close()
 
 	client := NewWebhookClient(config.Config{
 		WebhookBase:        srv.URL + "/api/webhook",
 		WebhookID:          "hook-id",
-		ClientID:           "oauth-client",
-		ClientSecret:       "oauth-secret",
-		OAuthTokenURL:      srv.URL + "/oauth/token",
+		PipedreamAPIToken:  "pd-token",
 		HTTPTimeoutSeconds: 5,
 	})
 	msg := "NEW LEAD"
 	if err := client.PostMessage(context.Background(), msg); err != nil {
-		t.Fatalf("PostMessage OAuth: %v", err)
-	}
-	if tokenHits != 1 {
-		t.Errorf("token POSTs = %d, want 1", tokenHits)
-	}
-	if gotTokenCT != "application/json" {
-		t.Errorf("token Content-Type = %q, want application/json", gotTokenCT)
-	}
-	var tokenReq map[string]string
-	if err := json.Unmarshal(gotTokenBody, &tokenReq); err != nil {
-		t.Fatalf("token body JSON: %v (%q)", err, gotTokenBody)
-	}
-	if tokenReq["grant_type"] != "client_credentials" {
-		t.Errorf("grant_type = %q, want client_credentials", tokenReq["grant_type"])
-	}
-	if tokenReq["client_id"] != "oauth-client" {
-		t.Errorf("client_id = %q, want oauth-client", tokenReq["client_id"])
-	}
-	if tokenReq["client_secret"] != "oauth-secret" {
-		t.Errorf("client_secret = %q, want oauth-secret", tokenReq["client_secret"])
+		t.Fatalf("PostMessage token: %v", err)
 	}
 	if gotPath != "/api/webhook" {
 		t.Errorf("webhook path = %q, want /api/webhook", gotPath)
 	}
-	if gotAuth != "Bearer test-token" {
-		t.Errorf("Authorization = %q, want Bearer test-token", gotAuth)
+	if gotAuth != "Bearer pd-token" {
+		t.Errorf("Authorization = %q, want Bearer pd-token", gotAuth)
 	}
 	var payload map[string]string
 	if err := json.Unmarshal(gotBody, &payload); err != nil {
-		t.Fatalf("webhook body JSON: %v (%q)", err, gotBody)
+		t.Fatalf("webhook JSON: %v (%q)", err, gotBody)
 	}
 	if payload["notify"] != "hook-id" || payload["message"] != msg {
 		t.Errorf("webhook JSON = %v, want notify=hook-id message=%q", payload, msg)
-	}
-}
-
-func TestPostMessage_OAuthTokenHTTPErrorFailsWebhook(t *testing.T) {
-	var webhookHits int
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/oauth/token" {
-			w.WriteHeader(http.StatusUnauthorized)
-			return
-		}
-		webhookHits++
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer srv.Close()
-	client := NewWebhookClient(config.Config{
-		WebhookBase:        srv.URL + "/hook",
-		WebhookID:          "id",
-		ClientID:           "oauth-client",
-		ClientSecret:       "oauth-secret",
-		OAuthTokenURL:      srv.URL + "/oauth/token",
-		HTTPTimeoutSeconds: 5,
-	})
-	if err := client.PostMessage(context.Background(), "x"); err == nil {
-		t.Fatal("token HTTP 401 must fail PostMessage")
-	}
-	if webhookHits != 0 {
-		t.Errorf("webhook hits = %d, want 0 after token failure", webhookHits)
-	}
-}
-
-func TestPostMessage_OAuthRequiresBothClientKnobs(t *testing.T) {
-	client := NewWebhookClient(config.Config{
-		WebhookBase:        "http://127.0.0.1:9",
-		WebhookID:          "id",
-		ClientID:           "oauth-client",
-		HTTPTimeoutSeconds: 5,
-	})
-	if err := client.PostMessage(context.Background(), "x"); err == nil {
-		t.Fatal("CLIENT_ID without CLIENT_SECRET must fail before HTTP")
 	}
 }

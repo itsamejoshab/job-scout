@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 )
 
@@ -40,6 +41,93 @@ func GetSearchSettings(ctx context.Context, db *sql.DB) (*SearchSettings, error)
 		}
 	}
 	return &s, nil
+}
+
+// ReplaceSearchSettings rewrites all six filter lists and returns the stored row.
+func ReplaceSearchSettings(ctx context.Context, db *sql.DB, in SearchSettings) (*SearchSettings, error) {
+	normalized := normalizeSearchSettings(in)
+	existing, err := GetSearchSettings(ctx, db)
+	if err != nil {
+		return nil, err
+	}
+	if existing == nil {
+		if _, err := db.ExecContext(ctx, `
+			INSERT INTO search_settings (desc_include_words, desc_exclude_words, title_include,
+			                             title_exclude, company_exclude, non_remote_phrases)
+			VALUES ($1::json, $2::json, $3::json, $4::json, $5::json, $6::json)
+		`, mustJSON(normalized.DescIncludeWords), mustJSON(normalized.DescExcludeWords),
+			mustJSON(normalized.TitleInclude), mustJSON(normalized.TitleExclude),
+			mustJSON(normalized.CompanyExclude), mustJSON(normalized.NonRemotePhrases)); err != nil {
+			return nil, err
+		}
+		return GetSearchSettings(ctx, db)
+	}
+	if _, err := db.ExecContext(ctx, `
+		UPDATE search_settings
+		SET desc_include_words = $1::json,
+		    desc_exclude_words = $2::json,
+		    title_include = $3::json,
+		    title_exclude = $4::json,
+		    company_exclude = $5::json,
+		    non_remote_phrases = $6::json,
+		    updated_at = now()
+		WHERE id = $7
+	`, mustJSON(normalized.DescIncludeWords), mustJSON(normalized.DescExcludeWords),
+		mustJSON(normalized.TitleInclude), mustJSON(normalized.TitleExclude),
+		mustJSON(normalized.CompanyExclude), mustJSON(normalized.NonRemotePhrases), existing.ID); err != nil {
+		return nil, err
+	}
+	return GetSearchSettings(ctx, db)
+}
+
+// ResetSearchSettings restores the filter lists from embedded seed defaults.
+func ResetSearchSettings(ctx context.Context, db *sql.DB) (*SearchSettings, error) {
+	seed, err := loadSearchSettingsSeed()
+	if err != nil {
+		return nil, err
+	}
+	return ReplaceSearchSettings(ctx, db, seed)
+}
+
+func normalizeSearchSettings(in SearchSettings) SearchSettings {
+	return SearchSettings{
+		DescIncludeWords: normalizeWordList(in.DescIncludeWords),
+		DescExcludeWords: normalizeWordList(in.DescExcludeWords),
+		TitleInclude:     normalizeWordList(in.TitleInclude),
+		TitleExclude:     normalizeWordList(in.TitleExclude),
+		CompanyExclude:   normalizeWordList(in.CompanyExclude),
+		NonRemotePhrases: normalizeWordList(in.NonRemotePhrases),
+	}
+}
+
+func normalizeWordList(in []string) []string {
+	out := make([]string, 0, len(in))
+	seen := make(map[string]struct{}, len(in))
+	for _, raw := range in {
+		word := strings.TrimSpace(raw)
+		if word == "" {
+			continue
+		}
+		key := strings.ToLower(word)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, word)
+	}
+	return out
+}
+
+func loadSearchSettingsSeed() (SearchSettings, error) {
+	raw, err := seedFS.ReadFile("seed/search_settings.json")
+	if err != nil {
+		return SearchSettings{}, err
+	}
+	var s SearchSettings
+	if err := json.Unmarshal(raw, &s); err != nil {
+		return SearchSettings{}, fmt.Errorf("parse search_settings seed: %w", err)
+	}
+	return normalizeSearchSettings(s), nil
 }
 
 // GetScraperSettings returns the scraper-specific row for a source, or nil.
@@ -103,6 +191,47 @@ func AllScraperSettings(ctx context.Context, db *sql.DB) ([]ScraperSettings, err
 	return out, nil
 }
 
+// ReplaceScraperSettings rewrites only operator-owned provider settings.
+func ReplaceScraperSettings(
+	ctx context.Context,
+	db *sql.DB,
+	source JobSource,
+	in ScraperSettings,
+) (*ScraperSettings, error) {
+	if _, err := db.ExecContext(ctx, `
+		UPDATE scraper_settings
+		SET search_queries = $1::json,
+		    hardcoded_urls = $2::json,
+		    timespan_code = $3,
+		    pages_to_scrape = $4,
+		    rounds = $5,
+		    enabled = $6,
+		    scrape_interval_seconds = $7,
+		    updated_at = now()
+		WHERE job_source = $8
+	`, mustJSON(in.SearchQueries), mustJSON(in.HardcodedURLs), in.TimespanCode,
+		in.PagesToScrape, in.Rounds, in.Enabled, in.ScrapeIntervalSeconds, source); err != nil {
+		return nil, err
+	}
+	return GetScraperSettings(ctx, db, source)
+}
+
+// ResetScraperSettings restores operator-owned fields and leaves cadence intact.
+func ResetScraperSettings(
+	ctx context.Context,
+	db *sql.DB,
+	source JobSource,
+) (*ScraperSettings, error) {
+	seed, err := loadScraperSettingsSeed(source)
+	if err != nil {
+		return nil, err
+	}
+	if seed == nil {
+		return nil, nil
+	}
+	return ReplaceScraperSettings(ctx, db, source, *seed)
+}
+
 // SeedSettings inserts universal + per-source settings from the embedded seed
 // files if (and only if) they are missing. This fixes the original Python bug
 // where scraper_settings was never seeded, so every scrape failed.
@@ -123,13 +252,9 @@ func seedSearchSettings(ctx context.Context, db *sql.DB) error {
 		return nil
 	}
 
-	raw, err := seedFS.ReadFile("seed/search_settings.json")
+	s, err := loadSearchSettingsSeed()
 	if err != nil {
 		return err
-	}
-	var s SearchSettings
-	if err := json.Unmarshal(raw, &s); err != nil {
-		return fmt.Errorf("parse search_settings seed: %w", err)
 	}
 
 	_, err = db.ExecContext(ctx, `
@@ -146,13 +271,9 @@ func seedSearchSettings(ctx context.Context, db *sql.DB) error {
 }
 
 func seedScraperSettings(ctx context.Context, db *sql.DB) error {
-	raw, err := seedFS.ReadFile("seed/scraper_settings.json")
+	seeds, err := loadScraperSettingsSeeds()
 	if err != nil {
 		return err
-	}
-	var seeds []ScraperSettings
-	if err := json.Unmarshal(raw, &seeds); err != nil {
-		return fmt.Errorf("parse scraper_settings seed: %w", err)
 	}
 
 	for _, s := range seeds {
@@ -179,6 +300,31 @@ func seedScraperSettings(ctx context.Context, db *sql.DB) error {
 	return nil
 }
 
+func loadScraperSettingsSeeds() ([]ScraperSettings, error) {
+	raw, err := seedFS.ReadFile("seed/scraper_settings.json")
+	if err != nil {
+		return nil, err
+	}
+	var seeds []ScraperSettings
+	if err := json.Unmarshal(raw, &seeds); err != nil {
+		return nil, fmt.Errorf("parse scraper_settings seed: %w", err)
+	}
+	return seeds, nil
+}
+
+func loadScraperSettingsSeed(source JobSource) (*ScraperSettings, error) {
+	seeds, err := loadScraperSettingsSeeds()
+	if err != nil {
+		return nil, err
+	}
+	for _, s := range seeds {
+		if s.JobSource == source {
+			return &s, nil
+		}
+	}
+	return nil, nil
+}
+
 func intervalOrDefault(s ScraperSettings) int {
 	if s.ScrapeIntervalSeconds > 0 {
 		return s.ScrapeIntervalSeconds
@@ -195,8 +341,15 @@ func TryLockJobSource(ctx context.Context, conn *sql.Conn, source JobSource) (bo
 
 // UnlockJobSource releases the session advisory lock for source.
 func UnlockJobSource(ctx context.Context, conn *sql.Conn, source JobSource) error {
-	_, err := conn.ExecContext(ctx, `SELECT pg_advisory_unlock(hashtext($1))`, string(source))
-	return err
+	var unlocked bool
+	if err := conn.QueryRowContext(ctx,
+		`SELECT pg_advisory_unlock(hashtext($1))`, string(source)).Scan(&unlocked); err != nil {
+		return err
+	}
+	if !unlocked {
+		return fmt.Errorf("advisory lock was not held for job source: %s", source)
+	}
+	return nil
 }
 
 // MarkScrapeSuccess sets last_scraped_at and clears next_eligible_at.

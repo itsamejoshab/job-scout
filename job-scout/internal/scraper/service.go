@@ -3,6 +3,7 @@ package scraper
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -187,7 +188,14 @@ func (s *Service) scrapeSource(ctx context.Context, source db.JobSource) (Result
 		slog.Info("scrape skipped, advisory lock busy", "source", source)
 		return Result{Status: "skipped", JobSource: string(source), Error: "advisory lock busy"}, nil
 	}
-	defer func() { _ = db.UnlockJobSource(ctx, conn, source) }()
+	defer func() {
+		unlockCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := db.UnlockJobSource(unlockCtx, conn, source); err != nil {
+			slog.Error("advisory unlock failed; discarding connection", "source", source, "err", err)
+			_ = conn.Raw(func(any) error { return driver.ErrBadConn })
+		}
+	}()
 
 	provider, err := s.newProvider(source, *scraperSettings)
 	if err != nil {
@@ -199,27 +207,36 @@ func (s *Service) scrapeSource(ctx context.Context, source db.JobSource) (Result
 		scrapeErr error
 	)
 
-	for _, urlCfg := range scraperSettings.HardcodedURLs {
-		jobs, err := provider.ScrapeHardcodedURL(ctx, urlCfg)
-		all = append(all, jobs...)
-		if err != nil {
-			slog.Error("scraping hardcoded url failed", "err", err)
-			scrapeErr = err
-		}
-		if err := sleep(ctx, sleepBetween); err != nil {
-			return s.finishScrape(ctx, source, all, err)
-		}
+	rounds := scraperSettings.Rounds
+	if rounds < 1 {
+		rounds = 1
 	}
-
-	for _, query := range scraperSettings.SearchQueries {
-		jobs, err := provider.ScrapeJobs(ctx, query)
-		all = append(all, jobs...)
-		if err != nil {
-			slog.Error("scraping query failed", "query", query, "err", err)
-			scrapeErr = err
+	if rounds > 3 {
+		rounds = 3
+	}
+	for round := 0; round < rounds; round++ {
+		for _, urlCfg := range scraperSettings.HardcodedURLs {
+			jobs, err := provider.ScrapeHardcodedURL(ctx, urlCfg)
+			all = append(all, jobs...)
+			if err != nil {
+				slog.Error("scraping hardcoded url failed", "round", round+1, "err", err)
+				scrapeErr = err
+			}
+			if err := sleep(ctx, sleepBetween); err != nil {
+				return s.finishScrape(ctx, source, all, err)
+			}
 		}
-		if err := sleep(ctx, sleepBetween); err != nil {
-			return s.finishScrape(ctx, source, all, err)
+
+		for _, query := range scraperSettings.SearchQueries {
+			jobs, err := provider.ScrapeJobs(ctx, query)
+			all = append(all, jobs...)
+			if err != nil {
+				slog.Error("scraping query failed", "round", round+1, "query", query, "err", err)
+				scrapeErr = err
+			}
+			if err := sleep(ctx, sleepBetween); err != nil {
+				return s.finishScrape(ctx, source, all, err)
+			}
 		}
 	}
 

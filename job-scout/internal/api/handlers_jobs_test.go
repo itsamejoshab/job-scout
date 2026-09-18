@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jobscout/jobscout/internal/config"
 	"github.com/jobscout/jobscout/internal/db"
 	"github.com/jobscout/jobscout/internal/db/pgtest"
 )
@@ -18,37 +20,215 @@ func TestMain(m *testing.M) {
 	os.Exit(pgtest.Run(m))
 }
 
-func TestJobs_ListJSONIncludesState(t *testing.T) {
+func TestJobs_ListFiltersOrdersPagesAndOmitsDescription(t *testing.T) {
 	pool := pgtest.Open(t)
 	if err := db.Migrate(pool); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	if _, err := db.InsertJobIfNew(t.Context(), pool, db.Job{
-		JobSource: db.SourceLinkedIn,
-		Title:     "IT Help Desk",
-		Company:   "Acme",
-		Location:  "Remote",
-		JobURL:    "https://www.linkedin.com/jobs/view/api-list/",
-	}); err != nil {
-		t.Fatalf("insert: %v", err)
+	description := "Full private description"
+	for _, job := range []db.Job{
+		{
+			JobSource:   db.SourceLinkedIn,
+			Title:       "Platform Engineer",
+			Company:     "Acme",
+			Description: &description,
+			Location:    "Remote",
+			JobURL:      "https://example.test/jobs/one",
+		},
+		{
+			JobSource: db.SourceLinkedIn,
+			Title:     "Platform Engineer",
+			Company:   "Acme",
+			Location:  "Remote",
+			JobURL:    "https://example.test/jobs/two",
+		},
+		{
+			JobSource: db.SourceLinkedIn,
+			Title:     "Platform Engineer",
+			Company:   "Acme",
+			Location:  "Remote",
+			JobURL:    "https://example.test/jobs/three",
+		},
+		{
+			JobSource: db.SourceIndeed,
+			Title:     "Platform Engineer",
+			Company:   "Acme",
+			Location:  "Remote",
+			JobURL:    "https://example.test/jobs/wrong-source",
+		},
+		{
+			JobSource: db.SourceLinkedIn,
+			Title:     "Accountant",
+			Company:   "Other",
+			Location:  "Remote",
+			JobURL:    "https://example.test/jobs/wrong-search",
+		},
+	} {
+		if _, err := db.InsertJobIfNew(t.Context(), pool, job); err != nil {
+			t.Fatalf("insert: %v", err)
+		}
+	}
+	if _, err := pool.Exec(`
+		UPDATE jobs SET created_at = '2026-09-18 04:30:00+00'
+		WHERE job_url IN ('https://example.test/jobs/one', 'https://example.test/jobs/two');
+		UPDATE jobs SET created_at = '2026-09-18 03:59:59+00'
+		WHERE job_url = 'https://example.test/jobs/three';
+		UPDATE jobs SET created_at = '2026-09-18 04:30:00+00'
+		WHERE job_url IN (
+			'https://example.test/jobs/wrong-source',
+			'https://example.test/jobs/wrong-search'
+		);
+		UPDATE jobs SET state = 'eligible'
+	`); err != nil {
+		t.Fatalf("prepare jobs: %v", err)
 	}
 
-	h := &Handler{DB: pool}
-	req := httptest.NewRequest(http.MethodGet, "/api/v0/jobs", nil)
+	h := &Handler{DB: pool, Cfg: config.Config{ReportingTimezone: "America/New_York"}}
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v0/jobs?state=eligible&job_source=linkedin&q=acme&date_from=2026-09-18&date_to=2026-09-18&limit=1",
+		nil,
+	)
 	rec := httptest.NewRecorder()
 	NewServer("", h).Handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET /api/v0/jobs status=%d body=%s", rec.Code, rec.Body.String())
 	}
-	var jobs []map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &jobs); err != nil {
+	var page struct {
+		Items []map[string]any `json:"items"`
+		Total int              `json:"total"`
+		AsOf  string           `json:"as_of"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil {
 		t.Fatalf("jobs JSON: %v", err)
 	}
-	if len(jobs) != 1 {
-		t.Fatalf("jobs len=%d, want 1", len(jobs))
+	if len(page.Items) != 1 || page.Total != 2 || page.AsOf == "" {
+		t.Fatalf("page = %#v, want one of two items and an anchor", page)
 	}
-	if jobs[0]["state"] != "pending" {
-		t.Errorf("GET /api/v0/jobs state=%v, want pending", jobs[0]["state"])
+	if page.Items[0]["state"] != "eligible" {
+		t.Errorf("state=%v, want eligible", page.Items[0]["state"])
+	}
+	if page.Items[0]["job_url"] != "https://example.test/jobs/two" {
+		t.Errorf("first tied item URL=%v, want higher id", page.Items[0]["job_url"])
+	}
+	if _, exists := page.Items[0]["description"]; exists {
+		t.Error("list item must omit description")
+	}
+	if page.Items[0]["has_description"] != false {
+		t.Errorf("has_description=%v, want false", page.Items[0]["has_description"])
+	}
+
+	if _, err := pool.Exec(`
+		INSERT INTO jobs (job_source, title, company, location, date, job_url, created_at)
+		VALUES ('LINKEDIN', 'Platform Engineer', 'Acme', 'Remote', now(),
+		        'https://example.test/jobs/new-after-anchor', now() + interval '1 minute')
+	`); err != nil {
+		t.Fatalf("insert after anchor: %v", err)
+	}
+	secondPath := "/api/v0/jobs?state=eligible&job_source=linkedin&q=acme" +
+		"&date_from=2026-09-18&date_to=2026-09-18&limit=1&offset=1&as_of=" +
+		page.AsOf
+	req = httptest.NewRequest(http.MethodGet, secondPath, nil)
+	rec = httptest.NewRecorder()
+	NewServer("", h).Handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("second page status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil {
+		t.Fatalf("second page JSON: %v", err)
+	}
+	if page.Total != 2 || len(page.Items) != 1 {
+		t.Fatalf("pinned second page = %#v, want one of two original rows", page)
+	}
+	if page.Items[0]["job_url"] != "https://example.test/jobs/one" {
+		t.Errorf("second tied item URL=%v, want lower id", page.Items[0]["job_url"])
+	}
+	if page.Items[0]["has_description"] != true {
+		t.Errorf("has_description=%v, want true", page.Items[0]["has_description"])
+	}
+}
+
+func TestJobs_DefaultLimitAndMaximumClamp(t *testing.T) {
+	pool := pgtest.Open(t)
+	if err := db.Migrate(pool); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	if _, err := pool.Exec(`
+		INSERT INTO jobs (job_source, title, company, location, date, job_url)
+		SELECT 'LINKEDIN', 'Job ' || n, 'Acme', 'Remote', now(),
+		       'https://example.test/jobs/limit-' || n
+		FROM generate_series(1, 201) AS n
+	`); err != nil {
+		t.Fatalf("insert jobs: %v", err)
+	}
+	h := &Handler{DB: pool}
+	for _, tc := range []struct {
+		path string
+		want int
+	}{
+		{path: "/api/v0/jobs", want: 50},
+		{path: "/api/v0/jobs?limit=999", want: 200},
+	} {
+		req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+		rec := httptest.NewRecorder()
+		NewServer("", h).Handler.ServeHTTP(rec, req)
+		var page struct {
+			Items []map[string]any `json:"items"`
+		}
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s status=%d body=%s", tc.path, rec.Code, rec.Body.String())
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil {
+			t.Fatalf("%s JSON: %v", tc.path, err)
+		}
+		if len(page.Items) != tc.want {
+			t.Errorf("%s items=%d, want %d", tc.path, len(page.Items), tc.want)
+		}
+	}
+}
+
+func TestJobByIDReturnsFullRowAndValidatesID(t *testing.T) {
+	pool := pgtest.Open(t)
+	if err := db.Migrate(pool); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	description := "Full description"
+	if _, err := db.InsertJobIfNew(t.Context(), pool, db.Job{
+		JobSource: db.SourceLinkedIn, Title: "Engineer", Company: "Acme",
+		Description: &description, Location: "Remote", JobURL: "https://example.test/jobs/detail",
+	}); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+	var id int64
+	if err := pool.QueryRow(`SELECT id FROM jobs WHERE job_url = 'https://example.test/jobs/detail'`).Scan(&id); err != nil {
+		t.Fatalf("select id: %v", err)
+	}
+
+	h := &Handler{DB: pool}
+	for _, tc := range []struct {
+		path       string
+		wantStatus int
+	}{
+		{path: fmt.Sprintf("/api/v0/jobs/%d", id), wantStatus: http.StatusOK},
+		{path: "/api/v0/jobs/999999", wantStatus: http.StatusNotFound},
+		{path: "/api/v0/jobs/not-a-number", wantStatus: http.StatusBadRequest},
+		{path: "/api/v0/jobs/stats", wantStatus: http.StatusOK},
+	} {
+		req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+		rec := httptest.NewRecorder()
+		NewServer("", h).Handler.ServeHTTP(rec, req)
+		if rec.Code != tc.wantStatus {
+			t.Errorf("%s status=%d body=%s, want %d", tc.path, rec.Code, rec.Body.String(), tc.wantStatus)
+		}
+		if tc.path == fmt.Sprintf("/api/v0/jobs/%d", id) {
+			var job map[string]any
+			if err := json.Unmarshal(rec.Body.Bytes(), &job); err != nil {
+				t.Fatalf("detail JSON: %v", err)
+			}
+			if job["description"] != description {
+				t.Errorf("description=%v, want full description", job["description"])
+			}
+		}
 	}
 }
 
