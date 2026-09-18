@@ -24,9 +24,9 @@ The API and worker are the same Go binary, selected by the first arg (`jobscout 
 
 `make up` starts Postgres, Temporal, the API, and the worker. The API process creates or updates two Temporal interval schedules (`jobscout-scrape`, `jobscout-notify`) on boot.
 
-The API and worker containers must be able to open TCP to the LAN Home Assistant host `192.168.1.222:8123`. Docker Desktop usually routes to the LAN; a timeout or connect error is an environment failure, not a filter failure.
+The worker must be able to open TCP to the host in `WEBHOOK_BASE`. A timeout or connect error is an environment failure, not a filter failure.
 
-Automated tests never POST to the live `allenjobhit` webhook.
+Automated tests POST only to `httptest` servers. They must not use live webhook URLs, LAN addresses, or secrets.
 
 ### Pipeline (Temporal workflows)
 
@@ -82,7 +82,7 @@ Everything else is the standard library (`net/http`, `database/sql`, `encoding/j
 make up
 ```
 
-5. Manual acceptance (not CI): set `.env` webhook to local Home Assistant, then:
+5. Manual acceptance (not CI): set `.env` webhook values, then:
 
 ```bash
 curl -X POST "http://localhost:8001/api/v0/run?force=1"
@@ -90,7 +90,7 @@ curl -X POST "http://localhost:8001/api/v0/run?force=1"
 curl -X POST "http://localhost:8001/api/v0/notify"
 ```
 
-Confirm the Home Assistant automation on `allenjobhit`. Automated tests never POST to that live webhook.
+Confirm the downstream notify automation. Automated tests never POST to a live webhook.
 
 Scheduled scrape (default 60s) and notify (default 300s) also run from Temporal after API boot. To scrape or notify now without waiting:
 

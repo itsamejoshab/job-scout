@@ -33,18 +33,14 @@ func TestPostMessage_PostsJSONToWebhookBaseWithNotifyKey(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	if strings.Contains(srv.URL, "192.168.1.222") || strings.Contains(srv.URL, "allenjobhit") {
-		t.Fatalf("httptest must not use the live Home Assistant URL, got %s", srv.URL)
-	}
-
 	cfg := config.Config{
 		WebhookBase:        srv.URL + "/api/webhook",
-		WebhookID:          "allenjobhit",
+		WebhookID:          "hook-id",
 		HTTPTimeoutSeconds: 30,
 	}
 	client := NewWebhookClient(cfg)
 	if client.Client == nil || client.Client.Timeout != 30*time.Second {
-		t.Fatalf("Home Assistant HTTP timeout = %v, want 30s from HTTP_TIMEOUT_SECONDS", client.Client.Timeout)
+		t.Fatalf("webhook HTTP timeout = %v, want 30s from HTTP_TIMEOUT_SECONDS", client.Client.Timeout)
 	}
 	wantTarget := strings.TrimRight(cfg.WebhookBase, "/")
 	if client.Target != wantTarget {
@@ -52,9 +48,6 @@ func TestPostMessage_PostsJSONToWebhookBaseWithNotifyKey(t *testing.T) {
 	}
 	if client.Notify != cfg.WebhookID {
 		t.Errorf("client notify = %q, want WEBHOOK_ID %q", client.Notify, cfg.WebhookID)
-	}
-	if strings.Contains(client.Target, "192.168.1.222") {
-		t.Fatalf("webhook client must not target the live LAN host in tests, target=%q", client.Target)
 	}
 
 	msg := "  1 job postings stored.\nNEW LEAD"
@@ -80,8 +73,8 @@ func TestPostMessage_PostsJSONToWebhookBaseWithNotifyKey(t *testing.T) {
 	if payload["message"] != msg {
 		t.Errorf("JSON message = %q, want %q", payload["message"], msg)
 	}
-	if payload["notify"] != "allenjobhit" {
-		t.Errorf("JSON notify = %q, want %q", payload["notify"], "allenjobhit")
+	if payload["notify"] != "hook-id" {
+		t.Errorf("JSON notify = %q, want %q", payload["notify"], "hook-id")
 	}
 	if len(payload) != 2 {
 		t.Errorf("JSON object keys = %v, want notify and message", payload)
@@ -192,7 +185,7 @@ func TestPostMessage_OAuthBearerFromClientCredentials(t *testing.T) {
 
 	client := NewWebhookClient(config.Config{
 		WebhookBase:        srv.URL + "/api/webhook",
-		WebhookID:          "josh",
+		WebhookID:          "hook-id",
 		ClientID:           "oauth-client",
 		ClientSecret:       "oauth-secret",
 		OAuthTokenURL:      srv.URL + "/oauth/token",
@@ -231,8 +224,8 @@ func TestPostMessage_OAuthBearerFromClientCredentials(t *testing.T) {
 	if err := json.Unmarshal(gotBody, &payload); err != nil {
 		t.Fatalf("webhook body JSON: %v (%q)", err, gotBody)
 	}
-	if payload["notify"] != "josh" || payload["message"] != msg {
-		t.Errorf("webhook JSON = %v, want notify=josh message=%q", payload, msg)
+	if payload["notify"] != "hook-id" || payload["message"] != msg {
+		t.Errorf("webhook JSON = %v, want notify=hook-id message=%q", payload, msg)
 	}
 }
 

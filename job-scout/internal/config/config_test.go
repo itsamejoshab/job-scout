@@ -34,14 +34,14 @@ func TestLoad_NotifyAndWebhookKnobDefaults(t *testing.T) {
 	if cfg.NotifyClaimTimeoutSeconds != 0 {
 		t.Errorf("NOTIFY_CLAIM_TIMEOUT_SECONDS default = %d, want 0 (no auto-unstick)", cfg.NotifyClaimTimeoutSeconds)
 	}
-	if cfg.HTTPTimeoutSeconds != 30 {
-		t.Errorf("HTTP_TIMEOUT_SECONDS default = %d, want 30 (Home Assistant client reuses this)", cfg.HTTPTimeoutSeconds)
+		if cfg.HTTPTimeoutSeconds != 30 {
+		t.Errorf("HTTP_TIMEOUT_SECONDS default = %d, want 30 (webhook client reuses this)", cfg.HTTPTimeoutSeconds)
 	}
 }
 
 func TestLoad_NotifyAndWebhookKnobsFromEnv(t *testing.T) {
 	t.Setenv("WEBHOOK_BASE", "https://hooks.example/api/webhook")
-	t.Setenv("WEBHOOK_ID", "nabu-id")
+	t.Setenv("WEBHOOK_ID", "hook-id")
 	t.Setenv("WEBHOOK_URL", "http://unused.example/old")
 	t.Setenv("CLIENT_ID", "oauth-client")
 	t.Setenv("CLIENT_SECRET", "oauth-secret")
@@ -54,8 +54,8 @@ func TestLoad_NotifyAndWebhookKnobsFromEnv(t *testing.T) {
 	if cfg.WebhookBase != "https://hooks.example/api/webhook" {
 		t.Errorf("WEBHOOK_BASE = %q, want https://hooks.example/api/webhook", cfg.WebhookBase)
 	}
-	if cfg.WebhookID != "nabu-id" {
-		t.Errorf("WEBHOOK_ID = %q, want nabu-id", cfg.WebhookID)
+	if cfg.WebhookID != "hook-id" {
+		t.Errorf("WEBHOOK_ID = %q, want hook-id", cfg.WebhookID)
 	}
 	if cfg.ClientID != "oauth-client" {
 		t.Errorf("CLIENT_ID = %q, want oauth-client", cfg.ClientID)
@@ -88,21 +88,21 @@ func TestWebhookTarget_IsTrimmedBaseOnly(t *testing.T) {
 		wantNotify string
 	}{
 		{
-			base:       "http://192.168.1.222:8123/api/webhook",
-			id:         "allenjobhit",
-			wantTarget: "http://192.168.1.222:8123/api/webhook",
-			wantNotify: "allenjobhit",
+			base:       "https://hooks.example/api/webhook",
+			id:         "hook-id",
+			wantTarget: "https://hooks.example/api/webhook",
+			wantNotify: "hook-id",
 		},
 		{
-			base:       "http://192.168.1.222:8123/api/webhook/",
-			id:         "/allenjobhit",
-			wantTarget: "http://192.168.1.222:8123/api/webhook",
-			wantNotify: "allenjobhit",
+			base:       "https://hooks.example/api/webhook/",
+			id:         "/hook-id",
+			wantTarget: "https://hooks.example/api/webhook",
+			wantNotify: "hook-id",
 		},
 		{
-			base:       "https://nabu.example/api/webhook///",
+			base:       "https://hooks.example/api/webhook///",
 			id:         "///hook",
-			wantTarget: "https://nabu.example/api/webhook",
+			wantTarget: "https://hooks.example/api/webhook",
 			wantNotify: "hook",
 		},
 	}

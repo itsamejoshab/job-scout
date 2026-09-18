@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
@@ -65,9 +64,6 @@ func TestActivities_ClaimNotifyBatchUsesMaxJobsThenPostAndFinish(t *testing.T) {
 		_, _ = w.Write([]byte(`<not-json>`))
 	}))
 	defer srv.Close()
-	if strings.Contains(srv.URL, "192.168.1.222") {
-		t.Fatal("automated tests must not hit 192.168.1.222")
-	}
 
 	acts := &Activities{
 		DB: pool,
