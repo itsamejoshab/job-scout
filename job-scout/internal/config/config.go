@@ -29,6 +29,10 @@ type Config struct {
 	WebhookURL  string
 	WebhookBase string
 
+	ClientID      string
+	ClientSecret  string
+	OAuthTokenURL string
+
 	HTTPTimeoutSeconds        int
 	ScrapeErrorBackoffSeconds int
 	NotifyMaxJobs             int
@@ -37,17 +41,22 @@ type Config struct {
 	NotifyScheduleSeconds     int
 }
 
-// WebhookTarget joins WEBHOOK_BASE and WEBHOOK_ID. It is the send URL.
+// WebhookTarget is WEBHOOK_BASE with trailing slashes removed. It is the send URL.
 func (c Config) WebhookTarget() string {
-	base := strings.TrimRight(c.WebhookBase, "/")
-	id := strings.TrimLeft(c.WebhookID, "/")
-	if base == "" && id == "" {
-		return ""
-	}
-	return base + "/" + id
+	return strings.TrimRight(c.WebhookBase, "/")
 }
 
-const TaskQueue = "main-task-queue"
+// WebhookNotify is WEBHOOK_ID with leading slashes removed. It is the JSON notify value.
+func (c Config) WebhookNotify() string {
+	return strings.TrimLeft(c.WebhookID, "/")
+}
+
+const (
+	TaskQueue = "main-task-queue"
+
+	// DefaultOAuthTokenURL is the Pipedream client-credentials token endpoint.
+	DefaultOAuthTokenURL = "https://api.pipedream.com/v1/oauth/token"
+)
 
 func getenv(key, def string) string {
 	if v := os.Getenv(key); v != "" {
@@ -95,6 +104,9 @@ func Load() Config {
 		WebhookID:                 getenv("WEBHOOK_ID", ""),
 		WebhookURL:                getenv("WEBHOOK_URL", ""),
 		WebhookBase:               getenv("WEBHOOK_BASE", ""),
+		ClientID:                  getenv("CLIENT_ID", ""),
+		ClientSecret:              getenv("CLIENT_SECRET", ""),
+		OAuthTokenURL:             getenv("OAUTH_TOKEN_URL", DefaultOAuthTokenURL),
 		HTTPTimeoutSeconds:        getenvInt("HTTP_TIMEOUT_SECONDS", 30),
 		ScrapeErrorBackoffSeconds: getenvInt("SCRAPE_ERROR_BACKOFF_SECONDS", 300),
 		NotifyMaxJobs:             getenvInt("NOTIFY_MAX_JOBS", 25),

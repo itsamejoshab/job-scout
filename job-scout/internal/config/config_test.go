@@ -6,6 +6,9 @@ func TestLoad_NotifyAndWebhookKnobDefaults(t *testing.T) {
 	t.Setenv("WEBHOOK_BASE", "")
 	t.Setenv("WEBHOOK_ID", "")
 	t.Setenv("WEBHOOK_URL", "")
+	t.Setenv("CLIENT_ID", "")
+	t.Setenv("CLIENT_SECRET", "")
+	t.Setenv("OAUTH_TOKEN_URL", "")
 	t.Setenv("NOTIFY_MAX_JOBS", "")
 	t.Setenv("NOTIFY_CLAIM_TIMEOUT_SECONDS", "")
 
@@ -16,21 +19,33 @@ func TestLoad_NotifyAndWebhookKnobDefaults(t *testing.T) {
 	if cfg.WebhookID != "" {
 		t.Errorf("WEBHOOK_ID default = %q, want empty", cfg.WebhookID)
 	}
+	if cfg.ClientID != "" {
+		t.Errorf("CLIENT_ID default = %q, want empty", cfg.ClientID)
+	}
+	if cfg.ClientSecret != "" {
+		t.Errorf("CLIENT_SECRET default = %q, want empty", cfg.ClientSecret)
+	}
+	if cfg.OAuthTokenURL != DefaultOAuthTokenURL {
+		t.Errorf("OAUTH_TOKEN_URL default = %q, want %q", cfg.OAuthTokenURL, DefaultOAuthTokenURL)
+	}
 	if cfg.NotifyMaxJobs != 25 {
 		t.Errorf("NOTIFY_MAX_JOBS default = %d, want 25", cfg.NotifyMaxJobs)
 	}
 	if cfg.NotifyClaimTimeoutSeconds != 0 {
 		t.Errorf("NOTIFY_CLAIM_TIMEOUT_SECONDS default = %d, want 0 (no auto-unstick)", cfg.NotifyClaimTimeoutSeconds)
 	}
-	if cfg.HTTPTimeoutSeconds != 30 {
-		t.Errorf("HTTP_TIMEOUT_SECONDS default = %d, want 30 (Home Assistant client reuses this)", cfg.HTTPTimeoutSeconds)
+		if cfg.HTTPTimeoutSeconds != 30 {
+		t.Errorf("HTTP_TIMEOUT_SECONDS default = %d, want 30 (webhook client reuses this)", cfg.HTTPTimeoutSeconds)
 	}
 }
 
 func TestLoad_NotifyAndWebhookKnobsFromEnv(t *testing.T) {
 	t.Setenv("WEBHOOK_BASE", "https://hooks.example/api/webhook")
-	t.Setenv("WEBHOOK_ID", "nabu-id")
+	t.Setenv("WEBHOOK_ID", "hook-id")
 	t.Setenv("WEBHOOK_URL", "http://unused.example/old")
+	t.Setenv("CLIENT_ID", "oauth-client")
+	t.Setenv("CLIENT_SECRET", "oauth-secret")
+	t.Setenv("OAUTH_TOKEN_URL", "https://auth.example/oauth/token")
 	t.Setenv("NOTIFY_MAX_JOBS", "10")
 	t.Setenv("NOTIFY_CLAIM_TIMEOUT_SECONDS", "90")
 	t.Setenv("HTTP_TIMEOUT_SECONDS", "45")
@@ -39,8 +54,17 @@ func TestLoad_NotifyAndWebhookKnobsFromEnv(t *testing.T) {
 	if cfg.WebhookBase != "https://hooks.example/api/webhook" {
 		t.Errorf("WEBHOOK_BASE = %q, want https://hooks.example/api/webhook", cfg.WebhookBase)
 	}
-	if cfg.WebhookID != "nabu-id" {
-		t.Errorf("WEBHOOK_ID = %q, want nabu-id", cfg.WebhookID)
+	if cfg.WebhookID != "hook-id" {
+		t.Errorf("WEBHOOK_ID = %q, want hook-id", cfg.WebhookID)
+	}
+	if cfg.ClientID != "oauth-client" {
+		t.Errorf("CLIENT_ID = %q, want oauth-client", cfg.ClientID)
+	}
+	if cfg.ClientSecret != "oauth-secret" {
+		t.Errorf("CLIENT_SECRET = %q, want oauth-secret", cfg.ClientSecret)
+	}
+	if cfg.OAuthTokenURL != "https://auth.example/oauth/token" {
+		t.Errorf("OAUTH_TOKEN_URL = %q, want https://auth.example/oauth/token", cfg.OAuthTokenURL)
 	}
 	if cfg.NotifyMaxJobs != 10 {
 		t.Errorf("NOTIFY_MAX_JOBS = %d, want 10", cfg.NotifyMaxJobs)
@@ -56,33 +80,40 @@ func TestLoad_NotifyAndWebhookKnobsFromEnv(t *testing.T) {
 	}
 }
 
-func TestWebhookTarget_JoinsTrimmedBaseAndID(t *testing.T) {
+func TestWebhookTarget_IsTrimmedBaseOnly(t *testing.T) {
 	tests := []struct {
-		base string
-		id   string
-		want string
+		base       string
+		id         string
+		wantTarget string
+		wantNotify string
 	}{
 		{
-			base: "http://192.168.1.222:8123/api/webhook",
-			id:   "allenjobhit",
-			want: "http://192.168.1.222:8123/api/webhook/allenjobhit",
+			base:       "https://hooks.example/api/webhook",
+			id:         "hook-id",
+			wantTarget: "https://hooks.example/api/webhook",
+			wantNotify: "hook-id",
 		},
 		{
-			base: "http://192.168.1.222:8123/api/webhook/",
-			id:   "/allenjobhit",
-			want: "http://192.168.1.222:8123/api/webhook/allenjobhit",
+			base:       "https://hooks.example/api/webhook/",
+			id:         "/hook-id",
+			wantTarget: "https://hooks.example/api/webhook",
+			wantNotify: "hook-id",
 		},
 		{
-			base: "https://nabu.example/api/webhook///",
-			id:   "///hook",
-			want: "https://nabu.example/api/webhook/hook",
+			base:       "https://hooks.example/api/webhook///",
+			id:         "///hook",
+			wantTarget: "https://hooks.example/api/webhook",
+			wantNotify: "hook",
 		},
 	}
 	for _, tc := range tests {
 		cfg := Config{WebhookBase: tc.base, WebhookID: tc.id, WebhookURL: "http://unused.example"}
 		got := cfg.WebhookTarget()
-		if got != tc.want {
-			t.Errorf("WebhookTarget(%q, %q) = %q, want %q", tc.base, tc.id, got, tc.want)
+		if got != tc.wantTarget {
+			t.Errorf("WebhookTarget(%q) = %q, want %q", tc.base, got, tc.wantTarget)
+		}
+		if notify := cfg.WebhookNotify(); notify != tc.wantNotify {
+			t.Errorf("WebhookNotify(%q) = %q, want %q", tc.id, notify, tc.wantNotify)
 		}
 		if got == cfg.WebhookURL {
 			t.Errorf("WebhookTarget used WEBHOOK_URL %q", cfg.WebhookURL)

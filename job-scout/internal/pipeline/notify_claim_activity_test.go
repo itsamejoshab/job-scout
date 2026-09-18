@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
@@ -65,9 +64,6 @@ func TestActivities_ClaimNotifyBatchUsesMaxJobsThenPostAndFinish(t *testing.T) {
 		_, _ = w.Write([]byte(`<not-json>`))
 	}))
 	defer srv.Close()
-	if strings.Contains(srv.URL, "192.168.1.222") {
-		t.Fatal("automated tests must not hit 192.168.1.222")
-	}
 
 	acts := &Activities{
 		DB: pool,
@@ -101,8 +97,8 @@ func TestActivities_ClaimNotifyBatchUsesMaxJobsThenPostAndFinish(t *testing.T) {
 	if err := acts.PostHomeAssistant(ctx, msg); err != nil {
 		t.Fatalf("PostHomeAssistant: %v", err)
 	}
-	if hits != 1 || gotMethod != http.MethodPost || gotPath != "/api/webhook/hook" || gotCT != "application/json" {
-		t.Errorf("POST method=%q path=%q ct=%q hits=%d, want POST /api/webhook/hook application/json once", gotMethod, gotPath, gotCT, hits)
+	if hits != 1 || gotMethod != http.MethodPost || gotPath != "/api/webhook" || gotCT != "application/json" {
+		t.Errorf("POST method=%q path=%q ct=%q hits=%d, want POST /api/webhook application/json once", gotMethod, gotPath, gotCT, hits)
 	}
 	var payload map[string]string
 	if err := json.Unmarshal(gotBody, &payload); err != nil {
@@ -110,6 +106,9 @@ func TestActivities_ClaimNotifyBatchUsesMaxJobsThenPostAndFinish(t *testing.T) {
 	}
 	if payload["message"] != msg {
 		t.Errorf("JSON message = %q, want %q", payload["message"], msg)
+	}
+	if payload["notify"] != "hook" {
+		t.Errorf("JSON notify = %q, want %q", payload["notify"], "hook")
 	}
 
 	ids := []int64{batch.Jobs[0].ID, batch.Jobs[1].ID}

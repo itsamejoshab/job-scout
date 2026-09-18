@@ -12,8 +12,7 @@ func TestEnvSample_DocumentsEveryRuntimeKnob(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read .env.sample: %v", err)
 	}
-	text := string(body)
-	knobs := parseEnvAssignments(text)
+	knobs := parseEnvAssignments(string(body))
 
 	want := map[string]string{
 		"POSTGRES_USER":                "job",
@@ -23,8 +22,10 @@ func TestEnvSample_DocumentsEveryRuntimeKnob(t *testing.T) {
 		"POSTGRES_DB":                  "jobsearch",
 		"TEMPORAL_ADDRESS":             "temporal:7233",
 		"API_PORT":                     "8000",
-		"WEBHOOK_BASE":                 "http://192.168.1.222:8123/api/webhook",
-		"WEBHOOK_ID":                   "allenjobhit",
+		"WEBHOOK_BASE":                 "https://hooks.example/api/webhook",
+		"WEBHOOK_ID":                   "example-hook",
+		"CLIENT_ID":                    "",
+		"CLIENT_SECRET":                "",
 		"SCRAPE_SCHEDULE_SECONDS":      "60",
 		"NOTIFY_SCHEDULE_SECONDS":      "300",
 		"SCRAPE_ERROR_BACKOFF_SECONDS": "300",
@@ -40,8 +41,8 @@ func TestEnvSample_DocumentsEveryRuntimeKnob(t *testing.T) {
 	if _, ok := knobs["WEBHOOK_URL"]; ok {
 		t.Error(".env.sample must not set WEBHOOK_URL as an active send-target knob")
 	}
-	if strings.Contains(text, "192.168.1.222") && knobs["WEBHOOK_BASE"] != want["WEBHOOK_BASE"] {
-		t.Errorf("LAN webhook sample must be WEBHOOK_BASE=%s", want["WEBHOOK_BASE"])
+	if knobs["CLIENT_ID"] != "" || knobs["CLIENT_SECRET"] != "" {
+		t.Error(".env.sample CLIENT_ID and CLIENT_SECRET must be empty placeholders")
 	}
 }
 
