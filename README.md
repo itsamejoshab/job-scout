@@ -1,237 +1,142 @@
 # job-scout
 
-Job Scout is yet another homegrown application designed to monitor job sites for job postings, filter, and send alerts. What makes this one different from others is that it is built on distributed microservices. Why? Because I already have a python script to monitor for job changes, and I wanted to experiment and learn with Temporal orchestration.
+Job Scout is yet another homegrown application designed to monitor job sites for job postings, filter, and send alerts. What makes this one different is that it is built on a Temporal-orchestrated pipeline. Why? Because I already had a Python script to monitor for job changes, and I wanted to experiment and learn with Temporal orchestration.
 
-This may seem like overkill, but my hope is that with this type of architecture, it might be easier for more contributors to add features in the future.
+This started as a Python/FastAPI app and was rewritten in Go as a learning exercise: idiomatic Go, minimal external dependencies, explicit over clever.
 
 **Future Ideas**
 - A UI
 - Custom LLM resume, customized for each job
 - LLM filtering step (not everything can be simple rules, though simple rules are _fast_)
 
-Inspiration: 
+Inspiration:
 - [JobScout by Krishna](https://github.com/krishnavalliappan/JobScout)
-- [JobScout.ai by abhinav-m22 ](https://github.com/abhinav-m22/JobScout.ai) | [App](https://jobscout-ai.vercel.app/)
+- [JobScout.ai by abhinav-m22](https://github.com/abhinav-m22/JobScout.ai) | [App](https://jobscout-ai.vercel.app/)
 
 ## Architecture Overview
 
-The system consists of several key components:
+- **API** (`internal/api`): `net/http` server that triggers workflows and exposes read endpoints. Also runs migrations + seeds settings on startup.
+- **Worker** (`internal/pipeline`): Temporal worker hosting the workflow + activities.
+- **Temporal**: workflow orchestration and state management.
+- **PostgreSQL**: primary data store.
 
-### Core Services
+The API and worker are the same Go binary, selected by the first arg (`jobscout api` / `jobscout worker`).
 
-- **Job-Scout**: The main API and workflow orchestrator is in `job-scout/app`
-- **Temporal**: Workflow orchestration and state management
-- **PostgreSQL**: Primary data store
+`make up` starts Postgres, Temporal, the API, and the worker. The API process creates or updates two Temporal interval schedules (`jobscout-scrape`, `jobscout-notify`) on boot.
 
-### Processing Services
+The API and worker containers must be able to open TCP to the LAN Home Assistant host `192.168.1.222:8123`. Docker Desktop usually routes to the LAN; a timeout or connect error is an environment failure, not a filter failure.
 
-1. **Scraper**: Scrapes sites for job postings, mainly high level information: e.g. Company, Title, Location, URL
-2. **Duplicate Remover**: Dedupes jobs that may be cross posted or repeated results
-3. **Basic Filter**: Eliminates jobs based on obvious filters such as keyword matching in Title or Company
-4. **Job Detailer**: Scrapes more detail about each job, gets the entire description
-5. **Advanced Filter**: Further eliminates jobs based on keyword matching in the desription itself.
-6. **Smart Filter**: Uses AI to further eliminate jobs which don't match what the user wants
-7. **Notifier**: Sends notifications to a webhook. 
+Automated tests never POST to the live `allenjobhit` webhook.
+
+### Pipeline (Temporal workflows)
+
+Two workflows run on the `main-task-queue`:
+
+1. **ScrapeTick** – scrape enabled due providers (LinkedIn every 15 minutes unless `force=1`), store every distinct job URL. No filters and no webhook POST.
+2. **NotifyTick** – filter `pending` jobs, claim a batch, POST one JSON `{ "message": "..." }` to Home Assistant. Skip the POST when the claim is empty.
+
+Manual HTTP starts unique workflow IDs so `/run` and `/notify` are not blocked when a scheduled tick is still running.
+
+## Dependencies (intentionally minimal)
+
+- `go.temporal.io/sdk` – Temporal SDK
+- `github.com/jackc/pgx/v5` – Postgres driver (used behind stdlib `database/sql`)
+- `golang.org/x/net/html` – HTML parsing
+
+Everything else is the standard library (`net/http`, `database/sql`, `encoding/json`, `log/slog`, `embed`).
 
 ## Project Structure
 
 ```bash
 .
-├── data/                            # data folder containing the local database (Postgres)
-├── job-scout/                       # Main API and workflow orchestrator
-│   ├── app/                         # Main Job-Scout App
-|   │   ├── services/                # Modular services that run via workflow/activities with Temporal
-|   |   │   ├── scrapers/            # Custom scrapers for each job source (LINKEDIN, INDEED, etc)
-|   |   │   ├── duplicate_remover/   # Custom scrapers for each job source (LINKEDIN, INDEED, etc)
-|   |   │   ├── duplicate_remover/   # Dedupes jobs (Duplicate Remover service)
-|   |   │   ├── basic_filter/        # Filters jobs based on basic criteria (Basic Filter service)
-|   |   │   ├── job_detailer/        # Scrapes detailed job descriptions (Job Detailer service)
-|   |   │   ├── advanced_filter/     # Filters jobs based on description (Advanced Filter service)
-|   |   │   ├── smart_filter/        # AI-powered filtering (Smart Filter service)
-|   |   │   ├── notifier/            # Sends notifications to webhooks (Notifier service)
-|   │   ├── db/                      # Database layer - schemas, models, etc
-|   │   ├── workflow.py              # Main workflow logic (Temporal)
-|   │   ├── activities.py            # Main activities logic (Temporal)
-|   │   └── api.py                   # Fast-API server for routing requests
-├── config/                          # Configuration files
-└── docker-compose.yml               # Service orchestration
+├── data/                       # local Postgres data (gitignored)
+├── config/                     # Temporal dynamic config
+├── docker-compose.yml          # postgres, temporal, temporal-ui, api, worker
+├── Makefile
+└── job-scout/                  # Go module
+    ├── go.mod
+    ├── Dockerfile              # multi-stage Go build
+    ├── cmd/jobscout/main.go    # entrypoint: "api" | "worker"
+    └── internal/
+        ├── config/             # env-based config (single source of truth)
+        ├── db/                 # connection, embedded migrations + seeds, queries
+        ├── scraper/            # provider interface, LinkedIn (x/net/html), service
+        ├── pipeline/           # temporal client, workflow, activities, worker
+        └── api/                # ServeMux routes + handlers
 ```
 
 ## Prerequisites
 
 - Docker and Docker Compose
-- Python 3.12+
-- Make (for using Makefile commands)
+- Go 1.25+ (only for local builds/tests; the stack runs in containers)
+- Make
 
-## Quick Start (User)
+## Quick Start
 
-1. Clone the repository
+1. Clone the repository.
+2. Copy `job-scout/.env.sample` to `job-scout/.env`. Set Postgres credentials and the Home Assistant webhook (`WEBHOOK_BASE`, `WEBHOOK_ID`). Do not use `WEBHOOK_URL`; it is not the send target.
+3. (Optional) Tune search settings in `job-scout/internal/db/seed/` before first run; they seed the DB on startup.
+4. Start Postgres, Temporal, the API, and the worker:
 
-2. Configure the search settings manually (would love to develop a UI to manage the database)
-   a. Universal Search Settings: `app/db/search_settings.json`
-   b. Scraper specific search settings: `get_default_settings()` class in each scraper `.py` file
-
-3. Configure `.env` file with personal settings, like notifier webhook, etc.
-
-4. Run the app with `make up` 
-
-5. Externally hit `localhost:8001/api/v0/run` whenever you want the search to happen (i.e. every 5 mins, etc)
-
-## Quick Start (Developer)
-
-1. Clone the repository
-
-2. Set up environment variables:
 ```bash
-   cp controller/.env.example controller/.env
-   # Edit .env with your configuration
+make up
 ```
 
-3. Start the services:
-```bash
-   make up
- ```
+5. Manual acceptance (not CI): set `.env` webhook to local Home Assistant, then:
 
-4. Run database migrations:
 ```bash
-   make migrate
+curl -X POST "http://localhost:8001/api/v0/run?force=1"
+# wait until GET /api/v0/jobs shows rows
+curl -X POST "http://localhost:8001/api/v0/notify"
+```
+
+Confirm the Home Assistant automation on `allenjobhit`. Automated tests never POST to that live webhook.
+
+Scheduled scrape (default 60s) and notify (default 300s) also run from Temporal after API boot. To scrape or notify now without waiting:
+
+```bash
+make run                 # POST /api/v0/run (force off; LinkedIn still waits for cadence unless force=1)
+curl -X POST "http://localhost:8001/api/v0/run?force=1"
+make notify              # POST /api/v0/notify
 ```
 
 ## Make Commands
 
-The project includes several useful make commands for development and operations:
-
-### Service Management
 ```bash
-make up              # Build and start all services
-make down            # Stop all services
-make restart         # Restart all services
-make build           # Build service images
-make logs            # Follow service logs
-make clean           # Stop services and clean up volumes/images
+make up           # build & start the stack
+make down         # stop
+make restart      # restart containers
+make build        # build images only
+make logs         # follow logs
+make clean        # down + prune volumes/images
+make go-build     # compile the Go binary locally
+make go-test      # run Go tests
+make fmt          # gofmt the module
+make vet          # go vet the module
+make connect-db   # psql into the postgres container
+make run          # POST /api/v0/run
+make notify        # POST /api/v0/notify
 ```
 
-### Development Environment
-```bash
-make install-<svc>           # Install dependencies for a specific service
-make shell-<svc>             # Open a shell for a specific service
-make install-all             # Install dependencies for all services
-make pkg-install-<svc>-<pkg> # Install a package in a specific service
-make pkg-install-all-<pkg>   # Install a package in all services
-```
+## API Endpoints
 
-### Code Quality
-```bash
-make ruff                   # Run ruff formatter and linter for all services
-```
+Base path: `http://localhost:8001/api/v0`
 
-### Database
-```bash
-make connect-db             # Connect to PostgreSQL database
-```
-
-### Database Migrations
-
-The project uses Alembic for database migrations. Here are the available migration commands:
-
-#### Basic Migration Commands
-```bash
-# Generate a new migration
-make migrate-new
-# You'll be prompted to enter a migration message
-# Example: "add clip metadata table"
-
-# Apply all pending migrations
-make migrate-up
-
-# Rollback the last migration
-make migrate-down
-
-# Show current migration status and history
-make migrate-status
-```
-
-#### Advanced Migration Commands
-```bash
-# Reset all migrations (WARNING: This will delete all data!)
-make migrate-reset
-# You'll be prompted to confirm the action
-
-# Stamp the database with a specific revision
-make migrate-stamp
-# You'll be prompted to enter the revision ID
-```
-
-#### Migration Workflow Examples
-
-1. Creating a new migration:
-```bash
-# 1. Make your model changes in the code
-# 2. Generate a new migration
-make migrate-new
-# Enter message: "add user preferences table"
-
-# 3. Review the generated migration file in controller/alembic/versions/
-# 4. Apply the migration
-make migrate-up
-```
-
-2. Rolling back changes:
-```bash
-# If you need to undo the last migration
-make migrate-down
-
-# To check the current state
-make migrate-status
-```
-
-3. Development workflow:
-```bash
-# 1. Start fresh (WARNING: deletes all data)
-make migrate-reset
-
-# 2. Create new migration
-make migrate-new
-# Enter message: "add clip processing status"
-
-# 3. Apply migration
-make migrate-up
-
-# 4. Verify status
-make migrate-status
-```
-
-4. Stamping a specific version:
-```bash
-# Useful when setting up a new environment
-# or syncing with a specific database state
-make migrate-stamp
-# Enter revision: "a1b2c3d4e5f6"
-```
-
-> **Note**: Always backup your database before running migration commands, especially `migrate-reset` which will delete all data.
-
-### Workflow Triggers
-
-tbd
-
-### API Configuration
-You can customize the API endpoint by setting the API_HOST variable:
-```bash
-make API_HOST=other-host:8001 <workflow>
-```
-### Adding a New Service
-
-1. Create a new service directory in `services/`
-2. Copy the service template structure
-3. Add the service to `docker-compose.yml`
-4. Update the controller workflow and activities as needed
-
-## API Documentation
-
-Once the services are running, access the API documentation at:
-- Swagger UI: http://localhost:8001/controller/docs
-- ReDoc: http://localhost:8001/controller/redoc
+| Method | Path                     | Description                              |
+|--------|--------------------------|------------------------------------------|
+| POST   | `/run`                   | Start ScrapeTick (`?force=1` skips LinkedIn cadence) |
+| POST   | `/notify`                | Start NotifyTick (filters, claim, Home Assistant POST) |
+| POST   | `/scrape`                | Debug-only sync scrape (no Temporal); prefer `/run` |
+| GET    | `/health`                | Health check                             |
+| GET    | `/db-test`               | DB connectivity check                    |
+| GET    | `/temporal-test`         | Temporal connectivity check              |
+| GET    | `/search-settings`       | Universal search settings                |
+| GET    | `/scraper-settings`      | Per-source scraper settings              |
+| GET    | `/scraper-settings/all`  | All scraper settings                     |
+| GET    | `/jobs`                  | List jobs (`?limit&offset`), includes `state` |
+| GET    | `/jobs/stats`            | Job counts. `new_jobs` is the `pending` state count; `by_state` lists every state |
+| GET    | `/workflow/{id}`         | Workflow status                          |
+| GET    | `/config`                | Effective config                         |
 
 ## Monitoring
 
@@ -244,10 +149,3 @@ Once the services are running, access the API documentation at:
 3. Commit your changes
 4. Push to the branch
 5. Create a Pull Request
-
-
----
-
-## 🚀 Quick Start (local, CPU) using curl
-
-tbd

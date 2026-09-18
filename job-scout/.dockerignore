@@ -1,0 +1,16 @@
+# Legacy Python sources (not needed for the Go build)
+app/
+alembic/
+alembic.ini
+Pipfile
+Pipfile.lock
+setup.py
+setup.sh
+
+# Secrets / local
+.env
+.env.*
+*.DS_Store
+
+# Build artifacts
+bin/

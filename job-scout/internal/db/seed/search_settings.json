@@ -1,0 +1,45 @@
+{
+  "desc_include_words": [
+    "computer", "software", "hardware", "configure", "tier 2", "tier 3",
+    "install", "deploy", "image", "upgrade", "CompTIA", "troubleshooting",
+    "active directory", "adobe", "mac osx", "thin client", "ubuntu",
+    "windows", "linux", "gaming", "computer games"
+  ],
+  "desc_exclude_words": [
+    "inbound call center experience", "handle a lot of calls",
+    "must be able to travel", "drive own vehicle", "write test plans",
+    "lead a team", "security clearance", "erp processes", "epic certification",
+    "IAT Level II", "possess an active TS/SCI", "polygraph",
+    "requires extensive travel", "Greeting Guests", "greet guests",
+    "serving food", "records vital signs", "install fuel",
+    "Potential for paid travel", "Department: Supply Chain", "clean floor",
+    "wash", "polish", "Pharmacy Technician experience required",
+    "including occasional overnight travel", "writing T-SQL code", "write SQL",
+    "Mobius development", "project management"
+  ],
+  "title_include": [
+    "IT", "Help Desk", "Support", "Desktop", "Computer", "Technology",
+    "Technology Resource", "Technician", "Application Analyst", "Tech",
+    "Application Support"
+  ],
+  "title_exclude": [
+    "Software Engineer", "architect", "developer", "president", "manager",
+    "director", "administrator", "Tier 1", "trainer", "training", "intern",
+    "first year earning", "earning potential", "sales", "hr", "payroll",
+    "receptionist", "relations", "data entry", "enterprise architect",
+    "consultant", "billing", "account executive", "kitchen team", "cashier",
+    "planning coordinator", "electrical engineering", "production",
+    "security officer", "patient care", "landscape technician", "Manufacturing",
+    "qe", "utility worker", "Customer Service Representative",
+    "Talent Acquisition", "Part Time"
+  ],
+  "company_exclude": [
+    "ClickJobs.io", "Brooksource", "Jobs via Dice", "Franklin Fitch",
+    "Westgate Resorts", "Sureguard LLC", "Panda Restaurant Group"
+  ],
+  "non_remote_phrases": [
+    "travel to office", "not remote", "not a remote position",
+    "required to be onsite", "Ability to travel", "primarily remote-based",
+    "primarily remote", "mostly remote"
+  ]
+}
