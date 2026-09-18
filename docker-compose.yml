@@ -131,6 +131,44 @@ services:
     networks:
       - backend
 
+  # Live operator UI. Source is bind-mounted so host edits reload.
+  # make up / make down start and stop this with the rest of the stack.
+  job-scout-webui:
+    container_name: job-scout-webui
+    image: node:20-alpine
+    working_dir: /src
+    command: ["sh", "-c", "npm ci && npm run dev"]
+    environment:
+      VITE_API_PROXY_TARGET: http://job-scout-api:8000
+      VITE_USE_POLLING: "1"
+    volumes:
+      - ./job-scout/webui:/src
+      - webui_node_modules:/src/node_modules
+    ports:
+      - "5173:5173"
+    depends_on:
+      job-scout-api:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - backend
+    logging: *default-logging
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:5173').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 90s
+
+volumes:
+  webui_node_modules:
+
 networks:
   backend:
     name: job-scout-backend

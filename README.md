@@ -77,30 +77,28 @@ All other code uses the standard library (`net/http`, `database/sql`, `encoding/
 
 ## Tools for local work
 
-You need Docker and Docker Compose to run the stack. You need Go 1.25+ only for local Go builds and tests. Node.js 20+ is optional. Use it to run frontend tests or the Vite development server. You need Make only if you use the `make` targets (macOS and Raspberry Pi). Windows can use `docker compose` as in [QUICKSTART.md](QUICKSTART.md).
+You need Docker and Docker Compose to run the stack. You need Go 1.25+ only for local Go builds and tests. Node.js 20+ is optional. Use it only for `make ui-test` on the host. You need Make only if you use the `make` targets (macOS and Raspberry Pi). Windows can use `docker compose` as in [QUICKSTART.md](QUICKSTART.md).
 
-The production container uses a Node stage to build `webui/dist`. The Go stage embeds that output in the binary. For frontend development:
+`make up` starts Postgres, Temporal, the API, the worker, and a Vite UI container. You do not run `npm` on the host for that path. Open http://localhost:5173 for the live operator UI. The API also serves the embedded production bundle at http://localhost:8001.
+
+To run frontend tests on the host:
 
 ```bash
-cd job-scout/webui
-npm ci
-npm test
-npm run dev
+make ui-test
 ```
-
-Vite serves the development UI and proxies `/api` to `http://localhost:8001`, the port the stack publishes. Start the stack with `make up` first. Set `VITE_API_PROXY_TARGET` to proxy to a different API, such as `http://localhost:8000` for a local `jobscout api` process.
 
 ## Make commands
 
 ```bash
-make up           # build and start the stack
-make down         # stop
+make up           # build and start the stack, including the Vite UI
+make down         # stop the stack and the Vite UI
 make restart      # restart containers
 make build        # build images only
 make logs         # follow logs
 make clean        # down + prune volumes/images
 make go-build     # compile the Go binary locally
 make go-test      # run Go tests
+make ui-test      # run frontend tests (installs npm deps if needed)
 make fmt          # gofmt the module
 make vet          # go vet the module
 make connect-db   # psql into the postgres container
@@ -118,7 +116,7 @@ make notify              # POST /api/v0/notify
 
 ## Operator UI
 
-Open http://localhost:8001 after the stack starts. The dashboard shows provider and job statistics. It can start a forced scrape or a notify workflow. Each manual run shows its workflow ID and a link to the configured Temporal UI. The UI polls the workflow until it finishes. A finished workflow does not by itself mean that every provider scrape succeeded. Check each provider card and its last-scraped value.
+Open http://localhost:5173 after `make up`. That is the live operator UI. http://localhost:8001 is the API and the embedded production bundle. The dashboard shows provider and job statistics. It can start a forced scrape or a notify workflow. Each manual run shows its workflow ID and a link to the configured Temporal UI. The UI polls the workflow until it finishes. A finished workflow does not by itself mean that every provider scrape succeeded. Check each provider card and its last-scraped value.
 
 ## API endpoints
 

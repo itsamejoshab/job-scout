@@ -7,19 +7,21 @@ API_HOST ?= localhost:8001
 API_BASE_URL = http://$(API_HOST)/api/v0
 
 GO_DIR = job-scout
+WEBUI_DIR = job-scout/webui
 
 .DEFAULT_GOAL := help
 
 help:
 	@echo "Usage: make <target>"
-	@echo "up            - build & start the whole stack (postgres, temporal, api, worker)"
-	@echo "down          - stop the stack"
+	@echo "up            - build and start the stack, including the Vite UI on :5173"
+	@echo "down          - stop the stack and the Vite UI"
 	@echo "restart       - restart all containers"
 	@echo "build         - build images only"
 	@echo "logs          - follow logs"
 	@echo "clean         - down + prune volumes/images"
 	@echo "go-build      - compile the Go binary locally"
 	@echo "go-test       - run Go tests"
+	@echo "ui-test       - run frontend tests (installs npm deps if needed)"
 	@echo "fmt           - gofmt the module"
 	@echo "vet           - go vet the module"
 	@echo "connect-db    - psql into the postgres container"
@@ -29,6 +31,8 @@ help:
 # ---------- docker stack ----------
 up:
 	docker compose --env-file ./job-scout/.env up -d --build
+	@echo "Operator UI (live): http://localhost:5173"
+	@echo "API + embedded UI:  http://localhost:8001"
 
 down:
 	docker compose down
@@ -59,6 +63,13 @@ fmt:
 
 vet:
 	cd $(GO_DIR) && go vet ./...
+
+ui-ci:
+	npm ci --prefix $(WEBUI_DIR)
+
+ui-test:
+	@test -d $(WEBUI_DIR)/node_modules || $(MAKE) ui-ci
+	npm test --prefix $(WEBUI_DIR)
 
 # ---------- database ----------
 connect-db:

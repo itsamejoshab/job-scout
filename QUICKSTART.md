@@ -6,7 +6,8 @@ GitHub does not show tabs. Open **one** section below: Windows, macOS, or Linux 
 
 When the stack is up:
 
-- Operator UI and API: http://localhost:8001
+- Live operator UI: http://localhost:5173
+- API and embedded UI: http://localhost:8001
 - Temporal UI: http://localhost:8082
 
 ---
@@ -70,7 +71,7 @@ This starts Postgres, Temporal, the API, and the worker. The first run can take 
 curl.exe http://localhost:8001/api/v0/health
 ```
 
-You must get a success response. Then open http://localhost:8001 for the operator UI. Open http://localhost:8082 for the Temporal UI.
+You must get a success response. Then open http://localhost:5173 for the live operator UI. Open http://localhost:8001 for the API. Open http://localhost:8082 for the Temporal UI.
 
 </details>
 
@@ -144,7 +145,7 @@ This starts Postgres, Temporal, the API, and the worker. The first run can take 
 curl http://localhost:8001/api/v0/health
 ```
 
-You must get a success response. Then open http://localhost:8001 for the operator UI. Open http://localhost:8082 for the Temporal UI.
+You must get a success response. Then open http://localhost:5173 for the live operator UI. Open http://localhost:8001 for the API. Open http://localhost:8082 for the Temporal UI.
 
 </details>
 
@@ -245,7 +246,7 @@ If you do not have Make:
 docker compose --env-file ./job-scout/.env up -d --build
 ```
 
-This starts Postgres, Temporal, the API, and the worker. The first run **builds Go on the Pi**. That can take 15 minutes or more.
+This starts Postgres, Temporal, the API, the worker, and the Vite UI. The first run **builds Go on the Pi**. That can take 15 minutes or more.
 
 ### 6. Check that it is up
 
@@ -258,7 +259,8 @@ hostname -I
 
 You must get a success response from `curl`. Then, on a computer on the same network, open:
 
-- Operator UI and API: `http://PI_IP:8001`
+- Live operator UI: `http://PI_IP:5173`
+- API and embedded UI: `http://PI_IP:8001`
 - Temporal UI: `http://PI_IP:8082`
 
 Replace `PI_IP` with the first address from `hostname -I`.
@@ -271,7 +273,7 @@ Replace `PI_IP` with the first address from `hostname -I`.
 
 Do this after the health check. This is a manual check. Automated tests must not POST to a live webhook.
 
-Open the operator UI at http://localhost:8001. On a Raspberry Pi, use `http://PI_IP:8001`. Use the dashboard buttons to start a forced scrape or a notify pass. The page shows the workflow ID and a direct Temporal UI link. It polls until the workflow finishes, then refreshes its statistics and jobs. A finished scrape workflow does not prove that every provider scrape succeeded. Check the provider card and its last-scraped value.
+Open the live operator UI at http://localhost:5173. On a Raspberry Pi, use `http://PI_IP:5173` or the embedded UI at `http://PI_IP:8001`. Use the dashboard buttons to start a forced scrape or a notify pass. The page shows the workflow ID and a direct Temporal UI link. It polls until the workflow finishes, then refreshes its statistics and jobs. A finished scrape workflow does not prove that every provider scrape succeeded. Check the provider card and its last-scraped value.
 
 You can also use the API:
 
@@ -360,16 +362,13 @@ The list accepts `limit`, `offset`, `as_of`, `state`, `job_source`, `q`, `date_f
 
 ## Frontend development (optional)
 
-Docker builds the frontend in a Node stage and embeds it in the Go binary. You do not need Node.js to start the Docker stack. Install Node.js 20+ only if you want to run frontend tests or use Vite:
+`make up` starts a Vite UI container. You do not `cd` into `job-scout/webui` and you do not run `npm` on the host for daily work. Open http://localhost:5173. The API still serves the embedded production bundle at http://localhost:8001.
+
+Install Node.js 20+ on the host only if you want frontend tests:
 
 ```bash
-cd job-scout/webui
-npm ci
-npm test
-npm run dev
+make ui-test
 ```
-
-The Vite development server proxies `/api` to `http://localhost:8001`, the port the stack publishes. Start the stack with `make up` first. To proxy to a different API, set `VITE_API_PROXY_TARGET`.
 
 ## Stop the stack
 
