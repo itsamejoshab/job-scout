@@ -1,58 +1,67 @@
-# job-scout
+# Job Scout
 
-Job Scout is yet another homegrown application designed to monitor job sites for job postings, filter, and send alerts. What makes this one different is that it is built on a Temporal-orchestrated pipeline. Why? Because I already had a Python script to monitor for job changes, and I wanted to experiment and learn with Temporal orchestration.
+Job Scout monitors job sites. It stores each new job URL. It sends a webhook when a job passes the filters.
 
-This started as a Python/FastAPI app and was rewritten in Go as a learning exercise: idiomatic Go, minimal external dependencies, explicit over clever.
+The pipeline uses [Temporal](https://temporal.io/). This project started as a Python/FastAPI app. It is now a Go service. The goal is idiomatic Go, few external libraries, and explicit control flow.
 
-**Future Ideas**
-- A UI
-- Custom LLM resume, customized for each job
-- LLM filtering step (not everything can be simple rules, though simple rules are _fast_)
+**Start here:** [QUICKSTART.md](QUICKSTART.md) — clone the repo, set `.env`, and start the stack on Windows, macOS, or Linux.
 
-Inspiration:
-- [JobScout by Krishna](https://github.com/krishnavalliappan/JobScout)
-- [JobScout.ai by abhinav-m22](https://github.com/abhinav-m22/JobScout.ai) | [App](https://jobscout-ai.vercel.app/)
+## Screenshots
 
-## Architecture Overview
+Add PNG files in `docs/screenshots/` with these names. The slots below show those files when they exist.
 
-- **API** (`internal/api`): `net/http` server that triggers workflows and exposes read endpoints. Also runs migrations + seeds settings on startup.
-- **Worker** (`internal/pipeline`): Temporal worker hosting the workflow + activities.
-- **Temporal**: workflow orchestration and state management.
-- **PostgreSQL**: primary data store.
+![Job list](docs/screenshots/jobs.png)
 
-The API and worker are the same Go binary, selected by the first arg (`jobscout api` / `jobscout worker`).
+![Temporal UI](docs/screenshots/temporal-ui.png)
 
-`make up` starts Postgres, Temporal, the API, and the worker. The API process creates or updates two Temporal interval schedules (`jobscout-scrape`, `jobscout-notify`) on boot.
+![Notify in action](docs/screenshots/notify.png)
 
-The worker must be able to open TCP to the host in `WEBHOOK_BASE`. A timeout or connect error is an environment failure, not a filter failure.
+## Architecture
+
+| Part | Role |
+|------|------|
+| **API** (`internal/api`) | `net/http` server. Starts workflows. Exposes read endpoints. Runs migrations and seeds settings on startup. |
+| **Worker** (`internal/pipeline`) | Temporal worker. Hosts the workflow and the activities. |
+| **Temporal** | Workflow orchestration and state. |
+| **PostgreSQL** | Primary data store. |
+
+The API and the worker are the same Go binary. The first argument selects the process: `jobscout api` or `jobscout worker`.
+
+`make up` starts Postgres, Temporal, the API, and the worker. On boot, the API creates or updates two Temporal interval schedules: `jobscout-scrape` and `jobscout-notify`.
+
+The worker must open TCP to the host in `WEBHOOK_BASE`. A timeout or connect error is an environment failure, not a filter failure.
 
 Automated tests POST only to `httptest` servers. They must not use live webhook URLs, LAN addresses, or secrets.
 
 ### Pipeline (Temporal workflows)
 
-Two workflows run on the `main-task-queue`:
+Two workflows run on `main-task-queue`:
 
-1. **ScrapeTick** – scrape enabled due providers (LinkedIn every 15 minutes unless `force=1`), store every distinct job URL. No filters and no webhook POST.
-2. **NotifyTick** – filter `pending` jobs, claim a batch, POST one JSON `{ "notify": "<WEBHOOK_ID>", "message": "..." }` to `WEBHOOK_BASE`. Skip the POST when the claim is empty.
+1. **ScrapeTick** — scrape enabled due providers (LinkedIn every 15 minutes unless `force=1`). Store every distinct job URL. No filters. No webhook POST.
+2. **NotifyTick** — filter `pending` jobs, claim a batch, POST one JSON `{ "notify": "<WEBHOOK_ID>", "message": "..." }` to `WEBHOOK_BASE`. Skip the POST when the claim is empty.
 
-Manual HTTP starts unique workflow IDs so `/run` and `/notify` are not blocked when a scheduled tick is still running.
+Manual HTTP starts unique workflow IDs. `/run` and `/notify` are not blocked when a scheduled tick is still running.
 
-## Dependencies (intentionally minimal)
+## Dependencies
 
-- `go.temporal.io/sdk` – Temporal SDK
-- `github.com/jackc/pgx/v5` – Postgres driver (used behind stdlib `database/sql`)
-- `golang.org/x/net/html` – HTML parsing
+The module uses a small set of libraries:
 
-Everything else is the standard library (`net/http`, `database/sql`, `encoding/json`, `log/slog`, `embed`).
+- `go.temporal.io/sdk` — Temporal SDK
+- `github.com/jackc/pgx/v5` — Postgres driver (behind stdlib `database/sql`)
+- `golang.org/x/net/html` — HTML parsing
 
-## Project Structure
+All other code uses the standard library (`net/http`, `database/sql`, `encoding/json`, `log/slog`, `embed`).
 
-```bash
+## Project structure
+
+```text
 .
+├── docs/screenshots/           # PNG captures for this README
 ├── data/                       # local Postgres data (gitignored)
 ├── config/                     # Temporal dynamic config
 ├── docker-compose.yml          # postgres, temporal, temporal-ui, api, worker
 ├── Makefile
+├── QUICKSTART.md
 └── job-scout/                  # Go module
     ├── go.mod
     ├── Dockerfile              # multi-stage Go build
@@ -65,45 +74,14 @@ Everything else is the standard library (`net/http`, `database/sql`, `encoding/j
         └── api/                # ServeMux routes + handlers
 ```
 
-## Prerequisites
+## Tools for local work
 
-- Docker and Docker Compose
-- Go 1.25+ (only for local builds/tests; the stack runs in containers)
-- Make
+You need Docker and Docker Compose to run the stack. You need Go 1.25+ only for local builds and tests. You need Make only if you use the `make` targets (macOS and Linux). Windows can use `docker compose` as in [QUICKSTART.md](QUICKSTART.md).
 
-## Quick Start
-
-1. Clone the repository.
-2. Copy `job-scout/.env.sample` to `job-scout/.env`. Set Postgres credentials, the webhook (`WEBHOOK_BASE`, `WEBHOOK_ID`), and OAuth (`CLIENT_ID`, `CLIENT_SECRET`). Do not use `WEBHOOK_URL`; it is not the send target.
-3. (Optional) Tune search settings in `job-scout/internal/db/seed/` before first run; they seed the DB on startup.
-4. Start Postgres, Temporal, the API, and the worker:
+## Make commands
 
 ```bash
-make up
-```
-
-5. Manual acceptance (not CI): set `.env` webhook values, then:
-
-```bash
-curl -X POST "http://localhost:8001/api/v0/run?force=1"
-# wait until GET /api/v0/jobs shows rows
-curl -X POST "http://localhost:8001/api/v0/notify"
-```
-
-Confirm the downstream notify automation. Automated tests never POST to a live webhook.
-
-Scheduled scrape (default 60s) and notify (default 300s) also run from Temporal after API boot. To scrape or notify now without waiting:
-
-```bash
-make run                 # POST /api/v0/run (force off; LinkedIn still waits for cadence unless force=1)
-curl -X POST "http://localhost:8001/api/v0/run?force=1"
-make notify              # POST /api/v0/notify
-```
-
-## Make Commands
-
-```bash
-make up           # build & start the stack
+make up           # build and start the stack
 make down         # stop
 make restart      # restart containers
 make build        # build images only
@@ -115,10 +93,18 @@ make fmt          # gofmt the module
 make vet          # go vet the module
 make connect-db   # psql into the postgres container
 make run          # POST /api/v0/run
-make notify        # POST /api/v0/notify
+make notify       # POST /api/v0/notify
 ```
 
-## API Endpoints
+To scrape or notify now without waiting for the schedule:
+
+```bash
+make run                 # POST /api/v0/run (force off; LinkedIn still waits for cadence unless force=1)
+curl -X POST "http://localhost:8001/api/v0/run?force=1"
+make notify              # POST /api/v0/notify
+```
+
+## API endpoints
 
 Base path: `http://localhost:8001/api/v0`
 
@@ -142,10 +128,21 @@ Base path: `http://localhost:8001/api/v0`
 
 - Temporal UI: http://localhost:8082
 
+## Ideas
+
+- A UI
+- Custom LLM resume, customized for each job
+- LLM filtering step (not everything can be simple rules, though simple rules are _fast_)
+
+## Inspiration
+
+- [JobScout by Krishna](https://github.com/krishnavalliappan/JobScout)
+- [JobScout.ai by abhinav-m22](https://github.com/abhinav-m22/JobScout.ai) | [App](https://jobscout-ai.vercel.app/)
+
 ## Contributing
 
-1. Fork the repository
-2. Create a feature branch
-3. Commit your changes
-4. Push to the branch
-5. Create a Pull Request
+1. Fork the repository.
+2. Create a feature branch.
+3. Commit your changes.
+4. Push the branch.
+5. Create a pull request.

@@ -102,6 +102,7 @@ wheels/
 .env
 .env.*
 !.env.example
+!.env.sample
 
 # Temporary files
 *.tmp
