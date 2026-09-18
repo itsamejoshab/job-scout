@@ -49,7 +49,7 @@ func (a *Activities) ApplyJobDecision(ctx context.Context, in ApplyJobDecisionIn
 	return db.UpdateJobNotifyState(ctx, a.DB, in.JobID, in.Decision.State, reason, desc, in.Decision.DetailAttempts)
 }
 
-// ClaimedJob is one row taken for this Home Assistant POST.
+// ClaimedJob is one row taken for this webhook POST.
 type ClaimedJob struct {
 	ID     int64
 	JobURL string
@@ -102,8 +102,8 @@ func (a *Activities) ClaimNotifyBatch(ctx context.Context) (ClaimBatch, error) {
 	return out, nil
 }
 
-// PostHomeAssistant POSTs the lead message once. MaximumAttempts must be 1.
-func (a *Activities) PostHomeAssistant(ctx context.Context, message string) error {
+// NotifyWebhook POSTs the lead message once. MaximumAttempts must be 1.
+func (a *Activities) NotifyWebhook(ctx context.Context, message string) error {
 	if a.Webhook == nil {
 		return fmt.Errorf("webhook client is not configured")
 	}

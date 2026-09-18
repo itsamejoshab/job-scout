@@ -45,8 +45,8 @@ func TestRegister_ScrapeAndNotifyAreProductionPath(t *testing.T) {
 	if !rec.hasActivity("ClaimNotifyBatch") {
 		t.Errorf("worker must register ClaimNotifyBatch; registered %v", rec.activities)
 	}
-	if !rec.hasActivity("PostHomeAssistant") {
-		t.Errorf("worker must register PostHomeAssistant; registered %v", rec.activities)
+	if !rec.hasActivity("NotifyWebhook") {
+		t.Errorf("worker must register NotifyWebhook; registered %v", rec.activities)
 	}
 	if !rec.hasActivity("FinishNotifyBatch") {
 		t.Errorf("worker must register FinishNotifyBatch; registered %v", rec.activities)
@@ -293,7 +293,7 @@ func TestNotifyTick_ClaimsBatchPostsOnceAndMarksNotified(t *testing.T) {
 			t.Errorf("finish IDs = %v, want claimed [8 9]", probe.finished[0].IDs)
 		}
 	}
-	assertActivityNames(t, *started, "LoadNotifySnapshot", "ApplyJobDecision", "ClaimNotifyBatch", "PostHomeAssistant", "FinishNotifyBatch")
+	assertActivityNames(t, *started, "LoadNotifySnapshot", "ApplyJobDecision", "ClaimNotifyBatch", "NotifyWebhook", "FinishNotifyBatch")
 }
 
 func TestNotifyTick_EmptyClaimDoesNotPost(t *testing.T) {
@@ -329,7 +329,7 @@ func TestNotifyTick_EmptyClaimDoesNotPost(t *testing.T) {
 	assertActivityNames(t, *started, "LoadNotifySnapshot", "ApplyJobDecision", "ClaimNotifyBatch")
 }
 
-func TestNotifyTick_HAPostRunsOnceThenEligible(t *testing.T) {
+func TestNotifyTick_WebhookFailureFinishesBatchThenFailsWorkflow(t *testing.T) {
 	env, _, probe := newWorkflowEnv()
 	job := domainJobNeedingDescription()
 	job.Description = "computer troubleshooting on windows"
@@ -350,13 +350,13 @@ func TestNotifyTick_HAPostRunsOnceThenEligible(t *testing.T) {
 	env.ExecuteWorkflow(NotifyTick)
 
 	if !env.IsWorkflowCompleted() {
-		t.Fatal("NotifyTick must complete after a single failed Home Assistant POST")
+		t.Fatal("NotifyTick must complete after a single failed webhook POST")
 	}
-	if err := env.GetWorkflowError(); err != nil {
-		t.Fatalf("NotifyTick must complete without workflow error after one failed HA POST: %v", err)
+	if err := env.GetWorkflowError(); err == nil || !strings.Contains(err.Error(), probe.webhookErr.Error()) {
+		t.Fatalf("NotifyTick must fail with the webhook error after cleanup, got %v", err)
 	}
 	if probe.webhook != 1 {
-		t.Errorf("Home Assistant POST activity retry policy MaximumAttempts must be 1, got %d attempts", probe.webhook)
+		t.Errorf("webhook POST activity retry policy MaximumAttempts must be 1, got %d attempts", probe.webhook)
 	}
 	if probe.finish != 1 || len(probe.finished) != 1 || probe.finished[0].State != domain.StateEligible {
 		t.Errorf("non-200/transport must return claimed jobs to eligible, got %+v", probe.finished)
@@ -541,7 +541,7 @@ func (p *activityProbe) ClaimNotifyBatch(context.Context) (ClaimBatch, error) {
 	return p.claim, nil
 }
 
-func (p *activityProbe) PostHomeAssistant(_ context.Context, message string) error {
+func (p *activityProbe) NotifyWebhook(_ context.Context, message string) error {
 	p.webhook++
 	p.lastMessage = message
 	return p.webhookErr

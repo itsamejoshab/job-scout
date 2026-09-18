@@ -94,8 +94,8 @@ func TestActivities_ClaimNotifyBatchUsesMaxJobsThenPostAndFinish(t *testing.T) {
 	}
 
 	msg := domain.BuildMessage(batch.Counts, []string{batch.Jobs[0].JobURL, batch.Jobs[1].JobURL})
-	if err := acts.PostHomeAssistant(ctx, msg); err != nil {
-		t.Fatalf("PostHomeAssistant: %v", err)
+	if err := acts.NotifyWebhook(ctx, msg); err != nil {
+		t.Fatalf("NotifyWebhook: %v", err)
 	}
 	if hits != 1 || gotMethod != http.MethodPost || gotPath != "/api/webhook" || gotCT != "application/json" {
 		t.Errorf("POST method=%q path=%q ct=%q hits=%d, want POST /api/webhook application/json once", gotMethod, gotPath, gotCT, hits)

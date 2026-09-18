@@ -105,7 +105,7 @@ func NotifyTick(ctx workflow.Context) error {
 		ids[i] = j.ID
 	}
 	msg := domain.BuildMessage(batch.Counts, urls)
-	postErr := workflow.ExecuteActivity(httpCtx, a.PostHomeAssistant, msg).Get(ctx, nil)
+	postErr := workflow.ExecuteActivity(httpCtx, a.NotifyWebhook, msg).Get(ctx, nil)
 	state := domain.StateNotified
 	if postErr != nil {
 		state = domain.StateEligible
@@ -115,6 +115,9 @@ func NotifyTick(ctx workflow.Context) error {
 		State: state,
 	}).Get(ctx, nil); err != nil {
 		return err
+	}
+	if postErr != nil {
+		return postErr
 	}
 
 	logger.Info("NotifyTick complete")
