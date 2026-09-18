@@ -1,69 +1,22 @@
 # Build stage
-FROM python:3.12-slim-bookworm AS builder
+FROM golang:1.25-bookworm AS build
 
-ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    PIP_NO_CACHE_DIR=1 \
-    PYTHONPATH=/app
+WORKDIR /src
 
-WORKDIR /app
+# Cache module downloads
+COPY go.mod go.sum ./
+RUN go mod download
 
-# Install build dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install pipenv
-RUN pip install --no-cache-dir pipenv
-
-# Copy only the necessary shared package files
-# First copy setup.py and __init__.py to create the package structure
-#COPY shared/setup.py shared/__init__.py /app/shared/
-# Then copy only the Python modules that are actually used
-#COPY shared/db /app/shared/db/
-
-# Install shared package in editable mode for development
-#RUN pip install -e /app/shared
-
-# Copy service dependencies
-COPY job-scout/Pipfile job-scout/Pipfile.lock ./
-COPY job-scout/setup.py ./
-
-# Install dependencies
-RUN pipenv install --system --deploy --ignore-pipfile
-
-# Copy application code, migrations, workflows, and setup script
-COPY job-scout/app ./app
-COPY job-scout/setup.sh ./
-COPY job-scout/.env ./
-COPY job-scout/alembic.ini ./
-COPY job-scout/alembic ./alembic
-
-# Make setup script executable
-RUN chmod +x setup.sh
+# Build the single binary (api|worker chosen at runtime via arg)
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -o /bin/jobscout ./cmd/jobscout
 
 # Final stage
-FROM python:3.12-slim-bookworm
+FROM alpine:3.20
+RUN apk add --no-cache ca-certificates wget
 
-ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONPATH=/app:/app/app:/app/app/db
+COPY --from=build /bin/jobscout /usr/local/bin/jobscout
 
-WORKDIR /app
-
-# Copy Python packages from builder
-COPY --from=builder /usr/local/lib/python3.12/site-packages/ /usr/local/lib/python3.12/site-packages/
-COPY --from=builder /usr/local/bin/ /usr/local/bin/
-
-# Copy application code, migrations, workflows, and setup script
-COPY --from=builder /app/app ./app
-COPY --from=builder /app/setup.sh ./
-COPY --from=builder /app/.env ./
-COPY --from=builder /app/alembic.ini ./
-COPY --from=builder /app/alembic ./
-
-# Make setup script executable
-RUN chmod +x setup.sh
-
-# Run the setup script
-CMD ["./setup.sh"]
+EXPOSE 8000
+ENTRYPOINT ["jobscout"]
+CMD ["api"]

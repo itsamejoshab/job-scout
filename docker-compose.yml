@@ -1,8 +1,3 @@
-# Common environment variables
-x-common-env: &common-env
-  DATABASE_URL: postgresql://${POSTGRES_USER:-defaultx}:${POSTGRES_PASSWORD:-defaultx}@postgres:5432/${POSTGRES_DB:-defaultx}
-  TEMPORAL_ADDRESS: temporal:7233
-
 # Default logging configuration for all services
 x-default-logging: &default-logging
   driver: "json-file"
@@ -10,22 +5,10 @@ x-default-logging: &default-logging
     max-size: "10m"
     max-file: "3"
 
-# Base configuration for all Python services
-x-python-service: &python-service
-  restart: unless-stopped
-  env_file: [ ./job-scout/.env ]          # centralised env variables
-  environment: *common-env                 # Add common environment variables
-  networks: 
-    - backend
-  depends_on: [ temporal ]
-  healthcheck:
-    test: ["CMD", "curl", "-f", "http://localhost:8000/docs"]
-    interval: 30s
-    timeout: 10s
-    retries: 5
-  logging: *default-logging
-  volumes:
-#    - ./shared:/app/shared:ro  # Mount shared package as read-only
+# Shared build for the Go app image (api + worker run from the same binary)
+x-jobscout-build: &jobscout-build
+  context: ./job-scout
+  dockerfile: Dockerfile
 
 services:
   # --- core data stores ---
@@ -40,7 +23,7 @@ services:
       PGDATA: /var/lib/postgresql/data/pgdata
     volumes:
       - ./data/postgres:/var/lib/postgresql/data/pgdata:rw
-    networks: 
+    networks:
       - backend
     ports:
       - 5432:5432
@@ -54,14 +37,14 @@ services:
     shm_size: '256mb'
     logging: *default-logging
 
-  # --- orchestration ---
-  job-scout: &service-defaults # Base service configuration
-    container_name: job-scout
-    build:
-      context: .
-      dockerfile: job-scout/Dockerfile
-    command: ["./setup.sh"]
-    environment: *common-env # Common environment variables
+  # --- app: API (also runs migrations + seeds settings on startup) ---
+  job-scout-api:
+    container_name: job-scout-api
+    build: *jobscout-build
+    command: ["api"]
+    env_file: [ ./job-scout/.env ]
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
     depends_on:
       temporal:
         condition: service_healthy
@@ -69,26 +52,45 @@ services:
         condition: service_healthy
     ports:
       - "8001:8000"
-    healthcheck: &default-healthcheck
-      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 30s
     restart: unless-stopped
-    volumes:
-#      - ./job-scout/alembic:/app/alembic  # Mount alembic directory
-      - ./job-scout/:/app #! DEV ONLY mount the app files
     networks:
       - backend
     logging: *default-logging
+
+  # --- app: Temporal worker ---
+  job-scout-worker:
+    container_name: job-scout-worker
+    build: *jobscout-build
+    command: ["worker"]
+    env_file: [ ./job-scout/.env ]
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+    depends_on:
+      temporal:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      job-scout-api:
+        condition: service_started
+    restart: unless-stopped
+    networks:
+      - backend
+    logging: *default-logging
+
+  # --- orchestration ---
   temporal:
     container_name: temporal
     image: temporalio/auto-setup:latest
     restart: unless-stopped
     environment:
       - DB=postgres12
-      - DB_PORT=${POSTGRES_PORT:-5342}
+      - DB_PORT=${POSTGRES_PORT:-5432}
       - AUTO_SETUP=true
       - ENABLE_ES=false
       - POSTGRES_USER=${POSTGRES_USER:-defaultx}
@@ -107,7 +109,7 @@ services:
       - "7234:7234" # temporal history
       - "7235:7235" # temporal matching
       - "7236:7236" # temporal worker
-    networks: 
+    networks:
       - backend
     healthcheck:
       test: ["CMD", "temporal", "operator", "cluster", "health", "--address", "temporal:7233"]
@@ -126,13 +128,10 @@ services:
     depends_on:
       - temporal
     ports: [ "8082:8080" ]
-    networks: 
+    networks:
       - backend
+
 networks:
   backend:
     name: job-scout-backend
     driver: bridge
-
-volumes:
-  job-store:
-  

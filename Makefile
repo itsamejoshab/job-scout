@@ -1,33 +1,32 @@
-# Load the .env file
-include job-scout/.env
-export $(shell sed 's/=.*//' .env)
-
-# ---------- variables ----------
+# Load env (for connect-db / curl helpers)
+-include job-scout/.env
+export
 
 # API endpoint configuration
 API_HOST ?= localhost:8001
 API_BASE_URL = http://$(API_HOST)/api/v0
 
-# Default target
+GO_DIR = job-scout
+
 .DEFAULT_GOAL := help
 
-
-# ---------- helper targets ----------
 help:
 	@echo "Usage: make <target>"
-	@echo "compose-up          – build & start stack"
-	@echo "compose-down        – stop stack"
-	@echo "compose-restart     – restart all containers"
-	@echo "compose-build       – build images only"
-	@echo "compose-logs        – follow logs"
-	@echo "clean               – down + prune volumes"
-	@echo "install-<svc>       – pipenv install --dev in service folder"
-	@echo "shell-<svc>         – pipenv shell in service folder"
-	@echo "install-all         – run pipenv install --dev for every service"
-	@echo "pkg-install-<svc>-<pkg> – install package in specific service"
-	@echo "pkg-install-all-<pkg>   – install package in all services"
+	@echo "up            - build & start the whole stack (postgres, temporal, api, worker)"
+	@echo "down          - stop the stack"
+	@echo "restart       - restart all containers"
+	@echo "build         - build images only"
+	@echo "logs          - follow logs"
+	@echo "clean         - down + prune volumes/images"
+	@echo "go-build      - compile the Go binary locally"
+	@echo "go-test       - run Go tests"
+	@echo "fmt           - gofmt the module"
+	@echo "vet           - go vet the module"
+	@echo "connect-db    - psql into the postgres container"
+	@echo "run           - POST /api/v0/run"
+	@echo "notify        - POST /api/v0/notify"
 
-
+# ---------- docker stack ----------
 up:
 	docker compose --env-file ./job-scout/.env up -d --build
 
@@ -45,83 +44,31 @@ logs:
 
 clean:
 	docker compose down -v --remove-orphans
+	rm -rf ./data/postgres
 	docker system prune -f -a
 
-# ---------- per‑service pipenv ----------
-install-%:
-	@if [ "$*" = "job-scout" ]; then \
-		cd $* && pipenv install --dev; \
-	else \
-		cd services/$* && pipenv install --dev; \
-	fi
+# ---------- Go (local) ----------
+go-build:
+	cd $(GO_DIR) && go build ./...
 
-shell-%:
-	@if [ "$*" = "job-scout" ]; then \
-		cd $* && pipenv shell; \
-	else \
-		cd services/$* && pipenv shell; \
-	fi
+go-test:
+	cd $(GO_DIR) && go test ./...
 
-# ---------- package installation ----------
-pkg-install-%-%:
-	@if [ "$(word 1,$(subst -, ,$*))" = "job-scout" ]; then \
-		echo "Installing $(word 2,$(subst -, ,$*)) in job-scout"; \
-		cd job-scout && pipenv install $(word 2,$(subst -, ,$*)); \
-	elif [ -d "services/$(word 1,$(subst -, ,$*))" ]; then \
-		echo "Installing $(word 2,$(subst -, ,$*)) in service $(word 1,$(subst -, ,$*))"; \
-		cd services/$(word 1,$(subst -, ,$*)) && pipenv install $(word 2,$(subst -, ,$*)); \
-	else \
-		echo "Service $(word 1,$(subst -, ,$*)) not found"; \
-		exit 1; \
-	fi
+fmt:
+	cd $(GO_DIR) && gofmt -w .
 
-pkg-install-all-%:
-	@echo "Installing $* in job-scout"
-	cd job-scout && pipenv install $*
-	@for svc in $(SERVICES); do \
-		echo "Installing $* in $$svc"; \
-		cd services/$$svc && pipenv install $* && cd ../..; \
-	done
+vet:
+	cd $(GO_DIR) && go vet ./...
 
-# ---------- testing ----------
-
-
-# ---------- local testing ----------
-
-
-# ---------- bulk ----------
-install-all:
-	@echo "Installing contjob-scoutroller"
-	$(MAKE) install-job-scout
-	@for svc in $(SERVICES); do \
-		echo "Installing $$svc"; \
-		$(MAKE) install-$$svc; \
-	done
-
-# ---------- run ruff for all services locally ----------
-ruff:
-	@echo "Running ruff for job-scout"
-	ruff format job-scout
-	ruff check job-scout --fix
-	@for svc in $(SERVICES); do \
-		echo "Running ruff for $$svc"; \
-		ruff format services/$$svc; \
-		ruff check services/$$svc --fix; \
-	done
-
-
+# ---------- database ----------
 connect-db:
 	docker compose exec -it postgres psql -U $(POSTGRES_USER) -d $(POSTGRES_DB)
 
-# Helper function to make curl requests
-define curl_request
-	@curl -X POST \
-		-H "Content-Type: application/json" \
-		$(if $(filter-out undefined,$(origin DATA)),-d '$(DATA)',) \
-		$(API_BASE_URL)/$(1)
-	@echo "\n"
-endef
+# ---------- workflow trigger ----------
+run:
+	@curl -s -X POST "$(API_BASE_URL)/run?job_source=$(or $(SOURCE),LINKEDIN)"
+	@echo ""
 
-# ---------- database migrations ----------
-
-# ---------- database export helpers ----------
+notify:
+	@curl -s -X POST "$(API_BASE_URL)/notify"
+	@echo ""
