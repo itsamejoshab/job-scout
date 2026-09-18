@@ -2,7 +2,7 @@
 
 This guide starts Job Scout on your computer. You do not need to read the Go code.
 
-GitHub does not show tabs. Open **one** section below: Windows, macOS, or Linux. Follow only that section.
+GitHub does not show tabs. Open **one** section below: Windows, macOS, or Linux (Raspberry Pi). Follow only that section.
 
 When the stack is up:
 
@@ -149,30 +149,53 @@ You must get a success response. Then open http://localhost:8082 in a browser fo
 </details>
 
 <details>
-<summary><strong>Linux</strong></summary>
+<summary><strong>Linux (Raspberry Pi)</strong></summary>
+
+This stack can run on a Raspberry Pi. You need **64-bit ARM** (`aarch64`). The Temporal and Postgres images do not run on 32-bit Raspberry Pi OS.
+
+**Hardware**
+
+- Raspberry Pi **4** (4 GB RAM or more) or Raspberry Pi **5**. 8 GB is better. Temporal plus Postgres uses a lot of RAM.
+- Do not use a Pi 3, Pi Zero, or 32-bit OS for this project.
+- Use a 32 GB (or larger) microSD card, or a USB SSD.
+
+**Operating system**
+
+Use **Raspberry Pi OS (64-bit)**. It is Debian. It is the official image for the Pi.
+
+1. On a Windows or Mac computer, install [Raspberry Pi Imager](https://www.raspberrypi.com/software/).
+2. Choose **Raspberry Pi OS (64-bit)**. Do not choose the 32-bit image.
+3. In Imager, open OS customisation. Set the hostname, Wi-Fi, and a user. Enable SSH.
+4. Write the image to the card. Put the card in the Pi. Power on.
+
+Then SSH from your computer (replace `pi` and `jobscout` if you set other names):
+
+```bash
+ssh pi@jobscout.local
+```
+
+If `.local` fails, use the Pi IP address from your router.
+
+Confirm 64-bit:
+
+```bash
+uname -m
+```
+
+The output must be `aarch64`. If you see `armv7l`, flash 64-bit Raspberry Pi OS and start again.
 
 ### 1. Install the tools
 
-Use a terminal. On many desktops: Control + Alt + T.
-
-Install Git (and Make, if you want the short commands):
+On the Pi:
 
 ```bash
 sudo apt update
-sudo apt install -y git make
-```
-
-On Fedora:
-
-```bash
-sudo dnf install -y git make
-```
-
-Install Docker Engine and the Compose plugin from the [Docker Engine install guide](https://docs.docker.com/engine/install/). Add your user to the `docker` group, then log out and log in:
-
-```bash
+sudo apt install -y git make curl
+curl -fsSL https://get.docker.com | sh
 sudo usermod -aG docker "$USER"
 ```
+
+Log out of SSH. Log in again so the `docker` group applies.
 
 ### 2. Check the tools
 
@@ -180,6 +203,7 @@ sudo usermod -aG docker "$USER"
 git --version
 docker version
 docker compose version
+uname -m
 ```
 
 If `docker version` fails with a permission error, log out and log in after the group change.
@@ -195,16 +219,17 @@ cd job-scout
 
 ```bash
 cp job-scout/.env.sample job-scout/.env
+nano job-scout/.env
 ```
 
-Open `job-scout/.env` in a text editor. Set at least:
+Set at least:
 
 - `WEBHOOK_BASE` — base URL of your webhook (no trailing slash if the sample has none)
 - `WEBHOOK_ID` — id that your webhook expects
 
 Set `CLIENT_ID` and `CLIENT_SECRET` if you use OAuth. Do not set `WEBHOOK_URL`. That name is not the send target.
 
-The worker must open TCP to the host in `WEBHOOK_BASE`. A timeout or connect error is an environment failure.
+The worker must open TCP to the host in `WEBHOOK_BASE`. A timeout or connect error is an environment failure. If Home Assistant runs on another device on your LAN, use that device IP in `WEBHOOK_BASE`. `localhost` on the Pi is the Pi itself, not your laptop.
 
 Optional: change search settings in `job-scout/internal/db/seed/` before the first start. The API writes those values to the database on startup.
 
@@ -220,15 +245,23 @@ If you do not have Make:
 docker compose --env-file ./job-scout/.env up -d --build
 ```
 
-This starts Postgres, Temporal, the API, and the worker. The first run can take several minutes.
+This starts Postgres, Temporal, the API, and the worker. The first run **builds Go on the Pi**. That can take 15 minutes or more.
 
 ### 6. Check that it is up
 
+On the Pi:
+
 ```bash
 curl http://localhost:8001/api/v0/health
+hostname -I
 ```
 
-You must get a success response. Then open http://localhost:8082 in a browser for the Temporal UI.
+You must get a success response from `curl`. Then, on a computer on the same network, open:
+
+- API: `http://PI_IP:8001`
+- Temporal UI: `http://PI_IP:8082`
+
+Replace `PI_IP` with the first address from `hostname -I`.
 
 </details>
 
@@ -256,7 +289,7 @@ Then send a notify:
 curl.exe -X POST "http://localhost:8001/api/v0/notify"
 ```
 
-**macOS and Linux**
+**macOS and Raspberry Pi**
 
 ```bash
 curl -X POST "http://localhost:8001/api/v0/run?force=1"
@@ -274,7 +307,7 @@ Then send a notify:
 curl -X POST "http://localhost:8001/api/v0/notify"
 ```
 
-If you have Make (macOS and Linux):
+If you have Make (macOS and Raspberry Pi):
 
 ```bash
 make run
