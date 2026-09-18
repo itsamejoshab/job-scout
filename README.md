@@ -4,7 +4,7 @@ Job Scout monitors job sites. It stores each new job URL. It sends a webhook whe
 
 The pipeline uses [Temporal](https://temporal.io/). This project started as a Python/FastAPI app. It is now a Go service. The goal is idiomatic Go, few external libraries, and explicit control flow.
 
-**Start here:** [QUICKSTART.md](QUICKSTART.md) — clone the repo, set `.env`, and start the stack on Windows, macOS, or Linux.
+**Start here:** [QUICKSTART.md](QUICKSTART.md) — clone the repo, set `.env`, and start the stack on Windows, macOS, or a Raspberry Pi.
 
 ## Screenshots
 
@@ -76,7 +76,7 @@ All other code uses the standard library (`net/http`, `database/sql`, `encoding/
 
 ## Tools for local work
 
-You need Docker and Docker Compose to run the stack. You need Go 1.25+ only for local builds and tests. You need Make only if you use the `make` targets (macOS and Linux). Windows can use `docker compose` as in [QUICKSTART.md](QUICKSTART.md).
+You need Docker and Docker Compose to run the stack. You need Go 1.25+ only for local builds and tests. You need Make only if you use the `make` targets (macOS and Raspberry Pi). Windows can use `docker compose` as in [QUICKSTART.md](QUICKSTART.md).
 
 ## Make commands
 
