@@ -33,7 +33,7 @@ Automated tests never POST to the live `allenjobhit` webhook.
 Two workflows run on the `main-task-queue`:
 
 1. **ScrapeTick** – scrape enabled due providers (LinkedIn every 15 minutes unless `force=1`), store every distinct job URL. No filters and no webhook POST.
-2. **NotifyTick** – filter `pending` jobs, claim a batch, POST one JSON `{ "message": "..." }` to Home Assistant. Skip the POST when the claim is empty.
+2. **NotifyTick** – filter `pending` jobs, claim a batch, POST one JSON `{ "notify": "<WEBHOOK_ID>", "message": "..." }` to `WEBHOOK_BASE`. Skip the POST when the claim is empty.
 
 Manual HTTP starts unique workflow IDs so `/run` and `/notify` are not blocked when a scheduled tick is still running.
 
@@ -74,7 +74,7 @@ Everything else is the standard library (`net/http`, `database/sql`, `encoding/j
 ## Quick Start
 
 1. Clone the repository.
-2. Copy `job-scout/.env.sample` to `job-scout/.env`. Set Postgres credentials and the Home Assistant webhook (`WEBHOOK_BASE`, `WEBHOOK_ID`). Do not use `WEBHOOK_URL`; it is not the send target.
+2. Copy `job-scout/.env.sample` to `job-scout/.env`. Set Postgres credentials, the webhook (`WEBHOOK_BASE`, `WEBHOOK_ID`), and OAuth (`CLIENT_ID`, `CLIENT_SECRET`). Do not use `WEBHOOK_URL`; it is not the send target.
 3. (Optional) Tune search settings in `job-scout/internal/db/seed/` before first run; they seed the DB on startup.
 4. Start Postgres, Temporal, the API, and the worker:
 
