@@ -30,8 +30,8 @@ export interface DashboardProviderStats {
 
 export interface DashboardDailyPoint {
   day: string;
-  job_source: string;
-  count: number;
+  total: number;
+  notified: number;
 }
 
 export interface DashboardStats {

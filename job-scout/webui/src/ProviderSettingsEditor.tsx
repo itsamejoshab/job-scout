@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Plus, RotateCcw, Save, Trash2 } from "lucide-react";
 import { useState } from "react";
 
 import {
@@ -10,6 +11,7 @@ import {
   type ProviderSettingsInput,
 } from "./api";
 import { Badge } from "./components/ui/badge";
+import { Button } from "./components/ui/button";
 
 const linkedInWorkTypes = [
   { code: "1", label: "On-Site" },
@@ -115,13 +117,13 @@ function LinkedInSearchEditor({
   return (
     <div className="mt-5 grid gap-6 lg:grid-cols-2">
       <fieldset>
-        <legend className="text-base font-semibold">Queries</legend>
+        <legend className="text-sm font-semibold tracking-tight">Queries</legend>
         <div className="mt-2 space-y-2">
           {matrix.queries.map((query, index) => (
             <div className="flex gap-2" key={index}>
               <input
                 aria-label={`LinkedIn query ${index + 1}`}
-                className="min-w-0 flex-1 rounded-md border px-2 py-1"
+                className="field-sm min-w-0 flex-1"
                 value={query}
                 onChange={(event) => {
                   const queries = matrix.queries.map((item, itemIndex) =>
@@ -130,41 +132,43 @@ function LinkedInSearchEditor({
                   onChange({ ...matrix, queries });
                 }}
               />
-              <button
-                type="button"
-                className="rounded-md border px-2 py-1 text-sm"
+              <Button
+                variant="danger"
+                size="sm"
                 aria-label={`Remove LinkedIn query ${index + 1}`}
                 onClick={() => onChange({
                   ...matrix,
                   queries: matrix.queries.filter((_, itemIndex) => itemIndex !== index),
                 })}
               >
+                <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
                 Remove
-              </button>
+              </Button>
             </div>
           ))}
         </div>
-        <button
-          type="button"
-          className="mt-2 rounded-md border px-3 py-2 text-sm"
+        <Button
+          size="sm"
+          className="mt-3"
           onClick={() => onChange({ ...matrix, queries: [...matrix.queries, ""] })}
         >
+          <Plus className="h-4 w-4" aria-hidden="true" />
           Add LinkedIn query
-        </button>
+        </Button>
       </fieldset>
 
       <fieldset>
-        <legend className="text-base font-semibold">Locations and work types</legend>
+        <legend className="text-sm font-semibold tracking-tight">Locations and work types</legend>
         <div className="mt-2 space-y-3">
           {matrix.locations.map((location, index) => (
-            <div className="rounded-md border p-3" key={index}>
+            <div className="rounded-xl border border-border/70 bg-muted/30 p-3" key={index}>
               <div className="flex gap-2">
                 <input
                   type="number"
                   min={1}
                   step={1}
                   aria-label={`LinkedIn location ${index + 1}`}
-                  className="min-w-0 flex-1 rounded-md border px-2 py-1"
+                  className="field-sm min-w-0 flex-1"
                   value={location.location}
                   onChange={(event) => {
                     const locations = matrix.locations.map((item, itemIndex) =>
@@ -173,17 +177,18 @@ function LinkedInSearchEditor({
                     onChange({ ...matrix, locations });
                   }}
                 />
-                <button
-                  type="button"
-                  className="rounded-md border px-2 py-1 text-sm"
+                <Button
+                  variant="danger"
+                  size="sm"
                   aria-label={`Remove LinkedIn location ${index + 1}`}
                   onClick={() => onChange({
                     ...matrix,
                     locations: matrix.locations.filter((_, itemIndex) => itemIndex !== index),
                   })}
                 >
+                  <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
                   Remove
-                </button>
+                </Button>
               </div>
               <div className="mt-2 flex flex-wrap gap-4">
                 {linkedInWorkTypes.map(({ code, label }) => (
@@ -214,9 +219,9 @@ function LinkedInSearchEditor({
             </div>
           ))}
         </div>
-        <button
-          type="button"
-          className="mt-2 rounded-md border px-3 py-2 text-sm"
+        <Button
+          size="sm"
+          className="mt-3"
           onClick={() => onChange({
             ...matrix,
             locations: [
@@ -228,8 +233,9 @@ function LinkedInSearchEditor({
             ],
           })}
         >
+          <Plus className="h-4 w-4" aria-hidden="true" />
           Add LinkedIn location
-        </button>
+        </Button>
       </fieldset>
     </div>
   );
@@ -281,9 +287,9 @@ function ProviderSection({
   };
 
   return (
-    <article className="mt-4 rounded-md border p-4">
+    <article className="mt-5 rounded-xl border border-border/70 bg-card p-5 shadow-soft">
       <div className="flex items-center gap-3">
-        <h3 className="text-lg font-semibold">{source} provider</h3>
+        <h3 className="text-base font-semibold tracking-tight">{source} provider</h3>
         {!implemented && <Badge variant="secondary">Not implemented</Badge>}
       </div>
 
@@ -305,7 +311,7 @@ function ProviderSection({
           <input
             type="number"
             min={60}
-            className="mt-1 w-full rounded-md border bg-background px-3 py-2 font-normal"
+            className="field mt-1.5 font-normal"
             value={draft.scrape_interval_seconds}
             onChange={(event) => patch({ scrape_interval_seconds: Number(event.target.value) })}
           />
@@ -313,7 +319,7 @@ function ProviderSection({
         <label className="text-sm font-medium">
           Timespan code
           <input
-            className="mt-1 w-full rounded-md border bg-background px-3 py-2 font-normal"
+            className="field mt-1.5 font-normal"
             value={draft.timespan_code}
             onChange={(event) => patch({ timespan_code: event.target.value })}
           />
@@ -323,7 +329,7 @@ function ProviderSection({
           <input
             type="number"
             min={1}
-            className="mt-1 w-full rounded-md border bg-background px-3 py-2 font-normal"
+            className="field mt-1.5 font-normal"
             value={draft.pages_to_scrape}
             onChange={(event) => patch({ pages_to_scrape: Number(event.target.value) })}
           />
@@ -334,12 +340,12 @@ function ProviderSection({
             type="number"
             min={1}
             max={3}
-            className="mt-1 w-full rounded-md border bg-background px-3 py-2 font-normal"
+            className="field mt-1.5 font-normal"
             value={draft.rounds}
             onChange={(event) => patch({ rounds: Number(event.target.value) })}
           />
         </label>
-        <div className="text-sm">
+        <div className="space-y-0.5 text-sm text-muted-foreground">
           <p>Last scraped: {formatTimestamp(settings.last_scraped_at)}</p>
           <p>Next eligible: {formatTimestamp(settings.next_eligible_at)}</p>
           <p>Identifier: {settings.id}</p>
@@ -351,10 +357,10 @@ function ProviderSection({
         <LinkedInSearchEditor matrix={draft.linkedInMatrix} onChange={patchLinkedIn} />
       ) : (
       <fieldset className="mt-5 overflow-x-auto">
-        <legend className="text-base font-semibold">Search queries</legend>
+        <legend className="text-sm font-semibold tracking-tight">Search queries</legend>
         <table className="mt-2 w-full text-left text-sm">
           <thead>
-            <tr>
+            <tr className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               <th className="p-2">Keywords</th>
               <th className="p-2">Location</th>
               <th className="p-2">Remote-work parameter</th>
@@ -367,7 +373,7 @@ function ProviderSection({
                 <td className="p-2">
                   <input
                     aria-label={`${source} query keywords`}
-                    className="w-full rounded-md border px-2 py-1"
+                    className="field-sm"
                     value={query.keywords}
                     onChange={(event) => {
                       const search_queries = draft.search_queries.map((item, itemIndex) =>
@@ -380,7 +386,7 @@ function ProviderSection({
                 <td className="p-2">
                   <input
                     aria-label={`${source} query location`}
-                    className="w-full rounded-md border px-2 py-1"
+                    className="field-sm"
                     value={query.location}
                     onChange={(event) => {
                       const search_queries = draft.search_queries.map((item, itemIndex) =>
@@ -393,7 +399,7 @@ function ProviderSection({
                 <td className="p-2">
                   <input
                     aria-label={`${source} query remote-work parameter`}
-                    className="w-full rounded-md border px-2 py-1"
+                    className="field-sm"
                     value={query.f_WT ?? ""}
                     onChange={(event) => {
                       const search_queries = draft.search_queries.map((item, itemIndex) =>
@@ -404,24 +410,25 @@ function ProviderSection({
                   />
                 </td>
                 <td className="p-2">
-                  <button
-                    type="button"
-                    className="rounded-md border px-2 py-1"
+                  <Button
+                    variant="danger"
+                    size="sm"
                     aria-label={`Remove ${source} query ${index + 1}`}
                     onClick={() => patch({
                       search_queries: draft.search_queries.filter((_, itemIndex) => itemIndex !== index),
                     })}
                   >
+                    <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
                     Remove
-                  </button>
+                  </Button>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
-        <button
-          type="button"
-          className="mt-2 rounded-md border px-3 py-2 text-sm"
+        <Button
+          size="sm"
+          className="mt-3"
           onClick={() => patch({
             search_queries: [
               ...draft.search_queries,
@@ -429,19 +436,20 @@ function ProviderSection({
             ],
           })}
         >
+          <Plus className="h-4 w-4" aria-hidden="true" />
           Add {source} query
-        </button>
+        </Button>
       </fieldset>
       )}
 
       <fieldset className="mt-5 overflow-x-auto">
-        <legend className="text-base font-semibold">Hardcoded URLs</legend>
+        <legend className="text-sm font-semibold tracking-tight">Hardcoded URLs</legend>
         {draft.hardcoded_urls.length === 0 ? (
           <p className="mt-2 text-sm text-muted-foreground">No hardcoded URLs.</p>
         ) : (
           <table className="mt-2 w-full text-left text-sm">
             <thead>
-              <tr>
+              <tr className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                 <th className="p-2">URL</th>
                 <th className="p-2">Description</th>
                 <th className="p-2">Remote</th>
@@ -454,7 +462,7 @@ function ProviderSection({
                   <td className="p-2">
                     <input
                       aria-label={`${source} hardcoded URL`}
-                      className="w-full rounded-md border px-2 py-1"
+                      className="field-sm"
                       value={entry.url}
                       onChange={(event) => {
                         const hardcoded_urls = draft.hardcoded_urls.map((item, itemIndex) =>
@@ -467,7 +475,7 @@ function ProviderSection({
                   <td className="p-2">
                     <input
                       aria-label={`${source} URL description`}
-                      className="w-full rounded-md border px-2 py-1"
+                      className="field-sm"
                       value={entry.description}
                       onChange={(event) => {
                         const hardcoded_urls = draft.hardcoded_urls.map((item, itemIndex) =>
@@ -491,25 +499,26 @@ function ProviderSection({
                     />
                   </td>
                   <td className="p-2">
-                    <button
-                      type="button"
-                      className="rounded-md border px-2 py-1"
+                    <Button
+                      variant="danger"
+                      size="sm"
                       aria-label={`Remove ${source} URL ${index + 1}`}
                       onClick={() => patch({
                         hardcoded_urls: draft.hardcoded_urls.filter((_, itemIndex) => itemIndex !== index),
                       })}
                     >
+                      <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
                       Remove
-                    </button>
+                    </Button>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
         )}
-        <button
-          type="button"
-          className="mt-2 rounded-md border px-3 py-2 text-sm"
+        <Button
+          size="sm"
+          className="mt-3"
           onClick={() => patch({
             hardcoded_urls: [
               ...draft.hardcoded_urls,
@@ -517,8 +526,9 @@ function ProviderSection({
             ],
           })}
         >
+          <Plus className="h-4 w-4" aria-hidden="true" />
           Add {source} URL
-        </button>
+        </Button>
       </fieldset>
 
       {(save.isError || reset.isError) && (
@@ -526,18 +536,14 @@ function ProviderSection({
           {(save.error ?? reset.error)?.message}
         </p>
       )}
-      <div className="mt-4 flex gap-2">
-        <button
-          type="button"
-          className="rounded-md border px-3 py-2 text-sm disabled:opacity-50"
-          disabled={!dirty || pending}
-          onClick={() => save.mutate(cloneInput(draft))}
-        >
-          Save {source} settings
-        </button>
-        <button
-          type="button"
-          className="rounded-md border px-3 py-2 text-sm disabled:opacity-50"
+      <div className="mt-5 flex items-center justify-end gap-2">
+        {dirty && (
+          <span className="mr-auto text-sm font-medium text-accent-foreground">
+            Unsaved changes
+          </span>
+        )}
+        <Button
+          variant="ghost"
           disabled={pending}
           onClick={() => {
             if (window.confirm(`Reset ${source} settings to seed defaults?`)) {
@@ -545,8 +551,17 @@ function ProviderSection({
             }
           }}
         >
+          <RotateCcw className="h-4 w-4" aria-hidden="true" />
           Reset {source} settings
-        </button>
+        </Button>
+        <Button
+          variant="primary"
+          disabled={!dirty || pending}
+          onClick={() => save.mutate(cloneInput(draft))}
+        >
+          <Save className="h-4 w-4" aria-hidden="true" />
+          Save {source} settings
+        </Button>
       </div>
     </article>
   );

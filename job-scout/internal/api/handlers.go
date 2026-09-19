@@ -565,7 +565,7 @@ func (h *Handler) Jobs(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-const jobDescriptionPreviewLimit = 160
+const jobDescriptionPreviewLimit = 480
 
 type jobListItem struct {
 	ID                 int64        `json:"id"`
@@ -678,9 +678,9 @@ type dashboardProviderView struct {
 }
 
 type dashboardDailyView struct {
-	Day       string `json:"day"`
-	JobSource string `json:"job_source"`
-	Count     int    `json:"count"`
+	Day      string `json:"day"`
+	Total    int    `json:"total"`
+	Notified int    `json:"notified"`
 }
 
 // GET /api/v0/dashboard/stats
@@ -727,9 +727,9 @@ func (h *Handler) DashboardStats(w http.ResponseWriter, r *http.Request) {
 	daily := make([]dashboardDailyView, 0, len(stats.Daily))
 	for _, point := range stats.Daily {
 		daily = append(daily, dashboardDailyView{
-			Day:       point.Day,
-			JobSource: string(point.JobSource),
-			Count:     point.Count,
+			Day:      point.Day,
+			Total:    point.Total,
+			Notified: point.Notified,
 		})
 	}
 
