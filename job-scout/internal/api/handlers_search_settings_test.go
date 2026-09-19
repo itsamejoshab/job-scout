@@ -18,7 +18,6 @@ type filterPayload struct {
 	TitleInclude     []string `json:"title_include"`
 	TitleExclude     []string `json:"title_exclude"`
 	CompanyExclude   []string `json:"company_exclude"`
-	NonRemotePhrases []string `json:"non_remote_phrases"`
 }
 
 func TestSearchSettings_PutNormalizesAndEchoesStoredRow(t *testing.T) {
@@ -36,7 +35,6 @@ func TestSearchSettings_PutNormalizesAndEchoesStoredRow(t *testing.T) {
 		TitleInclude:     []string{" ", "IT", "it", "Help Desk"},
 		TitleExclude:     []string{"Sales", " sales ", "Manager"},
 		CompanyExclude:   []string{"Acme", " acme ", "Other"},
-		NonRemotePhrases: []string{"onsite", "OnSite", " travel "},
 	}
 	body, err := json.Marshal(input)
 	if err != nil {
@@ -61,7 +59,6 @@ func TestSearchSettings_PutNormalizesAndEchoesStoredRow(t *testing.T) {
 		TitleInclude:     []string{"IT", "Help Desk"},
 		TitleExclude:     []string{"Sales", "Manager"},
 		CompanyExclude:   []string{"Acme", "Other"},
-		NonRemotePhrases: []string{"onsite", "travel"},
 	}
 	if !reflect.DeepEqual(got.DescIncludeWords, want.DescIncludeWords) {
 		t.Errorf("desc_include_words=%v want %v", got.DescIncludeWords, want.DescIncludeWords)
@@ -78,9 +75,6 @@ func TestSearchSettings_PutNormalizesAndEchoesStoredRow(t *testing.T) {
 	if !reflect.DeepEqual(got.CompanyExclude, want.CompanyExclude) {
 		t.Errorf("company_exclude=%v want %v", got.CompanyExclude, want.CompanyExclude)
 	}
-	if !reflect.DeepEqual(got.NonRemotePhrases, want.NonRemotePhrases) {
-		t.Errorf("non_remote_phrases=%v want %v", got.NonRemotePhrases, want.NonRemotePhrases)
-	}
 
 	stored, err := db.GetSearchSettings(t.Context(), pool)
 	if err != nil || stored == nil {
@@ -93,8 +87,7 @@ func TestSearchSettings_PutNormalizesAndEchoesStoredRow(t *testing.T) {
 		!reflect.DeepEqual(got.DescExcludeWords, stored.DescExcludeWords) ||
 		!reflect.DeepEqual(got.TitleInclude, stored.TitleInclude) ||
 		!reflect.DeepEqual(got.TitleExclude, stored.TitleExclude) ||
-		!reflect.DeepEqual(got.CompanyExclude, stored.CompanyExclude) ||
-		!reflect.DeepEqual(got.NonRemotePhrases, stored.NonRemotePhrases) {
+		!reflect.DeepEqual(got.CompanyExclude, stored.CompanyExclude) {
 		t.Errorf("response row != stored row response=%#v stored=%#v", got, stored)
 	}
 }
@@ -113,7 +106,6 @@ func TestSearchSettings_PutAllowsEmptyLists(t *testing.T) {
 		TitleInclude:     []string{},
 		TitleExclude:     []string{},
 		CompanyExclude:   []string{},
-		NonRemotePhrases: []string{},
 	})
 	if err != nil {
 		t.Fatalf("marshal request: %v", err)
@@ -136,7 +128,6 @@ func TestSearchSettings_PutAllowsEmptyLists(t *testing.T) {
 		"title_include":      stored.TitleInclude,
 		"title_exclude":      stored.TitleExclude,
 		"company_exclude":    stored.CompanyExclude,
-		"non_remote_phrases": stored.NonRemotePhrases,
 	} {
 		if len(values) != 0 {
 			t.Errorf("%s len=%d want 0", name, len(values))
@@ -155,7 +146,6 @@ func TestSearchSettings_PutInvalidBodyReturnsBadRequest(t *testing.T) {
 	bodies := []string{
 		`{"desc_include_words":"bad"}`,
 		`{"desc_include_words":[],"desc_exclude_words":[],"title_include":[]}`,
-		`{"desc_include_words":[],"desc_exclude_words":[],"title_include":[],"title_exclude":[],"company_exclude":[],"non_remote_phrases":[]`,
 	}
 	for _, body := range bodies {
 		req := httptest.NewRequest(http.MethodPut, "/api/v0/search-settings", bytes.NewBufferString(body))
@@ -224,7 +214,6 @@ func TestSearchSettings_ResetRestoresSeedAndDoesNotTouchProviders(t *testing.T) 
 		"title_include":      got.TitleInclude,
 		"title_exclude":      got.TitleExclude,
 		"company_exclude":    got.CompanyExclude,
-		"non_remote_phrases": got.NonRemotePhrases,
 	} {
 		var want []string
 		switch name {
@@ -238,8 +227,6 @@ func TestSearchSettings_ResetRestoresSeedAndDoesNotTouchProviders(t *testing.T) 
 			want = seed.TitleExclude
 		case "company_exclude":
 			want = seed.CompanyExclude
-		case "non_remote_phrases":
-			want = seed.NonRemotePhrases
 		}
 		if !reflect.DeepEqual(values, want) {
 			t.Errorf("%s=%v want %v", name, values, want)
@@ -256,8 +243,7 @@ func TestSearchSettings_ResetRestoresSeedAndDoesNotTouchProviders(t *testing.T) 
 		!reflect.DeepEqual(got.DescExcludeWords, stored.DescExcludeWords) ||
 		!reflect.DeepEqual(got.TitleInclude, stored.TitleInclude) ||
 		!reflect.DeepEqual(got.TitleExclude, stored.TitleExclude) ||
-		!reflect.DeepEqual(got.CompanyExclude, stored.CompanyExclude) ||
-		!reflect.DeepEqual(got.NonRemotePhrases, stored.NonRemotePhrases) {
+		!reflect.DeepEqual(got.CompanyExclude, stored.CompanyExclude) {
 		t.Errorf("reset response row != stored row response=%#v stored=%#v", got, stored)
 	}
 

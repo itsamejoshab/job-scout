@@ -18,14 +18,14 @@ var seedFS embed.FS
 // none exists yet.
 func GetSearchSettings(ctx context.Context, db *sql.DB) (*SearchSettings, error) {
 	var (
-		s                                                SearchSettings
-		inc, exc, titleIn, titleEx, companyEx, nonRemote []byte
+		s                                      SearchSettings
+		inc, exc, titleIn, titleEx, companyEx []byte
 	)
 	err := db.QueryRowContext(ctx, `
 		SELECT id, desc_include_words, desc_exclude_words, title_include,
-		       title_exclude, company_exclude, non_remote_phrases, created_at, updated_at
+		       title_exclude, company_exclude, created_at, updated_at
 		FROM search_settings ORDER BY id LIMIT 1
-	`).Scan(&s.ID, &inc, &exc, &titleIn, &titleEx, &companyEx, &nonRemote, &s.CreatedAt, &s.UpdatedAt)
+	`).Scan(&s.ID, &inc, &exc, &titleIn, &titleEx, &companyEx, &s.CreatedAt, &s.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -34,7 +34,7 @@ func GetSearchSettings(ctx context.Context, db *sql.DB) (*SearchSettings, error)
 	}
 	for raw, dst := range map[*[]byte]*[]string{
 		&inc: &s.DescIncludeWords, &exc: &s.DescExcludeWords, &titleIn: &s.TitleInclude,
-		&titleEx: &s.TitleExclude, &companyEx: &s.CompanyExclude, &nonRemote: &s.NonRemotePhrases,
+		&titleEx: &s.TitleExclude, &companyEx: &s.CompanyExclude,
 	} {
 		if err := json.Unmarshal(*raw, dst); err != nil {
 			return nil, err
@@ -43,7 +43,7 @@ func GetSearchSettings(ctx context.Context, db *sql.DB) (*SearchSettings, error)
 	return &s, nil
 }
 
-// ReplaceSearchSettings rewrites all six filter lists and returns the stored row.
+// ReplaceSearchSettings rewrites all five filter lists and returns the stored row.
 func ReplaceSearchSettings(ctx context.Context, db *sql.DB, in SearchSettings) (*SearchSettings, error) {
 	normalized := normalizeSearchSettings(in)
 	existing, err := GetSearchSettings(ctx, db)
@@ -53,11 +53,11 @@ func ReplaceSearchSettings(ctx context.Context, db *sql.DB, in SearchSettings) (
 	if existing == nil {
 		if _, err := db.ExecContext(ctx, `
 			INSERT INTO search_settings (desc_include_words, desc_exclude_words, title_include,
-			                             title_exclude, company_exclude, non_remote_phrases)
-			VALUES ($1::json, $2::json, $3::json, $4::json, $5::json, $6::json)
+			                             title_exclude, company_exclude)
+			VALUES ($1::json, $2::json, $3::json, $4::json, $5::json)
 		`, mustJSON(normalized.DescIncludeWords), mustJSON(normalized.DescExcludeWords),
 			mustJSON(normalized.TitleInclude), mustJSON(normalized.TitleExclude),
-			mustJSON(normalized.CompanyExclude), mustJSON(normalized.NonRemotePhrases)); err != nil {
+			mustJSON(normalized.CompanyExclude)); err != nil {
 			return nil, err
 		}
 		return GetSearchSettings(ctx, db)
@@ -69,12 +69,11 @@ func ReplaceSearchSettings(ctx context.Context, db *sql.DB, in SearchSettings) (
 		    title_include = $3::json,
 		    title_exclude = $4::json,
 		    company_exclude = $5::json,
-		    non_remote_phrases = $6::json,
 		    updated_at = now()
-		WHERE id = $7
+		WHERE id = $6
 	`, mustJSON(normalized.DescIncludeWords), mustJSON(normalized.DescExcludeWords),
 		mustJSON(normalized.TitleInclude), mustJSON(normalized.TitleExclude),
-		mustJSON(normalized.CompanyExclude), mustJSON(normalized.NonRemotePhrases), existing.ID); err != nil {
+		mustJSON(normalized.CompanyExclude), existing.ID); err != nil {
 		return nil, err
 	}
 	return GetSearchSettings(ctx, db)
@@ -96,7 +95,6 @@ func normalizeSearchSettings(in SearchSettings) SearchSettings {
 		TitleInclude:     normalizeWordList(in.TitleInclude),
 		TitleExclude:     normalizeWordList(in.TitleExclude),
 		CompanyExclude:   normalizeWordList(in.CompanyExclude),
-		NonRemotePhrases: normalizeWordList(in.NonRemotePhrases),
 	}
 }
 
@@ -133,16 +131,16 @@ func loadSearchSettingsSeed() (SearchSettings, error) {
 // GetScraperSettings returns the scraper-specific row for a source, or nil.
 func GetScraperSettings(ctx context.Context, db *sql.DB, source JobSource) (*ScraperSettings, error) {
 	var (
-		s                  ScraperSettings
-		queries, hardcoded []byte
-		last, next         sql.NullTime
+		s               ScraperSettings
+		queries, global []byte
+		last, next      sql.NullTime
 	)
 	err := db.QueryRowContext(ctx, `
-		SELECT id, job_source, search_queries, hardcoded_urls, timespan_code,
+		SELECT id, job_source, search_queries, global_searches, timespan_code,
 		       pages_to_scrape, rounds, enabled, scrape_interval_seconds,
 		       last_scraped_at, next_eligible_at, created_at, updated_at
 		FROM scraper_settings WHERE job_source = $1 LIMIT 1
-	`, source).Scan(&s.ID, &s.JobSource, &queries, &hardcoded, &s.TimespanCode,
+	`, source).Scan(&s.ID, &s.JobSource, &queries, &global, &s.TimespanCode,
 		&s.PagesToScrape, &s.Rounds, &s.Enabled, &s.ScrapeIntervalSeconds,
 		&last, &next, &s.CreatedAt, &s.UpdatedAt)
 	if err == sql.ErrNoRows {
@@ -159,20 +157,18 @@ func GetScraperSettings(ctx context.Context, db *sql.DB, source JobSource) (*Scr
 		t := next.Time
 		s.NextEligibleAt = &t
 	}
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
 	if err := json.Unmarshal(queries, &s.SearchQueries); err != nil {
 		return nil, err
 	}
-	if len(hardcoded) > 0 {
-		if err := json.Unmarshal(hardcoded, &s.HardcodedURLs); err != nil {
+	if len(global) > 0 {
+		if err := json.Unmarshal(global, &s.GlobalSearches); err != nil {
 			return nil, err
 		}
 	}
+	if s.GlobalSearches == nil {
+		s.GlobalSearches = []string{}
+	}
+	s.SearchQueries = normalizeSearchQueries(s.SearchQueries)
 	return &s, nil
 }
 
@@ -201,7 +197,7 @@ func ReplaceScraperSettings(
 	if _, err := db.ExecContext(ctx, `
 		UPDATE scraper_settings
 		SET search_queries = $1::json,
-		    hardcoded_urls = $2::json,
+		    global_searches = $2::json,
 		    timespan_code = $3,
 		    pages_to_scrape = $4,
 		    rounds = $5,
@@ -209,7 +205,7 @@ func ReplaceScraperSettings(
 		    scrape_interval_seconds = $7,
 		    updated_at = now()
 		WHERE job_source = $8
-	`, mustJSON(in.SearchQueries), mustJSON(in.HardcodedURLs), in.TimespanCode,
+	`, mustJSON(normalizeSearchQueries(in.SearchQueries)), mustJSON(normalizeGlobalSearches(in.GlobalSearches)), in.TimespanCode,
 		in.PagesToScrape, in.Rounds, in.Enabled, in.ScrapeIntervalSeconds, source); err != nil {
 		return nil, err
 	}
@@ -259,10 +255,10 @@ func seedSearchSettings(ctx context.Context, db *sql.DB) error {
 
 	_, err = db.ExecContext(ctx, `
 		INSERT INTO search_settings (desc_include_words, desc_exclude_words, title_include,
-		                             title_exclude, company_exclude, non_remote_phrases)
-		VALUES ($1::json, $2::json, $3::json, $4::json, $5::json, $6::json)
+		                             title_exclude, company_exclude)
+		VALUES ($1::json, $2::json, $3::json, $4::json, $5::json)
 	`, mustJSON(s.DescIncludeWords), mustJSON(s.DescExcludeWords), mustJSON(s.TitleInclude),
-		mustJSON(s.TitleExclude), mustJSON(s.CompanyExclude), mustJSON(s.NonRemotePhrases))
+		mustJSON(s.TitleExclude), mustJSON(s.CompanyExclude))
 	if err != nil {
 		return err
 	}
@@ -286,11 +282,11 @@ func seedScraperSettings(ctx context.Context, db *sql.DB) error {
 			continue
 		}
 		_, err = db.ExecContext(ctx, `
-			INSERT INTO scraper_settings (job_source, search_queries, hardcoded_urls,
+			INSERT INTO scraper_settings (job_source, search_queries, global_searches,
 			                              timespan_code, pages_to_scrape, rounds,
 			                              enabled, scrape_interval_seconds)
 			VALUES ($1, $2::json, $3::json, $4, $5, $6, $7, $8)
-		`, s.JobSource, mustJSON(s.SearchQueries), mustJSON(s.HardcodedURLs),
+		`, s.JobSource, mustJSON(normalizeSearchQueries(s.SearchQueries)), mustJSON(normalizeGlobalSearches(s.GlobalSearches)),
 			s.TimespanCode, s.PagesToScrape, s.Rounds, s.Enabled, intervalOrDefault(s))
 		if err != nil {
 			return err
@@ -330,6 +326,33 @@ func intervalOrDefault(s ScraperSettings) int {
 		return s.ScrapeIntervalSeconds
 	}
 	return 900
+}
+
+func normalizeSearchQueries(in []map[string]string) []map[string]string {
+	out := make([]map[string]string, 0, len(in))
+	for _, query := range in {
+		out = append(out, map[string]string{
+			"keywords": query["keywords"],
+			"location": query["location"],
+			"f_WT":     query["f_WT"],
+		})
+	}
+	return out
+}
+
+func normalizeGlobalSearches(in []string) []string {
+	if in == nil {
+		return []string{}
+	}
+	out := make([]string, 0, len(in))
+	for _, raw := range in {
+		word := strings.TrimSpace(raw)
+		if word == "" {
+			continue
+		}
+		out = append(out, word)
+	}
+	return out
 }
 
 // TryLockJobSource takes a session advisory lock for source without waiting.

@@ -15,7 +15,6 @@ const (
 	ReasonDuplicate    = "duplicate"
 	ReasonTitleCompany = "title_company"
 	ReasonDescription  = "description"
-	ReasonRemoteLie    = "remote_lie"
 	ReasonDetailFailed = "detail_failed"
 
 	MaxDetailAttempts = 3
@@ -29,18 +28,16 @@ type Job struct {
 	Description    string
 	JobURL         string
 	CreatedAt      time.Time
-	IsRemote       bool
 	DetailAttempts int
 }
 
 // Lists is the notify word lists loaded from search_settings.
 type Lists struct {
-	TitleInclude     []string
-	TitleExclude     []string
-	CompanyExclude   []string
-	DescInclude      []string
-	DescExclude      []string
-	NonRemotePhrases []string
+	TitleInclude   []string
+	TitleExclude   []string
+	CompanyExclude []string
+	DescInclude    []string
+	DescExclude    []string
 }
 
 // Decision is the next persist for one pending job.
@@ -77,17 +74,12 @@ func FilterPending(job Job, all []Job, lists Lists) Decision {
 	return FilterAfterDescription(job, lists)
 }
 
-// FilterAfterDescription applies description include/exclude and remote-lie.
+// FilterAfterDescription applies description include/exclude checks.
 func FilterAfterDescription(job Job, lists Lists) Decision {
 	d := Decision{Description: job.Description, DetailAttempts: job.DetailAttempts}
 	if !passInclude(job.Description, lists.DescInclude) || !passExclude(job.Description, lists.DescExclude) {
 		d.State = StateRejected
 		d.RejectReason = ReasonDescription
-		return d
-	}
-	if job.IsRemote && containsAny(job.Description, lists.NonRemotePhrases) {
-		d.State = StateRejected
-		d.RejectReason = ReasonRemoteLie
 		return d
 	}
 	d.State = StateEligible

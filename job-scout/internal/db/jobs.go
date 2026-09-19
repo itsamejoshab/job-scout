@@ -291,7 +291,6 @@ type NotifyInventory struct {
 	Total        int
 	TitleCompany int
 	Description  int
-	RemoteLie    int
 	Duplicate    int
 	DetailFailed int
 	Pending      int
@@ -375,7 +374,6 @@ func LoadNotifyInventory(ctx context.Context, database *sql.DB) (NotifyInventory
 			COUNT(*),
 			COUNT(*) FILTER (WHERE reject_reason = 'title_company'),
 			COUNT(*) FILTER (WHERE reject_reason = 'description'),
-			COUNT(*) FILTER (WHERE reject_reason = 'remote_lie'),
 			COUNT(*) FILTER (WHERE reject_reason = 'duplicate'),
 			COUNT(*) FILTER (WHERE reject_reason = 'detail_failed'),
 			COUNT(*) FILTER (WHERE state = 'pending'),
@@ -385,7 +383,7 @@ func LoadNotifyInventory(ctx context.Context, database *sql.DB) (NotifyInventory
 		FROM jobs
 	`).Scan(
 		&inv.Total,
-		&inv.TitleCompany, &inv.Description, &inv.RemoteLie, &inv.Duplicate, &inv.DetailFailed,
+		&inv.TitleCompany, &inv.Description, &inv.Duplicate, &inv.DetailFailed,
 		&inv.Pending, &inv.Eligible, &inv.Notifying, &inv.Notified,
 	)
 	return inv, err

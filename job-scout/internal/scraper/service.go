@@ -215,14 +215,15 @@ func (s *Service) scrapeSource(ctx context.Context, source db.JobSource) (Result
 		rounds = 3
 	}
 	for round := 0; round < rounds; round++ {
-		for _, urlCfg := range scraperSettings.HardcodedURLs {
-			jobs, err := provider.ScrapeHardcodedURL(ctx, urlCfg)
-			searchContext := hardcodedSearchContext(urlCfg)
+		for _, keywords := range scraperSettings.GlobalSearches {
+			query := map[string]string{"keywords": keywords}
+			jobs, err := provider.ScrapeJobs(ctx, query)
+			searchContext := globalSearchContext(keywords)
 			stampSearchContext(jobs, searchContext)
 			slog.Debug("search completed", "source", source, "round", round+1, "search_context", searchContext, "matches", len(jobs))
 			all = append(all, jobs...)
 			if err != nil {
-				slog.Error("scraping hardcoded url failed", "round", round+1, "err", err)
+				slog.Error("scraping global search failed", "round", round+1, "keywords", keywords, "err", err)
 				scrapeErr = err
 			}
 			if err := sleep(ctx, sleepBetween); err != nil {
@@ -230,7 +231,11 @@ func (s *Service) scrapeSource(ctx context.Context, source db.JobSource) (Result
 			}
 		}
 
-		for _, query := range scraperSettings.SearchQueries {
+		queries := scraperSettings.SearchQueries
+		if source == db.SourceLinkedIn {
+			queries = combineLinkedInSearchQueries(queries)
+		}
+		for _, query := range queries {
 			jobs, err := provider.ScrapeJobs(ctx, query)
 			searchContext := querySearchContext(query)
 			stampSearchContext(jobs, searchContext)
@@ -326,16 +331,8 @@ func querySearchContext(query map[string]string) string {
 	)
 }
 
-func hardcodedSearchContext(cfg map[string]any) string {
-	description, _ := cfg["description"].(string)
-	searchURL, _ := cfg["url"].(string)
-	remote, _ := cfg["is_remote"].(bool)
-	return fmt.Sprintf(
-		`hardcoded description=%q is_remote=%t url=%q`,
-		description,
-		remote,
-		searchURL,
-	)
+func globalSearchContext(keywords string) string {
+	return fmt.Sprintf(`global keywords=%q`, keywords)
 }
 
 // FetchJobDescription GETs LinkedIn job-detail HTML using the configured timeout.

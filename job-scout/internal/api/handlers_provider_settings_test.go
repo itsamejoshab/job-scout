@@ -20,7 +20,7 @@ type providerPayload struct {
 	PagesToScrape         int                 `json:"pages_to_scrape"`
 	Rounds                int                 `json:"rounds"`
 	SearchQueries         []map[string]string `json:"search_queries"`
-	HardcodedURLs         []map[string]any    `json:"hardcoded_urls"`
+	GlobalSearches        []string            `json:"global_searches"`
 }
 
 func TestProviderSettings_PutWhitelistsValidatesAndEchoes(t *testing.T) {
@@ -48,9 +48,9 @@ func TestProviderSettings_PutWhitelistsValidatesAndEchoes(t *testing.T) {
 		"pages_to_scrape":         4,
 		"rounds":                  3,
 		"search_queries": []map[string]string{
-			{"keywords": "  Support  ", "location": "  Remote  ", "f_WT": ""},
+			{"keywords": "  Support  ", "location": "  Remote  ", "f_WT": " 2 "},
 		},
-		"hardcoded_urls":      []map[string]any{},
+		"global_searches":     []string{"  Remote help desk near Port Orange  "},
 		"id":                  999,
 		"job_source":          "INDEED",
 		"last_scraped_at":     "2000-01-01T00:00:00Z",
@@ -92,11 +92,11 @@ func TestProviderSettings_PutWhitelistsValidatesAndEchoes(t *testing.T) {
 	if got.TimespanCode != "r86400" ||
 		got.SearchQueries[0]["keywords"] != "Support" ||
 		got.SearchQueries[0]["location"] != "Remote" ||
-		got.SearchQueries[0]["f_WT"] != "" {
+		got.SearchQueries[0]["f_WT"] != "2" {
 		t.Errorf("stored row was not normalized: %#v", got)
 	}
-	if got.HardcodedURLs == nil || len(got.HardcodedURLs) != 0 {
-		t.Errorf("empty hardcoded URL table must be stored as []: %#v", got.HardcodedURLs)
+	if !reflect.DeepEqual(got.GlobalSearches, []string{"Remote help desk near Port Orange"}) {
+		t.Errorf("global searches not normalized: %#v", got.GlobalSearches)
 	}
 }
 
@@ -115,11 +115,9 @@ func TestProviderSettings_PutRejectsInvalidAndUnavailableProviders(t *testing.T)
 		PagesToScrape:         1,
 		Rounds:                1,
 		SearchQueries: []map[string]string{
-			{"keywords": "Support", "location": "Remote", "f_WT": ""},
+			{"keywords": "Support", "location": "Remote"},
 		},
-		HardcodedURLs: []map[string]any{
-			{"url": "https://example.test/jobs", "description": "", "is_remote": true},
-		},
+		GlobalSearches: []string{"Remote help desk"},
 	}
 	tests := []struct {
 		name string
@@ -134,8 +132,7 @@ func TestProviderSettings_PutRejectsInvalidAndUnavailableProviders(t *testing.T)
 		{"timespan", "/api/v0/scraper-settings/LINKEDIN", func(p *providerPayload) { p.TimespanCode = " " }, 400},
 		{"query keywords", "/api/v0/scraper-settings/LINKEDIN", func(p *providerPayload) { p.SearchQueries[0]["keywords"] = " " }, 400},
 		{"query location", "/api/v0/scraper-settings/LINKEDIN", func(p *providerPayload) { p.SearchQueries[0]["location"] = "" }, 400},
-		{"url scheme", "/api/v0/scraper-settings/LINKEDIN", func(p *providerPayload) { p.HardcodedURLs[0]["url"] = "ftp://example.test" }, 400},
-		{"remote type", "/api/v0/scraper-settings/LINKEDIN", func(p *providerPayload) { p.HardcodedURLs[0]["is_remote"] = "true" }, 400},
+		{"global empty", "/api/v0/scraper-settings/LINKEDIN", func(p *providerPayload) { p.GlobalSearches[0] = " " }, 400},
 		{"stub enabled", "/api/v0/scraper-settings/INDEED", func(*providerPayload) {}, 400},
 		{"unknown", "/api/v0/scraper-settings/UNKNOWN", func(*providerPayload) {}, 404},
 	}
@@ -143,11 +140,9 @@ func TestProviderSettings_PutRejectsInvalidAndUnavailableProviders(t *testing.T)
 		t.Run(tc.name, func(t *testing.T) {
 			payload := valid
 			payload.SearchQueries = []map[string]string{{
-				"keywords": "Support", "location": "Remote", "f_WT": "",
+				"keywords": "Support", "location": "Remote",
 			}}
-			payload.HardcodedURLs = []map[string]any{{
-				"url": "https://example.test/jobs", "description": "", "is_remote": true,
-			}}
+			payload.GlobalSearches = []string{"Remote help desk"}
 			tc.edit(&payload)
 			raw, err := json.Marshal(payload)
 			if err != nil {
@@ -198,7 +193,7 @@ func TestProviderSettings_ResetRestoresSeedWhitelistAndPreservesCadence(t *testi
 	if _, err := pool.Exec(`
 		UPDATE scraper_settings
 		SET enabled = false, scrape_interval_seconds = 123, timespan_code = 'changed',
-		    pages_to_scrape = 77, rounds = 3, search_queries = '[]', hardcoded_urls = '[]',
+		    pages_to_scrape = 77, rounds = 3, search_queries = '[]', global_searches = '[]',
 		    last_scraped_at = $1, next_eligible_at = $2
 		WHERE job_source = 'LINKEDIN'
 	`, last, next); err != nil {
@@ -230,7 +225,7 @@ func TestProviderSettings_ResetRestoresSeedWhitelistAndPreservesCadence(t *testi
 		got.TimespanCode != seed.TimespanCode ||
 		got.PagesToScrape != seed.PagesToScrape || got.Rounds != seed.Rounds ||
 		!reflect.DeepEqual(got.SearchQueries, seed.SearchQueries) ||
-		!reflect.DeepEqual(got.HardcodedURLs, seed.HardcodedURLs) {
+		!reflect.DeepEqual(got.GlobalSearches, seed.GlobalSearches) {
 		t.Errorf("reset did not restore provider seed: got=%#v seed=%#v", got, seed)
 	}
 	if got.LastScrapedAt == nil || !got.LastScrapedAt.Equal(last) ||

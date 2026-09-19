@@ -253,7 +253,7 @@ function Header() {
 }
 
 const stateOrder = ["pending", "rejected", "eligible", "notifying", "notified"];
-const rejectReasonOrder = ["duplicate", "title_company", "description", "remote_lie", "detail_failed"];
+const rejectReasonOrder = ["duplicate", "title_company", "description", "detail_failed"];
 const chartColors = {
   total: "#2563eb",
   notified: "#16a34a",
@@ -737,13 +737,6 @@ const filterEditors: Array<{
     hint: "A job is rejected when its company name contains one of these words.",
     tone: "exclude",
   },
-  {
-    key: "non_remote_phrases",
-    heading: "Non-remote phrases",
-    noun: "non-remote phrase",
-    hint: "These phrases show that a job which claims to be remote is not remote.",
-    tone: "exclude",
-  },
 ];
 
 function listValuesEqual(left: string[], right: string[]) {
@@ -761,7 +754,6 @@ function cloneSettings(input: SearchSettingsInput): SearchSettingsInput {
     title_include: [...input.title_include],
     title_exclude: [...input.title_exclude],
     company_exclude: [...input.company_exclude],
-    non_remote_phrases: [...input.non_remote_phrases],
   };
 }
 

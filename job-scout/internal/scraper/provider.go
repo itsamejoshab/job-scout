@@ -24,8 +24,8 @@ type JobData struct {
 // Provider is implemented by each job-site scraper.
 type Provider interface {
 	Source() db.JobSource
-	// ScrapeJobs runs a single search query (keys: keywords, location, f_WT).
+	// ScrapeJobs runs a single search query (keys: keywords, optional location, optional f_WT).
+	// For LinkedIn, f_WT selects work types that are prepended to keywords;
+	// location is sent as geoId. Global searches omit location.
 	ScrapeJobs(ctx context.Context, query map[string]string) ([]JobData, error)
-	// ScrapeHardcodedURL scrapes a pre-built URL (keys: url, description, is_remote).
-	ScrapeHardcodedURL(ctx context.Context, cfg map[string]any) ([]JobData, error)
 }

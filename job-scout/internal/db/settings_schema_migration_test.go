@@ -17,7 +17,7 @@ func TestMigrate_EnforcesSingletonSettingsAndAddsQueryIndexes(t *testing.T) {
 
 	if _, err := pool.Exec(`
 		INSERT INTO scraper_settings
-			(job_source, search_queries, hardcoded_urls, timespan_code, pages_to_scrape, rounds)
+			(job_source, search_queries, global_searches, timespan_code, pages_to_scrape, rounds)
 		VALUES
 			('LINKEDIN', '[]', '[]', 'r86400', 1, 1),
 			('LINKEDIN', '[]', '[]', 'r86400', 2, 2),
@@ -29,10 +29,10 @@ func TestMigrate_EnforcesSingletonSettingsAndAddsQueryIndexes(t *testing.T) {
 	if _, err := pool.Exec(`
 		INSERT INTO search_settings
 			(desc_include_words, desc_exclude_words, title_include, title_exclude,
-			 company_exclude, non_remote_phrases)
+			 company_exclude)
 		VALUES
-			('["keep"]', '[]', '[]', '[]', '[]', '[]'),
-			('["drop"]', '[]', '[]', '[]', '[]', '[]')
+			('["keep"]', '[]', '[]', '[]', '[]'),
+			('["drop"]', '[]', '[]', '[]', '[]')
 	`); err != nil {
 		t.Fatalf("insert duplicate search_settings: %v", err)
 	}
@@ -86,14 +86,14 @@ func TestMigrate_EnforcesSingletonSettingsAndAddsQueryIndexes(t *testing.T) {
 
 	_, err := pool.Exec(`
 		INSERT INTO scraper_settings
-			(job_source, search_queries, hardcoded_urls, timespan_code, pages_to_scrape, rounds)
+			(job_source, search_queries, global_searches, timespan_code, pages_to_scrape, rounds)
 		VALUES ('LINKEDIN', '[]', '[]', 'r86400', 1, 1)
 	`)
 	assertPostgresCode(t, err, "23505", "duplicate scraper_settings job_source")
 
 	_, err = pool.Exec(`
 		INSERT INTO scraper_settings
-			(job_source, search_queries, hardcoded_urls, timespan_code, pages_to_scrape, rounds)
+			(job_source, search_queries, global_searches, timespan_code, pages_to_scrape, rounds)
 		VALUES (NULL, '[]', '[]', 'r86400', 1, 1)
 	`)
 	assertPostgresCode(t, err, "23502", "null scraper_settings job_source")
@@ -101,8 +101,8 @@ func TestMigrate_EnforcesSingletonSettingsAndAddsQueryIndexes(t *testing.T) {
 	_, err = pool.Exec(`
 		INSERT INTO search_settings
 			(desc_include_words, desc_exclude_words, title_include, title_exclude,
-			 company_exclude, non_remote_phrases)
-		VALUES ('[]', '[]', '[]', '[]', '[]', '[]')
+			 company_exclude)
+		VALUES ('[]', '[]', '[]', '[]', '[]')
 	`)
 	assertPostgresCode(t, err, "23505", "second search_settings row")
 

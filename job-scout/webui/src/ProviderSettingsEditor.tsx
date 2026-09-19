@@ -51,11 +51,19 @@ function toLinkedInMatrix(searchQueries: ProviderSettings["search_queries"]): Li
       };
       locations.set(query.location, location);
     }
-    if (query.f_WT === "1" || query.f_WT === "2" || query.f_WT === "3") {
-      location.workTypes[query.f_WT] = true;
-    } else if (!query.f_WT) {
-      // No LinkedIn work-type filter includes all three modes.
+    const codes = (query.f_WT ?? "")
+      .split(/[,\s|]+/)
+      .map((code) => code.trim())
+      .filter(Boolean);
+    if (codes.length === 0) {
+      // No work-type selection means all three modes.
       location.workTypes = { "1": true, "2": true, "3": true };
+      continue;
+    }
+    for (const code of codes) {
+      if (code === "1" || code === "2" || code === "3") {
+        location.workTypes[code] = true;
+      }
     }
   }
 
@@ -64,11 +72,16 @@ function toLinkedInMatrix(searchQueries: ProviderSettings["search_queries"]): Li
 
 function fromLinkedInMatrix(matrix: LinkedInMatrix): ProviderSettings["search_queries"] {
   return matrix.queries.flatMap((keywords) =>
-    matrix.locations.flatMap((location) =>
-      linkedInWorkTypes
+    matrix.locations.flatMap((location) => {
+      const selected = linkedInWorkTypes
         .filter(({ code }) => location.workTypes[code])
-        .map(({ code }) => ({ keywords, location: location.location, f_WT: code })),
-    ),
+        .map(({ code }) => code);
+      if (selected.length === 0) {
+        return [];
+      }
+      const f_WT = selected.length === linkedInWorkTypes.length ? "" : selected.join(",");
+      return [{ keywords, location: location.location, f_WT }];
+    }),
   );
 }
 
@@ -84,7 +97,7 @@ function toInput(settings: ProviderSettings): ProviderDraft {
       location: query.location,
       f_WT: query.f_WT ?? "",
     })),
-    hardcoded_urls: settings.hardcoded_urls.map((entry) => ({ ...entry })),
+    global_searches: [...settings.global_searches],
     linkedInMatrix: settings.job_source === "LINKEDIN"
       ? toLinkedInMatrix(settings.search_queries)
       : undefined,
@@ -99,7 +112,7 @@ function cloneInput(settings: ProviderDraft): ProviderSettingsInput {
     pages_to_scrape: settings.pages_to_scrape,
     rounds: settings.rounds,
     search_queries: settings.search_queries.map((query) => ({ ...query })),
-    hardcoded_urls: settings.hardcoded_urls.map((entry) => ({ ...entry })),
+    global_searches: [...settings.global_searches],
   };
 }
 
@@ -118,6 +131,9 @@ function LinkedInSearchEditor({
     <div className="mt-5 grid gap-6 lg:grid-cols-2">
       <fieldset>
         <legend className="text-sm font-semibold tracking-tight">Queries</legend>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Combined with every location below.
+        </p>
         <div className="mt-2 space-y-2">
           {matrix.queries.map((query, index) => (
             <div className="flex gap-2" key={index}>
@@ -157,68 +173,92 @@ function LinkedInSearchEditor({
         </Button>
       </fieldset>
 
-      <fieldset>
-        <legend className="text-sm font-semibold tracking-tight">Locations and work types</legend>
-        <div className="mt-2 space-y-3">
-          {matrix.locations.map((location, index) => (
-            <div className="rounded-xl border border-border/70 bg-muted/30 p-3" key={index}>
-              <div className="flex gap-2">
-                <input
-                  type="number"
-                  min={1}
-                  step={1}
-                  aria-label={`LinkedIn location ${index + 1}`}
-                  className="field-sm min-w-0 flex-1"
-                  value={location.location}
-                  onChange={(event) => {
-                    const locations = matrix.locations.map((item, itemIndex) =>
-                      itemIndex === index ? { ...item, location: event.target.value } : item
-                    );
-                    onChange({ ...matrix, locations });
-                  }}
-                />
-                <Button
-                  variant="danger"
-                  size="sm"
-                  aria-label={`Remove LinkedIn location ${index + 1}`}
-                  onClick={() => onChange({
-                    ...matrix,
-                    locations: matrix.locations.filter((_, itemIndex) => itemIndex !== index),
-                  })}
-                >
-                  <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
-                  Remove
-                </Button>
-              </div>
-              <div className="mt-2 flex flex-wrap gap-4">
+      <fieldset className="overflow-x-auto">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <legend className="text-sm font-semibold tracking-tight">Locations and work types</legend>
+          <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
+            {matrix.locations.length} locations
+          </span>
+        </div>
+        <p className="mt-1 text-xs text-muted-foreground">
+          LinkedIn geo ID. Selected work types are added to each query as natural-language text.
+        </p>
+        {matrix.locations.length === 0 ? (
+          <p className="mt-3 rounded-xl border border-dashed border-border/70 px-3 py-6 text-center text-sm text-muted-foreground">
+            No locations yet. Add a LinkedIn geo ID to start.
+          </p>
+        ) : (
+          <table className="mt-3 w-full text-left text-sm">
+            <thead>
+              <tr className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                <th className="p-2">Geo ID</th>
                 {linkedInWorkTypes.map(({ code, label }) => (
-                  <label className="flex items-center gap-2 text-sm" key={code}>
+                  <th className="p-2 text-center" key={code}>{label}</th>
+                ))}
+                <th className="p-2">Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {matrix.locations.map((location, index) => (
+                <tr key={index}>
+                  <td className="p-2">
                     <input
-                      type="checkbox"
-                      aria-label={`LinkedIn location ${index + 1} ${label}`}
-                      checked={location.workTypes[code]}
+                      type="number"
+                      min={1}
+                      step={1}
+                      aria-label={`LinkedIn location ${index + 1}`}
+                      className="field-sm min-w-[8rem] w-full"
+                      value={location.location}
                       onChange={(event) => {
                         const locations = matrix.locations.map((item, itemIndex) =>
-                          itemIndex === index
-                            ? {
-                                ...item,
-                                workTypes: {
-                                  ...item.workTypes,
-                                  [code]: event.target.checked,
-                                },
-                              }
-                            : item
+                          itemIndex === index ? { ...item, location: event.target.value } : item
                         );
                         onChange({ ...matrix, locations });
                       }}
                     />
-                    {label}
-                  </label>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
+                  </td>
+                  {linkedInWorkTypes.map(({ code, label }) => (
+                    <td className="p-2 text-center" key={code}>
+                      <input
+                        type="checkbox"
+                        aria-label={`LinkedIn location ${index + 1} ${label}`}
+                        checked={location.workTypes[code]}
+                        onChange={(event) => {
+                          const locations = matrix.locations.map((item, itemIndex) =>
+                            itemIndex === index
+                              ? {
+                                  ...item,
+                                  workTypes: {
+                                    ...item.workTypes,
+                                    [code]: event.target.checked,
+                                  },
+                                }
+                              : item
+                          );
+                          onChange({ ...matrix, locations });
+                        }}
+                      />
+                    </td>
+                  ))}
+                  <td className="p-2">
+                    <Button
+                      variant="danger"
+                      size="sm"
+                      aria-label={`Remove LinkedIn location ${index + 1}`}
+                      onClick={() => onChange({
+                        ...matrix,
+                        locations: matrix.locations.filter((_, itemIndex) => itemIndex !== index),
+                      })}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                      Remove
+                    </Button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
         <Button
           size="sm"
           className="mt-3"
@@ -238,6 +278,70 @@ function LinkedInSearchEditor({
         </Button>
       </fieldset>
     </div>
+  );
+}
+
+function GlobalSearchesEditor({
+  source,
+  searches,
+  onChange,
+}: {
+  source: string;
+  searches: string[];
+  onChange: (searches: string[]) => void;
+}) {
+  return (
+    <fieldset className="mt-5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <legend className="text-sm font-semibold tracking-tight">Global searches</legend>
+        <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
+          {searches.length} searches
+        </span>
+      </div>
+      <p className="mt-1 text-xs text-muted-foreground">
+        Free-form search strings. Not combined with locations.
+      </p>
+      {searches.length === 0 ? (
+        <p className="mt-3 rounded-xl border border-dashed border-border/70 px-3 py-6 text-center text-sm text-muted-foreground">
+          No global searches.
+        </p>
+      ) : (
+        <div className="mt-3 space-y-2">
+          {searches.map((search, index) => (
+            <div className="flex gap-2" key={index}>
+              <input
+                aria-label={`${source} global search ${index + 1}`}
+                className="field-sm min-w-0 flex-1"
+                value={search}
+                onChange={(event) => {
+                  const next = searches.map((item, itemIndex) =>
+                    itemIndex === index ? event.target.value : item
+                  );
+                  onChange(next);
+                }}
+              />
+              <Button
+                variant="danger"
+                size="sm"
+                aria-label={`Remove ${source} global search ${index + 1}`}
+                onClick={() => onChange(searches.filter((_, itemIndex) => itemIndex !== index))}
+              >
+                <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                Remove
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
+      <Button
+        size="sm"
+        className="mt-3"
+        onClick={() => onChange([...searches, ""])}
+      >
+        <Plus className="h-4 w-4" aria-hidden="true" />
+        Add {source} global search
+      </Button>
+    </fieldset>
   );
 }
 
@@ -363,7 +467,6 @@ function ProviderSection({
             <tr className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               <th className="p-2">Keywords</th>
               <th className="p-2">Location</th>
-              <th className="p-2">Remote-work parameter</th>
               <th className="p-2">Action</th>
             </tr>
           </thead>
@@ -397,19 +500,6 @@ function ProviderSection({
                   />
                 </td>
                 <td className="p-2">
-                  <input
-                    aria-label={`${source} query remote-work parameter`}
-                    className="field-sm"
-                    value={query.f_WT ?? ""}
-                    onChange={(event) => {
-                      const search_queries = draft.search_queries.map((item, itemIndex) =>
-                        itemIndex === index ? { ...item, f_WT: event.target.value } : item
-                      );
-                      patch({ search_queries });
-                    }}
-                  />
-                </td>
-                <td className="p-2">
                   <Button
                     variant="danger"
                     size="sm"
@@ -432,7 +522,7 @@ function ProviderSection({
           onClick={() => patch({
             search_queries: [
               ...draft.search_queries,
-              { keywords: "", location: "", f_WT: "" },
+              { keywords: "", location: "" },
             ],
           })}
         >
@@ -442,94 +532,11 @@ function ProviderSection({
       </fieldset>
       )}
 
-      <fieldset className="mt-5 overflow-x-auto">
-        <legend className="text-sm font-semibold tracking-tight">Hardcoded URLs</legend>
-        {draft.hardcoded_urls.length === 0 ? (
-          <p className="mt-2 text-sm text-muted-foreground">No hardcoded URLs.</p>
-        ) : (
-          <table className="mt-2 w-full text-left text-sm">
-            <thead>
-              <tr className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                <th className="p-2">URL</th>
-                <th className="p-2">Description</th>
-                <th className="p-2">Remote</th>
-                <th className="p-2">Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {draft.hardcoded_urls.map((entry, index) => (
-                <tr key={index}>
-                  <td className="p-2">
-                    <input
-                      aria-label={`${source} hardcoded URL`}
-                      className="field-sm"
-                      value={entry.url}
-                      onChange={(event) => {
-                        const hardcoded_urls = draft.hardcoded_urls.map((item, itemIndex) =>
-                          itemIndex === index ? { ...item, url: event.target.value } : item
-                        );
-                        patch({ hardcoded_urls });
-                      }}
-                    />
-                  </td>
-                  <td className="p-2">
-                    <input
-                      aria-label={`${source} URL description`}
-                      className="field-sm"
-                      value={entry.description}
-                      onChange={(event) => {
-                        const hardcoded_urls = draft.hardcoded_urls.map((item, itemIndex) =>
-                          itemIndex === index ? { ...item, description: event.target.value } : item
-                        );
-                        patch({ hardcoded_urls });
-                      }}
-                    />
-                  </td>
-                  <td className="p-2">
-                    <input
-                      type="checkbox"
-                      aria-label={`${source} URL remote`}
-                      checked={entry.is_remote}
-                      onChange={(event) => {
-                        const hardcoded_urls = draft.hardcoded_urls.map((item, itemIndex) =>
-                          itemIndex === index ? { ...item, is_remote: event.target.checked } : item
-                        );
-                        patch({ hardcoded_urls });
-                      }}
-                    />
-                  </td>
-                  <td className="p-2">
-                    <Button
-                      variant="danger"
-                      size="sm"
-                      aria-label={`Remove ${source} URL ${index + 1}`}
-                      onClick={() => patch({
-                        hardcoded_urls: draft.hardcoded_urls.filter((_, itemIndex) => itemIndex !== index),
-                      })}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
-                      Remove
-                    </Button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-        <Button
-          size="sm"
-          className="mt-3"
-          onClick={() => patch({
-            hardcoded_urls: [
-              ...draft.hardcoded_urls,
-              { url: "", description: "", is_remote: false },
-            ],
-          })}
-        >
-          <Plus className="h-4 w-4" aria-hidden="true" />
-          Add {source} URL
-        </Button>
-      </fieldset>
+      <GlobalSearchesEditor
+        source={source}
+        searches={draft.global_searches}
+        onChange={(global_searches) => patch({ global_searches })}
+      />
 
       {(save.isError || reset.isError) && (
         <p className="mt-3 text-sm text-destructive">

@@ -35,8 +35,7 @@ const dashboardStats = {
         duplicate: 0,
         title_company: 1,
         description: 0,
-        remote_lie: 0,
-        detail_failed: 0,
+                detail_failed: 0,
       },
     },
     {
@@ -59,8 +58,7 @@ const dashboardStats = {
         duplicate: 0,
         title_company: 0,
         description: 0,
-        remote_lie: 0,
-        detail_failed: 0,
+                detail_failed: 0,
       },
     },
   ],
@@ -99,7 +97,6 @@ const filterSeed = {
   title_include: ["IT"],
   title_exclude: ["manager"],
   company_exclude: ["Bad Co"],
-  non_remote_phrases: ["on site"],
   created_at: "2026-09-18T20:00:00Z",
   updated_at: "2026-09-18T20:00:00Z",
 };
@@ -109,13 +106,11 @@ const providerSeed: Record<"LINKEDIN" | "INDEED", ProviderSettings> = {
     id: 1,
     job_source: "LINKEDIN",
     search_queries: [
-      { keywords: "Support", location: "101076143", f_WT: "1" },
-      { keywords: "Support", location: "101076143", f_WT: "2" },
-      { keywords: "Engineer", location: "101076143", f_WT: "1" },
-      { keywords: "Engineer", location: "101076143", f_WT: "2" },
+      { keywords: "Support", location: "101076143", f_WT: "1,2" },
+      { keywords: "Engineer", location: "101076143", f_WT: "1,2" },
     ],
-    hardcoded_urls: [
-      { url: "https://example.test/jobs", description: "Remote jobs", is_remote: true },
+    global_searches: [
+      "Remote IT Help Desk near Port Orange FL",
     ],
     timespan_code: "r86400",
     pages_to_scrape: 1,
@@ -131,9 +126,9 @@ const providerSeed: Record<"LINKEDIN" | "INDEED", ProviderSettings> = {
     id: 2,
     job_source: "INDEED",
     search_queries: [
-      { keywords: "Support", location: "United States", f_WT: "" },
+      { keywords: "Support", location: "United States" },
     ],
-    hardcoded_urls: [],
+    global_searches: [],
     timespan_code: "r86400",
     pages_to_scrape: 1,
     rounds: 1,
@@ -245,7 +240,6 @@ function renderPath(path: string, options: RenderOptions = {}) {
         title_include: string[];
         title_exclude: string[];
         company_exclude: string[];
-        non_remote_phrases: string[];
       };
       currentSettings = {
         ...currentSettings,
@@ -254,7 +248,6 @@ function renderPath(path: string, options: RenderOptions = {}) {
         title_include: normalizeWords(payload.title_include ?? []),
         title_exclude: normalizeWords(payload.title_exclude ?? []),
         company_exclude: normalizeWords(payload.company_exclude ?? []),
-        non_remote_phrases: normalizeWords(payload.non_remote_phrases ?? []),
         updated_at: "2026-09-18T20:05:00Z",
       };
       return new Response(JSON.stringify(currentSettings), {
@@ -286,8 +279,9 @@ function renderPath(path: string, options: RenderOptions = {}) {
         search_queries: payload.search_queries.map((query: Record<string, string>) => ({
           keywords: query.keywords.trim(),
           location: query.location.trim(),
-          f_WT: query.f_WT,
+          f_WT: query.f_WT ?? "",
         })),
+        global_searches: (payload.global_searches as string[]).map((item) => item.trim()),
         updated_at: "2026-09-18T20:05:00Z",
       };
       return new Response(JSON.stringify(currentProviders[source]), {
@@ -677,7 +671,7 @@ describe("operator shell", () => {
     expect(screen.getByRole("button", { name: "Save LINKEDIN settings" })).toBeDisabled();
   });
 
-  it("edits LinkedIn queries and location work types as a Cartesian product", async () => {
+  it("edits LinkedIn queries, location work types, and global searches", async () => {
     const user = userEvent.setup();
     renderPath("/settings");
 
@@ -689,6 +683,10 @@ describe("operator shell", () => {
     expect(screen.getByLabelText("LinkedIn location 1 On-Site")).toBeChecked();
     expect(screen.getByLabelText("LinkedIn location 1 Hybrid")).not.toBeChecked();
     expect(screen.getByLabelText("LinkedIn location 1 Remote")).toBeChecked();
+    expect(screen.getByText("1 locations")).toBeInTheDocument();
+    expect(screen.getByLabelText("LINKEDIN global search 1")).toHaveValue(
+      "Remote IT Help Desk near Port Orange FL",
+    );
 
     await user.click(screen.getByRole("button", { name: "Add LinkedIn query" }));
     await user.type(screen.getByLabelText("LinkedIn query 3"), "Analyst");
@@ -696,7 +694,14 @@ describe("operator shell", () => {
     await user.type(screen.getByLabelText("LinkedIn location 2"), "105135351");
     await user.click(screen.getByLabelText("LinkedIn location 2 On-Site"));
     await user.click(screen.getByLabelText("LinkedIn location 2 Hybrid"));
+    await user.click(screen.getByRole("button", { name: "Add LINKEDIN global search" }));
+    await user.type(
+      screen.getByLabelText("LINKEDIN global search 2"),
+      "Hybrid help desk within 10 miles of Daytona Beach",
+    );
     expect(save).toBeEnabled();
+    expect(screen.getByText("2 locations")).toBeInTheDocument();
+    expect(screen.getByText("2 searches")).toBeInTheDocument();
 
     await user.click(save);
     await waitFor(() => {
@@ -713,16 +718,18 @@ describe("operator shell", () => {
     );
     const payload = JSON.parse(String((putCall?.[1] as RequestInit | undefined)?.body));
     expect(payload.search_queries).toEqual([
-      { keywords: "Support", location: "101076143", f_WT: "1" },
-      { keywords: "Support", location: "101076143", f_WT: "2" },
+      { keywords: "Support", location: "101076143", f_WT: "1,2" },
       { keywords: "Support", location: "105135351", f_WT: "3" },
-      { keywords: "Engineer", location: "101076143", f_WT: "1" },
-      { keywords: "Engineer", location: "101076143", f_WT: "2" },
+      { keywords: "Engineer", location: "101076143", f_WT: "1,2" },
       { keywords: "Engineer", location: "105135351", f_WT: "3" },
-      { keywords: "Analyst", location: "101076143", f_WT: "1" },
-      { keywords: "Analyst", location: "101076143", f_WT: "2" },
+      { keywords: "Analyst", location: "101076143", f_WT: "1,2" },
       { keywords: "Analyst", location: "105135351", f_WT: "3" },
     ]);
+    expect(payload.global_searches).toEqual([
+      "Remote IT Help Desk near Port Orange FL",
+      "Hybrid help desk within 10 miles of Daytona Beach",
+    ]);
+    expect(payload).not.toHaveProperty("hardcoded_urls");
     expect(save).toBeDisabled();
   });
 
