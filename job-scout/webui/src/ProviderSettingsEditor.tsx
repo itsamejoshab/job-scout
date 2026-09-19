@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, RotateCcw, Save, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 
 import {
   getDashboardStats,
@@ -120,6 +120,59 @@ function inputsEqual(left: ProviderDraft, right: ProviderDraft) {
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
+function SettingsGroup({
+  title,
+  hint,
+  count,
+  children,
+}: {
+  title: string;
+  hint?: string;
+  count?: string;
+  children: ReactNode;
+}) {
+  return (
+    <section className="border-b border-border/60 px-4 py-3 last:border-0">
+      <div className="flex flex-wrap items-baseline gap-x-2">
+        <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          {title}
+        </h4>
+        {count && <span className="text-xs tabular-nums text-muted-foreground">{count}</span>}
+      </div>
+      {hint && <p className="mt-0.5 text-xs text-muted-foreground">{hint}</p>}
+      {children}
+    </section>
+  );
+}
+
+function SettingRow({
+  label,
+  hint,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  children: ReactNode;
+}) {
+  return (
+    <label className="settings-row">
+      <span className="min-w-0">
+        <span className="block text-sm font-medium">{label}</span>
+        {hint && <span className="block text-xs text-muted-foreground">{hint}</span>}
+      </span>
+      {children}
+    </label>
+  );
+}
+
+function RemoveButton({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <Button variant="danger" size="icon" className="h-9 w-9 shrink-0" aria-label={label} onClick={onClick}>
+      <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+    </Button>
+  );
+}
+
 function LinkedInSearchEditor({
   matrix,
   onChange,
@@ -128,13 +181,13 @@ function LinkedInSearchEditor({
   onChange: (matrix: LinkedInMatrix) => void;
 }) {
   return (
-    <div className="mt-5 grid gap-6 lg:grid-cols-2">
-      <fieldset>
-        <legend className="text-sm font-semibold tracking-tight">Queries</legend>
-        <p className="mt-1 text-xs text-muted-foreground">
-          Combined with every location below.
-        </p>
-        <div className="mt-2 space-y-2">
+    <>
+      <SettingsGroup
+        title="Queries"
+        hint="Combined with every location below."
+        count={`${matrix.queries.length} queries`}
+      >
+        <div className="mt-2 max-w-md space-y-1.5">
           {matrix.queries.map((query, index) => (
             <div className="flex gap-2" key={index}>
               <input
@@ -148,66 +201,57 @@ function LinkedInSearchEditor({
                   onChange({ ...matrix, queries });
                 }}
               />
-              <Button
-                variant="danger"
-                size="sm"
-                aria-label={`Remove LinkedIn query ${index + 1}`}
+              <RemoveButton
+                label={`Remove LinkedIn query ${index + 1}`}
                 onClick={() => onChange({
                   ...matrix,
                   queries: matrix.queries.filter((_, itemIndex) => itemIndex !== index),
                 })}
-              >
-                <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
-                Remove
-              </Button>
+              />
             </div>
           ))}
         </div>
         <Button
           size="sm"
-          className="mt-3"
+          variant="ghost"
+          className="mt-2"
           onClick={() => onChange({ ...matrix, queries: [...matrix.queries, ""] })}
         >
           <Plus className="h-4 w-4" aria-hidden="true" />
           Add LinkedIn query
         </Button>
-      </fieldset>
+      </SettingsGroup>
 
-      <fieldset className="overflow-x-auto">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <legend className="text-sm font-semibold tracking-tight">Locations and work types</legend>
-          <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
-            {matrix.locations.length} locations
-          </span>
-        </div>
-        <p className="mt-1 text-xs text-muted-foreground">
-          LinkedIn geo ID. Selected work types are added to each query as natural-language text.
-        </p>
+      <SettingsGroup
+        title="Locations and work types"
+        hint="LinkedIn geo ID. Selected work types are added to each query as natural-language text."
+        count={`${matrix.locations.length} locations`}
+      >
         {matrix.locations.length === 0 ? (
-          <p className="mt-3 rounded-xl border border-dashed border-border/70 px-3 py-6 text-center text-sm text-muted-foreground">
+          <p className="mt-2 text-sm text-muted-foreground">
             No locations yet. Add a LinkedIn geo ID to start.
           </p>
         ) : (
-          <table className="mt-3 w-full text-left text-sm">
+          <table className="mt-2 max-w-md text-left text-sm">
             <thead>
-              <tr className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                <th className="p-2">Geo ID</th>
+              <tr className="text-xs font-medium text-muted-foreground">
+                <th className="py-1 pr-3 font-medium">Geo ID</th>
                 {linkedInWorkTypes.map(({ code, label }) => (
-                  <th className="p-2 text-center" key={code}>{label}</th>
+                  <th className="px-2 py-1 text-center font-medium" key={code}>{label}</th>
                 ))}
-                <th className="p-2">Action</th>
+                <th className="sr-only">Action</th>
               </tr>
             </thead>
             <tbody>
               {matrix.locations.map((location, index) => (
                 <tr key={index}>
-                  <td className="p-2">
+                  <td className="py-1 pr-3">
                     <input
                       type="number"
                       min={1}
                       step={1}
                       aria-label={`LinkedIn location ${index + 1}`}
-                      className="field-sm min-w-[8rem] w-full"
+                      className="field-sm w-32 tabular-nums"
                       value={location.location}
                       onChange={(event) => {
                         const locations = matrix.locations.map((item, itemIndex) =>
@@ -218,7 +262,7 @@ function LinkedInSearchEditor({
                     />
                   </td>
                   {linkedInWorkTypes.map(({ code, label }) => (
-                    <td className="p-2 text-center" key={code}>
+                    <td className="px-2 py-1 text-center" key={code}>
                       <input
                         type="checkbox"
                         aria-label={`LinkedIn location ${index + 1} ${label}`}
@@ -240,19 +284,14 @@ function LinkedInSearchEditor({
                       />
                     </td>
                   ))}
-                  <td className="p-2">
-                    <Button
-                      variant="danger"
-                      size="sm"
-                      aria-label={`Remove LinkedIn location ${index + 1}`}
+                  <td className="py-1 pl-2">
+                    <RemoveButton
+                      label={`Remove LinkedIn location ${index + 1}`}
                       onClick={() => onChange({
                         ...matrix,
                         locations: matrix.locations.filter((_, itemIndex) => itemIndex !== index),
                       })}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
-                      Remove
-                    </Button>
+                    />
                   </td>
                 </tr>
               ))}
@@ -261,7 +300,8 @@ function LinkedInSearchEditor({
         )}
         <Button
           size="sm"
-          className="mt-3"
+          variant="ghost"
+          className="mt-2"
           onClick={() => onChange({
             ...matrix,
             locations: [
@@ -276,8 +316,8 @@ function LinkedInSearchEditor({
           <Plus className="h-4 w-4" aria-hidden="true" />
           Add LinkedIn location
         </Button>
-      </fieldset>
-    </div>
+      </SettingsGroup>
+    </>
   );
 }
 
@@ -291,22 +331,15 @@ function GlobalSearchesEditor({
   onChange: (searches: string[]) => void;
 }) {
   return (
-    <fieldset className="mt-5">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <legend className="text-sm font-semibold tracking-tight">Global searches</legend>
-        <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
-          {searches.length} searches
-        </span>
-      </div>
-      <p className="mt-1 text-xs text-muted-foreground">
-        Free-form search strings. Not combined with locations.
-      </p>
+    <SettingsGroup
+      title="Global searches"
+      hint="Free-form search strings. Not combined with locations."
+      count={`${searches.length} searches`}
+    >
       {searches.length === 0 ? (
-        <p className="mt-3 rounded-xl border border-dashed border-border/70 px-3 py-6 text-center text-sm text-muted-foreground">
-          No global searches.
-        </p>
+        <p className="mt-2 text-sm text-muted-foreground">No global searches.</p>
       ) : (
-        <div className="mt-3 space-y-2">
+        <div className="mt-2 max-w-xl space-y-1.5">
           {searches.map((search, index) => (
             <div className="flex gap-2" key={index}>
               <input
@@ -320,28 +353,24 @@ function GlobalSearchesEditor({
                   onChange(next);
                 }}
               />
-              <Button
-                variant="danger"
-                size="sm"
-                aria-label={`Remove ${source} global search ${index + 1}`}
+              <RemoveButton
+                label={`Remove ${source} global search ${index + 1}`}
                 onClick={() => onChange(searches.filter((_, itemIndex) => itemIndex !== index))}
-              >
-                <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
-                Remove
-              </Button>
+              />
             </div>
           ))}
         </div>
       )}
       <Button
         size="sm"
-        className="mt-3"
+        variant="ghost"
+        className="mt-2"
         onClick={() => onChange([...searches, ""])}
       >
         <Plus className="h-4 w-4" aria-hidden="true" />
         Add {source} global search
       </Button>
-    </fieldset>
+    </SettingsGroup>
   );
 }
 
@@ -391,145 +420,160 @@ function ProviderSection({
   };
 
   return (
-    <article className="mt-5 rounded-xl border border-border/70 bg-card p-5 shadow-soft">
-      <div className="flex items-center gap-3">
-        <h3 className="text-base font-semibold tracking-tight">{source} provider</h3>
+    <article className="surface mt-3 overflow-hidden">
+      <header className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-border/60 bg-muted/40 px-4 py-3">
+        <h3 className="text-sm font-semibold tracking-tight">{source} provider</h3>
         {!implemented && <Badge variant="secondary">Not implemented</Badge>}
-      </div>
+        <div className="ml-auto flex items-center gap-2">
+          {dirty && (
+            <span className="text-xs font-medium text-accent-foreground">Unsaved changes</span>
+          )}
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={pending}
+            onClick={() => {
+              if (window.confirm(`Reset ${source} settings to seed defaults?`)) {
+                reset.mutate();
+              }
+            }}
+          >
+            <RotateCcw className="h-4 w-4" aria-hidden="true" />
+            Reset {source} settings
+          </Button>
+          <Button
+            size="sm"
+            variant="primary"
+            disabled={!dirty || pending}
+            onClick={() => save.mutate(cloneInput(draft))}
+          >
+            <Save className="h-4 w-4" aria-hidden="true" />
+            Save {source} settings
+          </Button>
+        </div>
+      </header>
 
-      <div className="mt-4 grid gap-3 md:grid-cols-3">
-        <label className="text-sm font-medium">
-          <span className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              aria-label={`Enable ${source}`}
-              checked={implemented && draft.enabled}
-              disabled={!implemented}
-              onChange={(event) => patch({ enabled: event.target.checked })}
-            />
-            Enabled
-          </span>
-        </label>
-        <label className="text-sm font-medium">
-          Scrape interval seconds
+      <SettingsGroup title="Schedule">
+        <SettingRow label="Enabled" hint="Include this provider in scheduled scrape runs.">
+          <input
+            type="checkbox"
+            aria-label={`Enable ${source}`}
+            checked={implemented && draft.enabled}
+            disabled={!implemented}
+            onChange={(event) => patch({ enabled: event.target.checked })}
+          />
+        </SettingRow>
+        <SettingRow label="Scrape interval" hint="Seconds to wait between scrape runs.">
           <input
             type="number"
             min={60}
-            className="field mt-1.5 font-normal"
+            aria-label={`${source} scrape interval seconds`}
+            className="field-sm w-24 shrink-0 tabular-nums"
             value={draft.scrape_interval_seconds}
             onChange={(event) => patch({ scrape_interval_seconds: Number(event.target.value) })}
           />
-        </label>
-        <label className="text-sm font-medium">
-          Timespan code
+        </SettingRow>
+        <SettingRow label="Timespan code" hint="Provider code for posting age, such as r86400 for one day.">
           <input
-            className="field mt-1.5 font-normal"
+            aria-label={`${source} timespan code`}
+            className="field-sm w-28 shrink-0"
             value={draft.timespan_code}
             onChange={(event) => patch({ timespan_code: event.target.value })}
           />
-        </label>
-        <label className="text-sm font-medium">
-          Pages to scrape
+        </SettingRow>
+        <SettingRow label="Pages to scrape" hint="Result pages to read for each search.">
           <input
             type="number"
             min={1}
-            className="field mt-1.5 font-normal"
+            aria-label={`${source} pages to scrape`}
+            className="field-sm w-20 shrink-0 tabular-nums"
             value={draft.pages_to_scrape}
             onChange={(event) => patch({ pages_to_scrape: Number(event.target.value) })}
           />
-        </label>
-        <label className="text-sm font-medium">
-          Rounds
+        </SettingRow>
+        <SettingRow label="Rounds" hint="Passes for each run, from 1 to 3.">
           <input
             type="number"
             min={1}
             max={3}
-            className="field mt-1.5 font-normal"
+            aria-label={`${source} rounds`}
+            className="field-sm w-20 shrink-0 tabular-nums"
             value={draft.rounds}
             onChange={(event) => patch({ rounds: Number(event.target.value) })}
           />
-        </label>
-        <div className="space-y-0.5 text-sm text-muted-foreground">
-          <p>Last scraped: {formatTimestamp(settings.last_scraped_at)}</p>
-          <p>Next eligible: {formatTimestamp(settings.next_eligible_at)}</p>
-          <p>Identifier: {settings.id}</p>
-          <p>Updated: {formatTimestamp(settings.updated_at)}</p>
-        </div>
-      </div>
+        </SettingRow>
+      </SettingsGroup>
 
       {source === "LINKEDIN" && draft.linkedInMatrix ? (
         <LinkedInSearchEditor matrix={draft.linkedInMatrix} onChange={patchLinkedIn} />
       ) : (
-      <fieldset className="mt-5 overflow-x-auto">
-        <legend className="text-sm font-semibold tracking-tight">Search queries</legend>
-        <table className="mt-2 w-full text-left text-sm">
-          <thead>
-            <tr className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              <th className="p-2">Keywords</th>
-              <th className="p-2">Location</th>
-              <th className="p-2">Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            {draft.search_queries.map((query, index) => (
-              <tr key={index}>
-                <td className="p-2">
-                  <input
-                    aria-label={`${source} query keywords`}
-                    className="field-sm"
-                    value={query.keywords}
-                    onChange={(event) => {
-                      const search_queries = draft.search_queries.map((item, itemIndex) =>
-                        itemIndex === index ? { ...item, keywords: event.target.value } : item
-                      );
-                      patch({ search_queries });
-                    }}
-                  />
-                </td>
-                <td className="p-2">
-                  <input
-                    aria-label={`${source} query location`}
-                    className="field-sm"
-                    value={query.location}
-                    onChange={(event) => {
-                      const search_queries = draft.search_queries.map((item, itemIndex) =>
-                        itemIndex === index ? { ...item, location: event.target.value } : item
-                      );
-                      patch({ search_queries });
-                    }}
-                  />
-                </td>
-                <td className="p-2">
-                  <Button
-                    variant="danger"
-                    size="sm"
-                    aria-label={`Remove ${source} query ${index + 1}`}
-                    onClick={() => patch({
-                      search_queries: draft.search_queries.filter((_, itemIndex) => itemIndex !== index),
-                    })}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
-                    Remove
-                  </Button>
-                </td>
+        <SettingsGroup title="Search queries" count={`${draft.search_queries.length} queries`}>
+          <table className="mt-2 max-w-xl text-left text-sm">
+            <thead>
+              <tr className="text-xs font-medium text-muted-foreground">
+                <th className="py-1 pr-3 font-medium">Keywords</th>
+                <th className="py-1 pr-3 font-medium">Location</th>
+                <th className="sr-only">Action</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-        <Button
-          size="sm"
-          className="mt-3"
-          onClick={() => patch({
-            search_queries: [
-              ...draft.search_queries,
-              { keywords: "", location: "" },
-            ],
-          })}
-        >
-          <Plus className="h-4 w-4" aria-hidden="true" />
-          Add {source} query
-        </Button>
-      </fieldset>
+            </thead>
+            <tbody>
+              {draft.search_queries.map((query, index) => (
+                <tr key={index}>
+                  <td className="py-1 pr-3">
+                    <input
+                      aria-label={`${source} query keywords`}
+                      className="field-sm w-40"
+                      value={query.keywords}
+                      onChange={(event) => {
+                        const search_queries = draft.search_queries.map((item, itemIndex) =>
+                          itemIndex === index ? { ...item, keywords: event.target.value } : item
+                        );
+                        patch({ search_queries });
+                      }}
+                    />
+                  </td>
+                  <td className="py-1 pr-3">
+                    <input
+                      aria-label={`${source} query location`}
+                      className="field-sm w-40"
+                      value={query.location}
+                      onChange={(event) => {
+                        const search_queries = draft.search_queries.map((item, itemIndex) =>
+                          itemIndex === index ? { ...item, location: event.target.value } : item
+                        );
+                        patch({ search_queries });
+                      }}
+                    />
+                  </td>
+                  <td className="py-1">
+                    <RemoveButton
+                      label={`Remove ${source} query ${index + 1}`}
+                      onClick={() => patch({
+                        search_queries: draft.search_queries.filter(
+                          (_, itemIndex) => itemIndex !== index,
+                        ),
+                      })}
+                    />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="mt-2"
+            onClick={() => patch({
+              search_queries: [
+                ...draft.search_queries,
+                { keywords: "", location: "" },
+              ],
+            })}
+          >
+            <Plus className="h-4 w-4" aria-hidden="true" />
+            Add {source} query
+          </Button>
+        </SettingsGroup>
       )}
 
       <GlobalSearchesEditor
@@ -538,38 +582,20 @@ function ProviderSection({
         onChange={(global_searches) => patch({ global_searches })}
       />
 
+      <SettingsGroup title="State">
+        <div className="mt-1 space-y-0.5 text-xs text-muted-foreground">
+          <p>Last scraped: {formatTimestamp(settings.last_scraped_at)}</p>
+          <p>Next eligible: {formatTimestamp(settings.next_eligible_at)}</p>
+          <p>Identifier: {settings.id}</p>
+          <p>Updated: {formatTimestamp(settings.updated_at)}</p>
+        </div>
+      </SettingsGroup>
+
       {(save.isError || reset.isError) && (
-        <p className="mt-3 text-sm text-destructive">
+        <p className="border-t border-border/60 px-4 py-3 text-sm text-destructive">
           {(save.error ?? reset.error)?.message}
         </p>
       )}
-      <div className="mt-5 flex items-center justify-end gap-2">
-        {dirty && (
-          <span className="mr-auto text-sm font-medium text-accent-foreground">
-            Unsaved changes
-          </span>
-        )}
-        <Button
-          variant="ghost"
-          disabled={pending}
-          onClick={() => {
-            if (window.confirm(`Reset ${source} settings to seed defaults?`)) {
-              reset.mutate();
-            }
-          }}
-        >
-          <RotateCcw className="h-4 w-4" aria-hidden="true" />
-          Reset {source} settings
-        </Button>
-        <Button
-          variant="primary"
-          disabled={!dirty || pending}
-          onClick={() => save.mutate(cloneInput(draft))}
-        >
-          <Save className="h-4 w-4" aria-hidden="true" />
-          Save {source} settings
-        </Button>
-      </div>
     </article>
   );
 }

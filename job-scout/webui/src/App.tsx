@@ -167,7 +167,7 @@ function Header() {
         <div className="flex flex-wrap items-center gap-2">
           <Button
             size="sm"
-            variant="primary"
+            variant="action"
             disabled={temporalDown || start.isPending}
             onClick={() => start.mutate("scrape")}
           >
@@ -175,6 +175,7 @@ function Header() {
           </Button>
           <Button
             size="sm"
+            variant="action"
             disabled={temporalDown || start.isPending}
             onClick={() => start.mutate("notify")}
           >
@@ -182,13 +183,14 @@ function Header() {
           </Button>
           <Button
             size="sm"
+            variant="action"
             disabled={reEvaluate.isPending}
             onClick={reEvaluateRejected}
             title="Send rejected jobs back to pending so the next notify pass applies the current filters."
           >
             Re-Evaluate Rejected Jobs
             {rejectedCount > 0 && (
-              <span className="rounded-full bg-muted px-1.5 py-0.5 text-xs font-semibold tabular-nums text-muted-foreground">
+              <span className="rounded-full bg-primary/15 px-1.5 py-0.5 text-xs font-semibold tabular-nums text-accent-foreground">
                 {rejectedCount}
               </span>
             )}
@@ -791,30 +793,26 @@ function FilterWordEditor({
   };
 
   return (
-    <section className="w-full rounded-xl border border-border/70 bg-card p-5 shadow-soft">
-      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-        <h3 className="text-sm font-semibold tracking-tight">{heading}</h3>
-        <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium tabular-nums text-muted-foreground">
+    <section className="border-b border-border/60 px-4 py-3 last:border-0">
+      <div className="flex flex-wrap items-baseline gap-x-2">
+        <h3 className="text-sm font-medium">{heading}</h3>
+        <span className="text-xs tabular-nums text-muted-foreground">
           {values.length} {values.length === 1 ? "entry" : "entries"}
         </span>
-        <p className="w-full text-sm text-muted-foreground">{hint}</p>
       </div>
+      <p className="mt-0.5 text-xs text-muted-foreground">{hint}</p>
 
       {values.length === 0 ? (
-        <p className="mt-4 rounded-lg border border-dashed border-border px-3 py-4 text-center text-sm text-muted-foreground">
-          No entries.
-        </p>
+        <p className="mt-2 text-sm text-muted-foreground">No entries.</p>
       ) : (
-        <ul className="mt-4 flex flex-wrap gap-2">
+        <ul className="mt-2 flex flex-wrap gap-1.5">
           {values.map((value, index) => (
             <li key={`${value}-${index}`}>
               <button
                 type="button"
                 className={cn(
-                  "group inline-flex items-center gap-1.5 rounded-full border py-1 pl-3 pr-2 text-sm transition-colors",
-                  tone === "include"
-                    ? "border-accent bg-accent text-accent-foreground hover:border-accent-foreground/30"
-                    : "border-border bg-muted text-foreground hover:border-destructive/40 hover:text-destructive",
+                  "pill group",
+                  tone === "include" ? "pill-include" : "pill-exclude",
                 )}
                 onClick={() => onRemove(index)}
                 aria-label={`Remove ${value}`}
@@ -830,12 +828,12 @@ function FilterWordEditor({
         </ul>
       )}
 
-      <div className="mt-4 flex gap-2">
+      <div className="mt-2 flex max-w-md gap-2">
         <input
           id={inputID}
           aria-label={`Add ${noun}`}
           placeholder={`Add a ${noun}`}
-          className="field flex-1"
+          className="field-sm min-w-0 flex-1"
           value={entry}
           onChange={(event) => setEntry(event.target.value)}
           onKeyDown={(event) => {
@@ -845,7 +843,7 @@ function FilterWordEditor({
             }
           }}
         />
-        <Button variant="primary" onClick={add} disabled={entry.trim() === ""}>
+        <Button size="sm" variant="primary" onClick={add} disabled={entry.trim() === ""}>
           <Plus className="h-4 w-4" aria-hidden="true" />
           Add
           <span className="sr-only"> {noun}</span>
@@ -935,28 +933,29 @@ function SettingsPage() {
   };
 
   return (
-    <main className="w-full px-6 py-8 lg:px-10">
-      <h1 className="text-3xl font-semibold tracking-tight">Settings</h1>
-      <p className="mt-1.5 text-muted-foreground">
+    <main className="w-full max-w-3xl px-6 py-8 lg:px-10">
+      <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
+      <p className="mt-1 text-sm text-muted-foreground">
         Edit universal filters and provider scrape settings.
       </p>
 
-      <section className="surface mt-8 bg-muted/40 p-5 lg:p-6">
-        <div className="flex flex-wrap items-center justify-between gap-3">
+      <section className="surface mt-6 overflow-hidden">
+        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b border-border/60 bg-muted/40 px-4 py-3">
           <div>
-            <h2 className="text-lg font-semibold tracking-tight">Filter word lists</h2>
-            <p className="mt-1 text-sm text-muted-foreground">
+            <h2 className="text-base font-semibold tracking-tight">Filter word lists</h2>
+            <p className="text-xs text-muted-foreground">
               Every list applies to all providers.
             </p>
           </div>
           {draft && (
             <div className="flex items-center gap-2">
               {dirty && (
-                <span className="text-sm font-medium text-accent-foreground">
+                <span className="text-xs font-medium text-accent-foreground">
                   Unsaved changes
                 </span>
               )}
               <Button
+                size="sm"
                 variant="ghost"
                 disabled={save.isPending || reset.isPending}
                 onClick={resetFilterSettings}
@@ -965,6 +964,7 @@ function SettingsPage() {
                 Reset filter settings
               </Button>
               <Button
+                size="sm"
                 variant="primary"
                 disabled={!dirty || save.isPending || reset.isPending}
                 onClick={saveFilterSettings}
@@ -977,32 +977,29 @@ function SettingsPage() {
         </div>
 
         {!draft && settings.isPending && (
-          <p className="mt-4 text-muted-foreground">Loading filter settings.</p>
+          <p className="px-4 py-3 text-sm text-muted-foreground">Loading filter settings.</p>
         )}
         {!draft && settings.isError && (
-          <p className="mt-4 text-destructive">Filter settings are unavailable.</p>
+          <p className="px-4 py-3 text-sm text-destructive">Filter settings are unavailable.</p>
         )}
-        {draft && (
-          <div className="mt-5 flex flex-col gap-4">
-            {filterEditors.map((editor) => (
-              <FilterWordEditor
-                key={editor.key}
-                heading={editor.heading}
-                noun={editor.noun}
-                hint={editor.hint}
-                tone={editor.tone}
-                values={draft[editor.key]}
-                onAdd={(value) => addEntry(editor.key, value)}
-                onRemove={(index) => removeEntry(editor.key, index)}
-              />
-            ))}
-          </div>
-        )}
+        {draft &&
+          filterEditors.map((editor) => (
+            <FilterWordEditor
+              key={editor.key}
+              heading={editor.heading}
+              noun={editor.noun}
+              hint={editor.hint}
+              tone={editor.tone}
+              values={draft[editor.key]}
+              onAdd={(value) => addEntry(editor.key, value)}
+              onRemove={(index) => removeEntry(editor.key, index)}
+            />
+          ))}
       </section>
 
-      <section className="surface mt-6 bg-muted/40 p-5 lg:p-6">
-        <h2 className="text-lg font-semibold tracking-tight">Provider settings</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
+      <section className="mt-6">
+        <h2 className="text-base font-semibold tracking-tight">Provider settings</h2>
+        <p className="text-xs text-muted-foreground">
           Each provider keeps its own schedule and search queries.
         </p>
         <ProviderSettingsEditor />
