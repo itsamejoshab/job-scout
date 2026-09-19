@@ -6,23 +6,19 @@ func TestQuerySearchContext_UsesStableLinkedInFields(t *testing.T) {
 	got := querySearchContext(map[string]string{
 		"keywords": "help desk",
 		"location": "103644278",
-		"f_WT":     "3",
+		"f_WT":     "3,2",
 		"ignored":  "not logged",
 	})
-	want := `query keywords="help desk" location="103644278" f_WT="3"`
+	want := `query keywords="help desk" location="103644278" f_WT="3,2"`
 	if got != want {
 		t.Errorf("querySearchContext() = %q, want %q", got, want)
 	}
 }
 
-func TestHardcodedSearchContext_IdentifiesConfiguredSearch(t *testing.T) {
-	got := hardcodedSearchContext(map[string]any{
-		"description": "US remote",
-		"is_remote":   true,
-		"url":         "https://www.linkedin.com/jobs/search/?f_WT=2",
-	})
-	want := `hardcoded description="US remote" is_remote=true url="https://www.linkedin.com/jobs/search/?f_WT=2"`
+func TestGlobalSearchContext_IdentifiesConfiguredSearch(t *testing.T) {
+	got := globalSearchContext("Remote IT Help Desk near Port Orange FL")
+	want := `global keywords="Remote IT Help Desk near Port Orange FL"`
 	if got != want {
-		t.Errorf("hardcodedSearchContext() = %q, want %q", got, want)
+		t.Errorf("globalSearchContext() = %q, want %q", got, want)
 	}
 }

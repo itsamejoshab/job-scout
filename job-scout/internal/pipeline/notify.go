@@ -43,12 +43,11 @@ func LoadNotifySnapshot(ctx context.Context, database *sql.DB) (NotifySnapshot, 
 	lists := domain.Lists{}
 	if settings != nil {
 		lists = domain.Lists{
-			TitleInclude:     settings.TitleInclude,
-			TitleExclude:     settings.TitleExclude,
-			CompanyExclude:   settings.CompanyExclude,
-			DescInclude:      settings.DescIncludeWords,
-			DescExclude:      settings.DescExcludeWords,
-			NonRemotePhrases: settings.NonRemotePhrases,
+			TitleInclude:   settings.TitleInclude,
+			TitleExclude:   settings.TitleExclude,
+			CompanyExclude: settings.CompanyExclude,
+			DescInclude:    settings.DescIncludeWords,
+			DescExclude:    settings.DescExcludeWords,
 		}
 	}
 
@@ -81,7 +80,6 @@ func domainJobFromDB(j db.Job) domain.Job {
 		Description:    desc,
 		JobURL:         j.JobURL,
 		CreatedAt:      j.CreatedAt,
-		IsRemote:       j.IsRemote,
 		DetailAttempts: j.DetailAttempts,
 	}
 }

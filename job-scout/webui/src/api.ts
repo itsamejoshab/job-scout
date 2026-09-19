@@ -96,7 +96,6 @@ export interface SearchSettings {
   title_include: string[];
   title_exclude: string[];
   company_exclude: string[];
-  non_remote_phrases: string[];
   created_at: string;
   updated_at: string;
 }
@@ -107,26 +106,20 @@ export interface SearchSettingsInput {
   title_include: string[];
   title_exclude: string[];
   company_exclude: string[];
-  non_remote_phrases: string[];
 }
 
 export interface ProviderSearchQuery {
   keywords: string;
   location: string;
+  /** Work-type codes for LinkedIn settings UI (1 on-site, 2 remote, 3 hybrid). Not sent as a LinkedIn URL filter. */
   f_WT?: string;
-}
-
-export interface ProviderHardcodedURL {
-  url: string;
-  description: string;
-  is_remote: boolean;
 }
 
 export interface ProviderSettings {
   id: number;
   job_source: string;
   search_queries: ProviderSearchQuery[];
-  hardcoded_urls: ProviderHardcodedURL[];
+  global_searches: string[];
   timespan_code: string;
   pages_to_scrape: number;
   rounds: number;
@@ -141,7 +134,7 @@ export interface ProviderSettings {
 export type ProviderSettingsInput = Pick<
   ProviderSettings,
   | "search_queries"
-  | "hardcoded_urls"
+  | "global_searches"
   | "timespan_code"
   | "pages_to_scrape"
   | "rounds"

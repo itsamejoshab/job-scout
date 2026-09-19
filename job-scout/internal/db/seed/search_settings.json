@@ -24,7 +24,7 @@
   ],
   "title_exclude": [
     "Software Engineer", "architect", "developer", "president", "manager",
-    "director", "administrator", "Tier 1", "trainer", "training", "intern",
+    "director", "administrator", "tier 1", "trainer", "training", "intern",
     "first year earning", "earning potential", "sales", "hr", "payroll",
     "receptionist", "relations", "data entry", "enterprise architect",
     "consultant", "billing", "account executive", "kitchen team", "cashier",
@@ -36,10 +36,5 @@
   "company_exclude": [
     "ClickJobs.io", "Brooksource", "Jobs via Dice", "Franklin Fitch",
     "Westgate Resorts", "Sureguard LLC", "Panda Restaurant Group"
-  ],
-  "non_remote_phrases": [
-    "travel to office", "not remote", "not a remote position",
-    "required to be onsite", "Ability to travel", "primarily remote-based",
-    "primarily remote", "mostly remote", "will require travel"
   ]
 }

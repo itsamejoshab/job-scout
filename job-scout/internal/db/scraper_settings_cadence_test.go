@@ -16,7 +16,7 @@ func TestMigrate_AddsCadenceColumnsAndUpdatesExistingRows(t *testing.T) {
 	applyNamedMigration(t, pool, "0002_job_url_state.sql")
 
 	if _, err := pool.Exec(`
-		INSERT INTO scraper_settings (job_source, search_queries, hardcoded_urls, timespan_code, pages_to_scrape, rounds)
+		INSERT INTO scraper_settings (job_source, search_queries, global_searches, timespan_code, pages_to_scrape, rounds)
 		VALUES
 			('LINKEDIN', '[]', '[]', 'r84600', 1, 1),
 			('INDEED', '[]', '[]', 'r86400', 1, 1)
@@ -158,11 +158,19 @@ func TestScraperSeedJSON_KeepsHelpDeskQueries(t *testing.T) {
 			t.Errorf("LinkedIn seed must not switch to notebook Technology keywords, got %q", kw)
 		}
 	}
-	if li.HardcodedURLs == nil {
-		t.Error("LinkedIn seed hardcoded_urls must be an empty list, not omitted")
+	if li.GlobalSearches == nil {
+		t.Error("LinkedIn seed global_searches must be a list, not omitted")
 	}
-	if len(li.HardcodedURLs) != 0 {
-		t.Errorf("LinkedIn seed hardcoded_urls = %#v, want [] (guest nationwide URLs are unused)", li.HardcodedURLs)
+	wantGlobal := []string{
+		"help desk or IT support jobs that are onsite near port orange, FL or hybrid if more than 10 miles, remote only if more than 40 miles",
+	}
+	if len(li.GlobalSearches) != len(wantGlobal) || li.GlobalSearches[0] != wantGlobal[0] {
+		t.Errorf("LinkedIn seed global_searches = %#v, want %#v", li.GlobalSearches, wantGlobal)
+	}
+	for _, q := range li.SearchQueries {
+		if _, ok := q["f_WT"]; !ok {
+			t.Errorf("LinkedIn seed search_queries must include f_WT for work-type settings, got %#v", q)
+		}
 	}
 }
 

@@ -20,7 +20,7 @@ const linkedInBaseURL = "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJob
 var linkedInPagePause = 2 * time.Second
 
 // linkedInWorkTypeOrder is the natural-language order for work-type phrases.
-// LinkedIn no longer honors f_WT; selected types are prepended to keywords.
+// LinkedIn ignores f_WT URL filters; selected types are prepended to keywords.
 var linkedInWorkTypeOrder = []struct {
 	code  string
 	label string
@@ -124,11 +124,6 @@ func effectiveLinkedInKeywords(keywords, fWT string) string {
 	return phrase + " " + keywords
 }
 
-func isRemoteOnlyWorkType(fWT string) bool {
-	codes := parseLinkedInWorkTypes(fWT)
-	return len(codes) == 1 && codes[0] == "2"
-}
-
 // combineLinkedInSearchQueries merges legacy one-code-per-row settings into one
 // query per keywords+location with a comma-separated f_WT list.
 func combineLinkedInSearchQueries(queries []map[string]string) []map[string]string {
@@ -184,14 +179,14 @@ func (s *LinkedInScraper) buildSearchURL(query map[string]string) string {
 	if loc := query["location"]; loc != "" {
 		params = append(params, "geoId="+loc)
 	}
-	// f_WT is ignored by LinkedIn guest search; work type lives in keywords.
+	// f_WT is settings-only; LinkedIn guest search ignores it as a URL filter.
 	params = append(params, "f_TPR="+s.timespanCode, "start=0")
 	return linkedInBaseURL + "?" + strings.Join(params, "&")
 }
 
 func (s *LinkedInScraper) ScrapeJobs(ctx context.Context, query map[string]string) ([]JobData, error) {
-	if query["keywords"] == "" || query["location"] == "" {
-		return nil, fmt.Errorf("invalid search query: missing required fields")
+	if query["keywords"] == "" {
+		return nil, fmt.Errorf("invalid search query: missing keywords")
 	}
 
 	var jobs []JobData
@@ -203,7 +198,6 @@ func (s *LinkedInScraper) ScrapeJobs(ctx context.Context, query map[string]strin
 		if err != nil {
 			return jobs, err
 		}
-		stampRemote(pageJobs, isRemoteOnlyWorkType(query["f_WT"]))
 		jobs = append(jobs, pageJobs...)
 		if len(pageJobs) == 0 {
 			break
@@ -215,45 +209,6 @@ func (s *LinkedInScraper) ScrapeJobs(ctx context.Context, query map[string]strin
 		}
 	}
 	slog.Info("scraped linkedin jobs", "count", len(jobs))
-	return jobs, nil
-}
-
-func (s *LinkedInScraper) ScrapeHardcodedURL(ctx context.Context, cfg map[string]any) ([]JobData, error) {
-	base, _ := cfg["url"].(string)
-	if base == "" {
-		return nil, fmt.Errorf("hardcoded url config missing 'url'")
-	}
-
-	remote, _ := cfg["is_remote"].(bool)
-	if strings.Contains(base, "f_WT=2") {
-		remote = true
-	}
-
-	var jobs []JobData
-	for page := 0; page < s.pagesToScrape; page++ {
-		pageURL := base
-		if page > 0 {
-			if strings.Contains(pageURL, "start=0") {
-				pageURL = strings.Replace(pageURL, "start=0", fmt.Sprintf("start=%d", 25*page), 1)
-			} else {
-				pageURL = fmt.Sprintf("%s&start=%d", pageURL, 25*page)
-			}
-		}
-		pageJobs, err := s.scrapePage(ctx, pageURL)
-		if err != nil {
-			return jobs, err
-		}
-		stampRemote(pageJobs, remote)
-		jobs = append(jobs, pageJobs...)
-		if len(pageJobs) == 0 {
-			break
-		}
-		if page < s.pagesToScrape-1 {
-			if err := sleep(ctx, linkedInPagePause); err != nil {
-				return jobs, err
-			}
-		}
-	}
 	return jobs, nil
 }
 
@@ -330,15 +285,6 @@ func (s *LinkedInScraper) transformJobCards(doc *html.Node) []JobData {
 		})
 	}
 	return jobs
-}
-
-func stampRemote(jobs []JobData, remote bool) {
-	if !remote {
-		return
-	}
-	for i := range jobs {
-		jobs[i].IsRemote = true
-	}
 }
 
 // ParseJobDescription extracts the posting body from LinkedIn job-detail HTML.

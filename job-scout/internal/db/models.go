@@ -67,7 +67,6 @@ type SearchSettings struct {
 	TitleInclude     []string  `json:"title_include"`
 	TitleExclude     []string  `json:"title_exclude"`
 	CompanyExclude   []string  `json:"company_exclude"`
-	NonRemotePhrases []string  `json:"non_remote_phrases"`
 	CreatedAt        time.Time `json:"created_at"`
 	UpdatedAt        time.Time `json:"updated_at"`
 }
@@ -77,7 +76,7 @@ type ScraperSettings struct {
 	ID                    int                 `json:"id"`
 	JobSource             JobSource           `json:"job_source"`
 	SearchQueries         []map[string]string `json:"search_queries"`
-	HardcodedURLs         []map[string]any    `json:"hardcoded_urls"`
+	GlobalSearches        []string            `json:"global_searches"`
 	TimespanCode          string              `json:"timespan_code"`
 	PagesToScrape         int                 `json:"pages_to_scrape"`
 	Rounds                int                 `json:"rounds"`

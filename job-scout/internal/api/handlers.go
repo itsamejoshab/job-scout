@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -204,7 +203,6 @@ type replaceSearchSettingsRequest struct {
 	TitleInclude     *[]string `json:"title_include"`
 	TitleExclude     *[]string `json:"title_exclude"`
 	CompanyExclude   *[]string `json:"company_exclude"`
-	NonRemotePhrases *[]string `json:"non_remote_phrases"`
 }
 
 func (in replaceSearchSettingsRequest) validate() error {
@@ -214,7 +212,6 @@ func (in replaceSearchSettingsRequest) validate() error {
 		"title_include":      in.TitleInclude,
 		"title_exclude":      in.TitleExclude,
 		"company_exclude":    in.CompanyExclude,
-		"non_remote_phrases": in.NonRemotePhrases,
 	}
 	for field, value := range required {
 		if value == nil {
@@ -248,7 +245,6 @@ func (h *Handler) ReplaceSearchSettings(w http.ResponseWriter, r *http.Request) 
 		TitleInclude:     cloneList(*in.TitleInclude),
 		TitleExclude:     cloneList(*in.TitleExclude),
 		CompanyExclude:   cloneList(*in.CompanyExclude),
-		NonRemotePhrases: cloneList(*in.NonRemotePhrases),
 	})
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
@@ -311,20 +307,14 @@ type providerSearchQuery struct {
 	Remote   string `json:"f_WT"`
 }
 
-type providerHardcodedURL struct {
-	URL         string `json:"url"`
-	Description string `json:"description"`
-	IsRemote    *bool  `json:"is_remote"`
-}
-
 type replaceScraperSettingsRequest struct {
-	Enabled               *bool                   `json:"enabled"`
-	ScrapeIntervalSeconds *int                    `json:"scrape_interval_seconds"`
-	TimespanCode          *string                 `json:"timespan_code"`
-	PagesToScrape         *int                    `json:"pages_to_scrape"`
-	Rounds                *int                    `json:"rounds"`
-	SearchQueries         *[]providerSearchQuery  `json:"search_queries"`
-	HardcodedURLs         *[]providerHardcodedURL `json:"hardcoded_urls"`
+	Enabled               *bool                  `json:"enabled"`
+	ScrapeIntervalSeconds *int                   `json:"scrape_interval_seconds"`
+	TimespanCode          *string                `json:"timespan_code"`
+	PagesToScrape         *int                   `json:"pages_to_scrape"`
+	Rounds                *int                   `json:"rounds"`
+	SearchQueries         *[]providerSearchQuery `json:"search_queries"`
+	GlobalSearches        *[]string              `json:"global_searches"`
 }
 
 func (in replaceScraperSettingsRequest) validate() error {
@@ -349,8 +339,8 @@ func (in replaceScraperSettingsRequest) validate() error {
 		return errors.New("rounds must be between 1 and 3")
 	case in.SearchQueries == nil:
 		return errors.New("missing required field: search_queries")
-	case in.HardcodedURLs == nil:
-		return errors.New("missing required field: hardcoded_urls")
+	case in.GlobalSearches == nil:
+		return errors.New("missing required field: global_searches")
 	}
 	for i, query := range *in.SearchQueries {
 		if strings.TrimSpace(query.Keywords) == "" {
@@ -360,13 +350,9 @@ func (in replaceScraperSettingsRequest) validate() error {
 			return fmt.Errorf("search_queries[%d].location must not be empty", i)
 		}
 	}
-	for i, entry := range *in.HardcodedURLs {
-		parsed, err := url.Parse(strings.TrimSpace(entry.URL))
-		if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
-			return fmt.Errorf("hardcoded_urls[%d].url must use http or https", i)
-		}
-		if entry.IsRemote == nil {
-			return fmt.Errorf("hardcoded_urls[%d].is_remote must be boolean", i)
+	for i, keywords := range *in.GlobalSearches {
+		if strings.TrimSpace(keywords) == "" {
+			return fmt.Errorf("global_searches[%d] must not be empty", i)
 		}
 	}
 	return nil
@@ -378,16 +364,12 @@ func (in replaceScraperSettingsRequest) settings() db.ScraperSettings {
 		queries = append(queries, map[string]string{
 			"keywords": strings.TrimSpace(query.Keywords),
 			"location": strings.TrimSpace(query.Location),
-			"f_WT":     query.Remote,
+			"f_WT":     strings.TrimSpace(query.Remote),
 		})
 	}
-	hardcoded := make([]map[string]any, 0, len(*in.HardcodedURLs))
-	for _, entry := range *in.HardcodedURLs {
-		hardcoded = append(hardcoded, map[string]any{
-			"url":         strings.TrimSpace(entry.URL),
-			"description": strings.TrimSpace(entry.Description),
-			"is_remote":   *entry.IsRemote,
-		})
+	global := make([]string, 0, len(*in.GlobalSearches))
+	for _, keywords := range *in.GlobalSearches {
+		global = append(global, strings.TrimSpace(keywords))
 	}
 	return db.ScraperSettings{
 		Enabled:               *in.Enabled,
@@ -396,7 +378,7 @@ func (in replaceScraperSettingsRequest) settings() db.ScraperSettings {
 		PagesToScrape:         *in.PagesToScrape,
 		Rounds:                *in.Rounds,
 		SearchQueries:         queries,
-		HardcodedURLs:         hardcoded,
+		GlobalSearches:        global,
 	}
 }
 

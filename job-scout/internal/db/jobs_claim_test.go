@@ -266,7 +266,6 @@ func TestLoadNotifyInventory_AfterClaimIncludesNotifyingNow(t *testing.T) {
 		{"https://www.linkedin.com/jobs/view/inv-pending/", JobStatePending, nil},
 		{"https://www.linkedin.com/jobs/view/inv-title/", JobStateRejected, strPtr("title_company")},
 		{"https://www.linkedin.com/jobs/view/inv-desc/", JobStateRejected, strPtr("description")},
-		{"https://www.linkedin.com/jobs/view/inv-remote/", JobStateRejected, strPtr("remote_lie")},
 		{"https://www.linkedin.com/jobs/view/inv-dup/", JobStateRejected, strPtr("duplicate")},
 		{"https://www.linkedin.com/jobs/view/inv-detail/", JobStateRejected, strPtr("detail_failed")},
 		{"https://www.linkedin.com/jobs/view/inv-eligible/", JobStateEligible, nil},
@@ -294,10 +293,10 @@ func TestLoadNotifyInventory_AfterClaimIncludesNotifyingNow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadNotifyInventory: %v", err)
 	}
-	if inv.Total != 9 {
-		t.Errorf("Total = %d, want 9", inv.Total)
+	if inv.Total != 8 {
+		t.Errorf("Total = %d, want 8", inv.Total)
 	}
-	if inv.TitleCompany != 1 || inv.Description != 1 || inv.RemoteLie != 1 || inv.Duplicate != 1 || inv.DetailFailed != 1 {
+	if inv.TitleCompany != 1 || inv.Description != 1 || inv.Duplicate != 1 || inv.DetailFailed != 1 {
 		t.Errorf("reject counts = %+v, want 1 each reason", inv)
 	}
 	if inv.Pending != 1 || inv.Eligible != 0 || inv.Notifying != 2 || inv.Notified != 1 {

@@ -269,7 +269,6 @@ func TestNotifyTick_ClaimsBatchPostsOnceAndMarksNotified(t *testing.T) {
 			Total:        5,
 			TitleCompany: 0,
 			Description:  0,
-			RemoteLie:    0,
 			Duplicate:    0,
 			DetailFailed: 0,
 			Pending:      4,
@@ -295,7 +294,6 @@ func TestNotifyTick_ClaimsBatchPostsOnceAndMarksNotified(t *testing.T) {
 		"  5 job postings scraped\n" +
 		" -0 dont match companies or titles\n" +
 		" -0 dont match descriptions\n" +
-		" -0 are lying about remote\n" +
 		" -0 duplicate title/company\n" +
 		" -0 lost due to unforseen circumstances\n" +
 		"\n" +

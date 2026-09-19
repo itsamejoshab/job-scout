@@ -10,7 +10,6 @@ type MessageCounts struct {
 	Total        int
 	TitleCompany int
 	Description  int
-	RemoteLie    int
 	Duplicate    int
 	DetailFailed int
 	Pending      int
@@ -27,7 +26,6 @@ func BuildMessage(counts MessageCounts, urls []string) string {
 	fmt.Fprintf(&b, "  %d job postings scraped\n", counts.Total)
 	fmt.Fprintf(&b, " -%d dont match companies or titles\n", counts.TitleCompany)
 	fmt.Fprintf(&b, " -%d dont match descriptions\n", counts.Description)
-	fmt.Fprintf(&b, " -%d are lying about remote\n", counts.RemoteLie)
 	fmt.Fprintf(&b, " -%d duplicate title/company\n", counts.Duplicate)
 	fmt.Fprintf(&b, " -%d lost due to unforseen circumstances\n", counts.DetailFailed)
 	fmt.Fprintf(&b, "\n%d new jobs to check out\n", len(urls))

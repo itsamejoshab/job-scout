@@ -134,15 +134,15 @@ func TestRunTick_PartialFailurePersistsJobsAndAppliesBackoff(t *testing.T) {
 	pool := cadencePool(t)
 	ctx := t.Context()
 	queries, err := json.Marshal([]map[string]string{
-		{"keywords": "IT Help Desk", "location": "101076143", "f_WT": "2"},
-		{"keywords": "Application Support", "location": "101076143", "f_WT": "2"},
+		{"keywords": "IT Help Desk", "location": "101076143"},
+		{"keywords": "Application Support", "location": "101076143"},
 	})
 	if err != nil {
 		t.Fatalf("marshal queries: %v", err)
 	}
 	if _, err := pool.Exec(`
 		UPDATE scraper_settings
-		SET search_queries = $1::json, hardcoded_urls = '[]',
+		SET search_queries = $1::json, global_searches = '[]',
 		    last_scraped_at = NULL, next_eligible_at = NULL
 		WHERE job_source = 'LINKEDIN'
 	`, queries); err != nil {
@@ -214,7 +214,7 @@ func TestRunTick_PartialPageFailurePersistsJobsAndAppliesBackoff(t *testing.T) {
 	pool := cadencePool(t)
 	ctx := t.Context()
 	if _, err := pool.Exec(`
-		UPDATE scraper_settings SET pages_to_scrape = 2, hardcoded_urls = '[]',
+		UPDATE scraper_settings SET pages_to_scrape = 2, global_searches = '[]',
 		    last_scraped_at = NULL, next_eligible_at = NULL
 		WHERE job_source = 'LINKEDIN'
 	`); err != nil {
@@ -271,33 +271,26 @@ func TestRunTick_RoundsRepeatFullPassAndKeepPaging(t *testing.T) {
 	pool := cadencePool(t)
 	ctx := t.Context()
 	queries, err := json.Marshal([]map[string]string{
-		{"keywords": "IT Help Desk", "location": "101076143", "f_WT": "2"},
-		{"keywords": "Application Support", "location": "101076143", "f_WT": "2"},
+		{"keywords": "IT Help Desk", "location": "101076143"},
+		{"keywords": "Application Support", "location": "101076143"},
 	})
 	if err != nil {
 		t.Fatalf("marshal queries: %v", err)
 	}
-	hardcoded, err := json.Marshal([]map[string]any{
-		{"url": "https://www.linkedin.com/hardcoded?start=0", "is_remote": true},
-	})
+	global, err := json.Marshal([]string{"Remote IT Help Desk near Port Orange FL"})
 	if err != nil {
-		t.Fatalf("marshal hardcoded urls: %v", err)
+		t.Fatalf("marshal global searches: %v", err)
 	}
 	if _, err := pool.Exec(`
 		UPDATE scraper_settings
-		SET search_queries = $1::json, hardcoded_urls = $2::json,
+		SET search_queries = $1::json, global_searches = $2::json,
 		    pages_to_scrape = 2, rounds = 1
 		WHERE job_source = 'LINKEDIN'
-	`, queries, hardcoded); err != nil {
+	`, queries, global); err != nil {
 		t.Fatalf("configure rounds test: %v", err)
 	}
 
 	client, hits, restore := interceptLinkedIn(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/hardcoded" {
-			w.WriteHeader(http.StatusOK)
-			_, _ = io.WriteString(w, "<html></html>")
-			return
-		}
 		linkedInFixtureHandler(t, http.StatusOK)(w, r)
 	})
 	defer restore()
@@ -309,7 +302,7 @@ func TestRunTick_RoundsRepeatFullPassAndKeepPaging(t *testing.T) {
 	} else if result.Status != "success" {
 		t.Fatalf("one-round RunTick status = %q (%s), want success", result.Status, result.Error)
 	}
-	const requestsPerRound = 1 + 2*2 // one empty hardcoded URL, two queries, two pages each
+	const requestsPerRound = 1*2 + 2*2 // one global search (2 pages) + two location queries (2 pages each)
 	if *hits != requestsPerRound {
 		t.Errorf("one round requests = %d, want %d", *hits, requestsPerRound)
 	}
@@ -615,14 +608,14 @@ func cadencePool(t *testing.T) *sql.DB {
 		linkedInPagePause = oldPause
 	})
 	queries, err := json.Marshal([]map[string]string{
-		{"keywords": "IT Help Desk", "location": "101076143", "f_WT": "2"},
+		{"keywords": "IT Help Desk", "location": "101076143"},
 	})
 	if err != nil {
 		t.Fatalf("marshal queries: %v", err)
 	}
 	if _, err := pool.Exec(`
 		UPDATE scraper_settings
-		SET search_queries = $1::json, hardcoded_urls = '[]', pages_to_scrape = 1
+		SET search_queries = $1::json, global_searches = '[]', pages_to_scrape = 1
 		WHERE job_source = 'LINKEDIN'
 	`, queries); err != nil {
 		t.Fatalf("shrink LinkedIn queries for tests: %v", err)

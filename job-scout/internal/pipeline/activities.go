@@ -88,7 +88,6 @@ func (a *Activities) claim_notification_batch(ctx context.Context) (ClaimBatch, 
 			Total:        inv.Total,
 			TitleCompany: inv.TitleCompany,
 			Description:  inv.Description,
-			RemoteLie:    inv.RemoteLie,
 			Duplicate:    inv.Duplicate,
 			DetailFailed: inv.DetailFailed,
 			Pending:      inv.Pending,
@@ -105,7 +104,6 @@ func (a *Activities) claim_notification_batch(ctx context.Context) (ClaimBatch, 
 			"title", j.Title,
 			"company", j.Company,
 			"location", j.Location,
-			"is_remote", j.IsRemote,
 			"search_context", j.SearchContext,
 			"job_url", j.JobURL,
 		)
@@ -131,6 +129,5 @@ func persistDescription(d domain.Decision) bool {
 		return true
 	}
 	return d.State == domain.StateEligible ||
-		d.RejectReason == domain.ReasonDescription ||
-		d.RejectReason == domain.ReasonRemoteLie
+		d.RejectReason == domain.ReasonDescription
 }

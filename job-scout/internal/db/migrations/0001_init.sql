@@ -33,7 +33,6 @@ CREATE TABLE IF NOT EXISTS search_settings (
     title_include      JSON NOT NULL,
     title_exclude      JSON NOT NULL,
     company_exclude    JSON NOT NULL,
-    non_remote_phrases JSON NOT NULL,
     created_at         TIMESTAMP DEFAULT now(),
     updated_at         TIMESTAMP DEFAULT now()
 );
@@ -43,7 +42,7 @@ CREATE TABLE IF NOT EXISTS scraper_settings (
     id              SERIAL PRIMARY KEY,
     job_source      jobsource,
     search_queries  JSON NOT NULL,
-    hardcoded_urls  JSON,
+    global_searches JSON NOT NULL DEFAULT '[]',
     timespan_code   VARCHAR(100) NOT NULL,
     pages_to_scrape INTEGER NOT NULL,
     rounds          INTEGER NOT NULL,

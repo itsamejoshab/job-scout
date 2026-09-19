@@ -7,7 +7,6 @@ func TestBuildMessage_MatchesSpecFormatIncludingZerosAndClaimedURLs(t *testing.T
 		Total:        10,
 		TitleCompany: 3,
 		Description:  1,
-		RemoteLie:    0,
 		Duplicate:    2,
 		DetailFailed: 1,
 		Pending:      1,
@@ -26,7 +25,6 @@ func TestBuildMessage_MatchesSpecFormatIncludingZerosAndClaimedURLs(t *testing.T
 		"  10 job postings scraped\n" +
 		" -3 dont match companies or titles\n" +
 		" -1 dont match descriptions\n" +
-		" -0 are lying about remote\n" +
 		" -2 duplicate title/company\n" +
 		" -1 lost due to unforseen circumstances\n" +
 		"\n" +
@@ -53,7 +51,6 @@ func TestBuildMessage_PrintsZeroRejectLinesAndClaimedURLsOnly(t *testing.T) {
 		"  4 job postings scraped\n" +
 		" -0 dont match companies or titles\n" +
 		" -0 dont match descriptions\n" +
-		" -0 are lying about remote\n" +
 		" -0 duplicate title/company\n" +
 		" -0 lost due to unforseen circumstances\n" +
 		"\n" +

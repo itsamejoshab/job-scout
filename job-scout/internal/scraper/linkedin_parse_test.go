@@ -112,8 +112,27 @@ func TestLinkedIn_GuestSearchURLCombinesWorkTypesInKeywords(t *testing.T) {
 		!strings.Contains(unrestricted, "keywords=IT%20Help%20Desk") {
 		t.Errorf("empty f_WT must leave keywords unchanged, got %q", unrestricted)
 	}
-	if strings.Contains(unrestricted, "Remote") || strings.Contains(unrestricted, "Hybrid") || strings.Contains(unrestricted, "On-Site") {
-		t.Errorf("unrestricted search must not prepend work-type words, got %q", unrestricted)
+}
+
+func TestLinkedIn_GuestSearchURLOmitsGeoIdForGlobalSearches(t *testing.T) {
+	s := NewLinkedIn(db.ScraperSettings{TimespanCode: "r84600"})
+	got := s.buildSearchURL(map[string]string{
+		"keywords": "help desk or IT support jobs that are onsite near port orange, FL or hybrid if more than 10 miles, remote only if more than 40 miles",
+	})
+	if !strings.Contains(got, "keywords=") {
+		t.Errorf("global search must send natural-language keywords, got %q", got)
+	}
+	if !strings.Contains(got, "help") || !strings.Contains(got, "port") {
+		t.Errorf("global search keywords missing expected terms, got %q", got)
+	}
+	if strings.Contains(got, "geoId=") {
+		t.Errorf("global search must omit geoId, got %q", got)
+	}
+	if strings.Contains(got, "f_WT=") {
+		t.Errorf("search URL must not send f_WT, got %q", got)
+	}
+	if !strings.Contains(got, "f_TPR=r84600") {
+		t.Errorf("global search must still send timespan f_TPR, got %q", got)
 	}
 }
 
@@ -138,18 +157,6 @@ func TestCombineLinkedInSearchQueries_MergesLegacyRows(t *testing.T) {
 			got[i]["f_WT"] != want[i]["f_WT"] {
 			t.Errorf("row %d = %#v, want %#v", i, got[i], want[i])
 		}
-	}
-}
-
-func TestIsRemoteOnlyWorkType(t *testing.T) {
-	if !isRemoteOnlyWorkType("2") {
-		t.Error(`f_WT "2" must be remote-only`)
-	}
-	if isRemoteOnlyWorkType("3,2") {
-		t.Error(`mixed remote+hybrid must not stamp all jobs remote`)
-	}
-	if isRemoteOnlyWorkType("") {
-		t.Error(`unrestricted search must not stamp all jobs remote`)
 	}
 }
 
