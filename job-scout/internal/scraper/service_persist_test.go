@@ -22,7 +22,11 @@ func TestSaveJobs_UsesSameUniquenessAndRemoteOR(t *testing.T) {
 	ctx := t.Context()
 
 	saved, err := s.saveJobs(ctx, []JobData{
-		{Title: "IT Help Desk", Company: "Acme", Location: "Remote", JobURL: "  " + url + "  ", Source: db.SourceLinkedIn, IsRemote: false},
+		{
+			Title: "IT Help Desk", Company: "Acme", Location: "Kansas", JobURL: "  " + url + "  ",
+			Source: db.SourceLinkedIn, IsRemote: false,
+			SearchContext: `query keywords="help desk" location="105493761" f_WT="3"`,
+		},
 	})
 	if err != nil {
 		t.Fatalf("save onsite: %v", err)
@@ -32,7 +36,11 @@ func TestSaveJobs_UsesSameUniquenessAndRemoteOR(t *testing.T) {
 	}
 
 	saved, err = s.saveJobs(ctx, []JobData{
-		{Title: "Other", Company: "Acme", Location: "Remote", JobURL: url, Source: db.SourceLinkedIn, IsRemote: true},
+		{
+			Title: "Other", Company: "Acme", Location: "Remote", JobURL: url,
+			Source: db.SourceLinkedIn, IsRemote: true,
+			SearchContext: `query keywords="help desk" location="103644278" f_WT="2"`,
+		},
 	})
 	if err != nil {
 		t.Fatalf("save remote resight: %v", err)
@@ -42,11 +50,12 @@ func TestSaveJobs_UsesSameUniquenessAndRemoteOR(t *testing.T) {
 	}
 
 	var (
-		n      int
-		remote bool
+		n             int
+		remote        bool
+		searchContext string
 	)
-	if err := pool.QueryRow(`SELECT COUNT(*), BOOL_OR(is_remote) FROM jobs WHERE job_url = $1`, url).
-		Scan(&n, &remote); err != nil {
+	if err := pool.QueryRow(`SELECT COUNT(*), BOOL_OR(is_remote), MIN(search_context) FROM jobs WHERE job_url = $1`, url).
+		Scan(&n, &remote, &searchContext); err != nil {
 		t.Errorf("POST /api/v0/scrape persist path must apply is_remote OR: %v", err)
 	} else {
 		if n != 1 {
@@ -54,6 +63,10 @@ func TestSaveJobs_UsesSameUniquenessAndRemoteOR(t *testing.T) {
 		}
 		if !remote {
 			t.Error("POST /api/v0/scrape persist path must apply is_remote OR")
+		}
+		wantContext := `query keywords="help desk" location="105493761" f_WT="3"`
+		if searchContext != wantContext {
+			t.Errorf("search context = %q, want first source query %q", searchContext, wantContext)
 		}
 	}
 

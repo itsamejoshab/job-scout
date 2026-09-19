@@ -27,6 +27,7 @@ func TestEnvSample_DocumentsEveryRuntimeKnob(t *testing.T) {
 		"WEBHOOK_BASE":                 "https://hooks.example/api/webhook",
 		"WEBHOOK_ID":                   "example-hook",
 		"PIPEDREAM_API_TOKEN":          "",
+		"DEBUG":                        "0",
 		"SCRAPE_SCHEDULE_SECONDS":      "60",
 		"NOTIFY_SCHEDULE_SECONDS":      "300",
 		"SCRAPE_ERROR_BACKOFF_SECONDS": "300",
