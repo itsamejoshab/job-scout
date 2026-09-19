@@ -42,8 +42,8 @@ func TestRun_ForceQueryEchoesAndStartsScrapeTick(t *testing.T) {
 			t.Fatalf("POST /api/v0/run?force=%s must start one workflow, starts=%d", raw, len(fake.starts))
 		}
 		start := fake.starts[0]
-		if name := workflowFuncName(start.workflow); name != "ScrapeTick" {
-			t.Errorf("force scrape must start ScrapeTick, got %s", name)
+		if name := workflowFuncName(start.workflow); name != "ScrapeWorkflow" {
+			t.Errorf("force scrape must start ScrapeWorkflow, got %s", name)
 		}
 		if len(start.args) != 1 {
 			t.Fatalf("ScrapeTick args=%v, want one Tick input", start.args)
@@ -204,8 +204,8 @@ func assertManualScrapeStart(t *testing.T, start workflowStart, responseID strin
 	if ts.Before(before) || ts.After(after) {
 		t.Errorf("manual scrape workflow ID timestamp %s is outside request window [%s, %s]", ts, before, after)
 	}
-	if name := workflowFuncName(start.workflow); name != "ScrapeTick" {
-		t.Errorf("POST /api/v0/run must start ScrapeTick asynchronously, got %s (%T)", name, start.workflow)
+	if name := workflowFuncName(start.workflow); name != "ScrapeWorkflow" {
+		t.Errorf("POST /api/v0/run must start ScrapeWorkflow asynchronously, got %s (%T)", name, start.workflow)
 	}
 	assertTickArg(t, start.args, false)
 }

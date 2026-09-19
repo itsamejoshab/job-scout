@@ -1,8 +1,8 @@
 # Job Scout
 
-Job Scout monitors job sites. It stores each new job URL. It sends a webhook when a job passes the filters.
+Job Scout is a homegrown application that monitors job sites, filters job postings, and sends alerts. It uses distributed services because the project is also an experiment with [Temporal](https://temporal.io/) orchestration.
 
-The pipeline uses [Temporal](https://temporal.io/). This project started as a Python/FastAPI app. It is now a Go service. The goal is idiomatic Go, few external libraries, and explicit control flow.
+The architecture is more complex than a single script, but it separates scraping, filtering, notification, and durable workflow state. This structure also gives contributors clear places to add providers and pipeline stages.
 
 **Start here:** [QUICKSTART.md](QUICKSTART.md) — clone the repo, set `.env`, and start the stack on Windows, macOS, or a Raspberry Pi.
 
@@ -37,10 +37,27 @@ Automated tests POST only to `httptest` servers. They must not use live webhook 
 
 Two workflows run on `main-task-queue`:
 
-1. **ScrapeTick** — scrape enabled due providers (LinkedIn every 15 minutes unless `force=1`). Store every distinct job URL. No filters. No webhook POST.
-2. **NotifyTick** — filter `pending` jobs, claim a batch, POST one JSON `{ "notify": "<WEBHOOK_ID>", "message": "..." }` to `WEBHOOK_BASE`. Skip the POST when the claim is empty.
+#### ScrapeWorkflow
 
-Manual HTTP starts unique workflow IDs. `/run` and `/notify` are not blocked when a scheduled tick is still running.
+`ScrapeWorkflow` collects and stores jobs. It does not apply content filters or send notifications.
+
+1. **Scraper** (`scrape_jobs`): Scrapes each enabled provider that is due. A forced run ignores provider cadence. The scraper collects high-level fields such as company, title, location, URL, remote status, and any description that the provider supplies.
+2. **URL Duplicate Remover** (part of `scrape_jobs`): Stores each job URL once. Repeated search results and repeated scrape rounds do not create another row.
+
+#### NotifyWorkflow
+
+`NotifyWorkflow` evaluates stored `pending` jobs and sends one batched notification.
+
+1. **Filter Data Loader** (`load_jobs_for_filtering`): Loads pending jobs, all jobs needed for duplicate checks, and the current search settings.
+2. **Duplicate Remover**: Rejects repeated title-and-company combinations. The earliest job is kept.
+3. **Basic Filter**: Rejects jobs that fail title or company include/exclude rules.
+4. **Job Detailer** (`get_job_description`): Fetches the full job description when a job passes the basic filter but has no description.
+5. **Advanced Filter**: Applies description include/exclude rules and checks remote jobs for phrases that indicate an on-site requirement.
+6. **Smart Filter**: Reserved for a future AI-based relevance check. It is not implemented.
+7. **Filter Result Writer** (`save_job_filter_result`): Saves each decision, rejection reason, fetched description, and detail-attempt count.
+8. **Notifier** (`claim_notification_batch`, `send_notification`, `finish_notification_batch`): Claims eligible jobs, sends one JSON `{ "notify": "<WEBHOOK_ID>", "message": "..." }` to `WEBHOOK_BASE`, and marks the batch as notified. It does not send a request when the claim is empty.
+
+Manual HTTP starts unique workflow IDs. `/run` and `/notify` are not blocked when a scheduled workflow run is still active.
 
 ## Dependencies
 
@@ -124,8 +141,8 @@ Base path: `http://localhost:8001/api/v0`
 
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/run` | Start ScrapeTick. `?force=1` bypasses provider cadence. |
-| POST | `/notify` | Start NotifyTick. |
+| POST | `/run` | Start `ScrapeWorkflow`. `?force=1` bypasses provider cadence. |
+| POST | `/notify` | Start `NotifyWorkflow`. |
 | POST | `/scrape` | Run a synchronous debug scrape without Temporal. Prefer `/run`. |
 | GET | `/health`, `/db-test`, `/temporal-test` | Read service and dependency health. |
 | GET | `/status` | Read aggregate database and Temporal status. |
