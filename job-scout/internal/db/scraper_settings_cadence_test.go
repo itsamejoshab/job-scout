@@ -158,8 +158,11 @@ func TestScraperSeedJSON_KeepsHelpDeskQueries(t *testing.T) {
 			t.Errorf("LinkedIn seed must not switch to notebook Technology keywords, got %q", kw)
 		}
 	}
-	if len(li.HardcodedURLs) == 0 {
-		t.Error("LinkedIn seed hardcoded_urls must stay populated")
+	if li.HardcodedURLs == nil {
+		t.Error("LinkedIn seed hardcoded_urls must be an empty list, not omitted")
+	}
+	if len(li.HardcodedURLs) != 0 {
+		t.Errorf("LinkedIn seed hardcoded_urls = %#v, want [] (guest nationwide URLs are unused)", li.HardcodedURLs)
 	}
 }
 
