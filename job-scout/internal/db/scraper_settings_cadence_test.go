@@ -161,11 +161,8 @@ func TestScraperSeedJSON_KeepsHelpDeskQueries(t *testing.T) {
 	if li.GlobalSearches == nil {
 		t.Error("LinkedIn seed global_searches must be a list, not omitted")
 	}
-	wantGlobal := []string{
-		"help desk or IT support jobs that are onsite near port orange, FL or hybrid if more than 10 miles, remote only if more than 40 miles",
-	}
-	if len(li.GlobalSearches) != len(wantGlobal) || li.GlobalSearches[0] != wantGlobal[0] {
-		t.Errorf("LinkedIn seed global_searches = %#v, want %#v", li.GlobalSearches, wantGlobal)
+	if len(li.GlobalSearches) != 0 {
+		t.Errorf("LinkedIn seed global_searches = %#v, want empty", li.GlobalSearches)
 	}
 	for _, q := range li.SearchQueries {
 		if _, ok := q["f_WT"]; !ok {

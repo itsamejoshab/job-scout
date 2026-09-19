@@ -81,12 +81,8 @@ func notifySchedule(cfg config.Config) client.ScheduleOptions {
 	return client.ScheduleOptions{
 		ID: NotifyScheduleID,
 		Spec: client.ScheduleSpec{
-			Intervals: []client.ScheduleIntervalSpec{{
-				Every:  time.Duration(cfg.NotifyScheduleSeconds) * time.Second,
-				Offset: time.Duration(cfg.NotifyScheduleOffsetSeconds) * time.Second,
-			}},
-			Skip:         notifySkipCalendars(cfg),
-			TimeZoneName: scheduleTimeZone(cfg),
+			CronExpressions: []string{notifyCron(cfg)},
+			TimeZoneName:    scheduleTimeZone(cfg),
 		},
 		Action: &client.ScheduleWorkflowAction{
 			ID:        ScheduledNotifyWorkflowID,
@@ -101,51 +97,12 @@ func scheduleTimeZone(cfg config.Config) string {
 	if cfg.ReportingTimezone != "" {
 		return cfg.ReportingTimezone
 	}
-	return "UTC"
+	return "America/New_York"
 }
 
-func notifySkipCalendars(cfg config.Config) []client.ScheduleCalendarSpec {
-	sh, sm, eh, em, ok := cfg.NotifyActiveWindow()
-	if !ok {
-		return nil
+func notifyCron(cfg config.Config) string {
+	if cfg.NotifyCron != "" {
+		return cfg.NotifyCron
 	}
-	var skip []client.ScheduleCalendarSpec
-	if sh > 0 {
-		skip = append(skip, skipWholeHours(0, sh-1))
-	}
-	if sm > 0 {
-		skip = append(skip, skipPartialHour(sh, 0, sm-1))
-	}
-	if em == 0 {
-		return append(skip, skipWholeHours(eh, 23))
-	}
-	skip = append(skip, skipPartialHour(eh, em, 59))
-	if eh < 23 {
-		skip = append(skip, skipWholeHours(eh+1, 23))
-	}
-	return skip
-}
-
-// skipWholeHours excludes every tick from the start of first to the end of last.
-// Minute and second must be whole ranges: the SDK fills an unset field with 0,
-// which would exclude only the top of each hour.
-func skipWholeHours(first, last int) client.ScheduleCalendarSpec {
-	return client.ScheduleCalendarSpec{
-		Hour:   scheduleRange(first, last),
-		Minute: scheduleRange(0, 59),
-		Second: scheduleRange(0, 59),
-	}
-}
-
-// skipPartialHour excludes minutes first through last of one hour.
-func skipPartialHour(hour, first, last int) client.ScheduleCalendarSpec {
-	return client.ScheduleCalendarSpec{
-		Hour:   scheduleRange(hour, hour),
-		Minute: scheduleRange(first, last),
-		Second: scheduleRange(0, 59),
-	}
-}
-
-func scheduleRange(first, last int) []client.ScheduleRange {
-	return []client.ScheduleRange{{Start: first, End: last}}
+	return "39 7,17,20 * * *"
 }

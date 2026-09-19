@@ -18,7 +18,7 @@ func TestInstallSchedules_UsesHandlerConfigAtAPIBoot(t *testing.T) {
 		Schedules: fake,
 		Cfg: config.Config{
 			ScrapeScheduleSeconds: 90,
-			NotifyScheduleSeconds: 450,
+			NotifyCron:            "15 8,18 * * *",
 		},
 	}
 	if err := h.InstallSchedules(context.Background()); err != nil {
@@ -45,8 +45,8 @@ func TestInstallSchedules_UsesHandlerConfigAtAPIBoot(t *testing.T) {
 	if len(scrape.Spec.Intervals) != 1 || scrape.Spec.Intervals[0].Every != 90*time.Second {
 		t.Errorf("API boot scrape interval = %v, want 90s from Handler.Cfg", scrape.Spec.Intervals)
 	}
-	if len(notify.Spec.Intervals) != 1 || notify.Spec.Intervals[0].Every != 450*time.Second {
-		t.Errorf("API boot notify interval = %v, want 450s from Handler.Cfg", notify.Spec.Intervals)
+	if len(notify.Spec.CronExpressions) != 1 || notify.Spec.CronExpressions[0] != "15 8,18 * * *" {
+		t.Errorf("API boot notify cron = %v, want 15 8,18 * * * from Handler.Cfg", notify.Spec.CronExpressions)
 	}
 	scrapeAction, _ := scrape.Action.(*client.ScheduleWorkflowAction)
 	notifyAction, _ := notify.Action.(*client.ScheduleWorkflowAction)
@@ -68,7 +68,7 @@ func TestInstallSchedules_UsesHandlerConfigAtAPIBoot(t *testing.T) {
 }
 
 func TestInstallSchedules_NilStoreIsError(t *testing.T) {
-	h := &Handler{Cfg: config.Config{ScrapeScheduleSeconds: 60, NotifyScheduleSeconds: 300}}
+	h := &Handler{Cfg: config.Config{ScrapeScheduleSeconds: 60}}
 	if err := h.InstallSchedules(context.Background()); err == nil {
 		t.Fatal("API boot must fail when Temporal schedule client is missing")
 	}
