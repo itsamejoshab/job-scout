@@ -38,7 +38,7 @@ type Handler struct {
 	Cfg       config.Config
 }
 
-// InstallSchedules creates or updates scrape and notify interval schedules.
+// InstallSchedules creates or updates scrape and notify Temporal schedules.
 func (h *Handler) InstallSchedules(ctx context.Context) error {
 	return pipeline.EnsureSchedules(ctx, h.Schedules, h.Cfg)
 }

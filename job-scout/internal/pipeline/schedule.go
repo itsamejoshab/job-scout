@@ -24,7 +24,7 @@ type ScheduleStore interface {
 	GetHandle(ctx context.Context, scheduleID string) client.ScheduleHandle
 }
 
-// EnsureSchedules creates or updates the scrape and notify interval schedules.
+// EnsureSchedules creates or updates the scrape and notify schedules.
 func EnsureSchedules(ctx context.Context, schedules ScheduleStore, cfg config.Config) error {
 	if schedules == nil {
 		return fmt.Errorf("temporal schedule client is required")
@@ -65,7 +65,7 @@ func scrapeSchedule(cfg config.Config) client.ScheduleOptions {
 		ID: ScrapeScheduleID,
 		Spec: client.ScheduleSpec{
 			Intervals:    []client.ScheduleIntervalSpec{{Every: time.Duration(cfg.ScrapeScheduleSeconds) * time.Second}},
-			TimeZoneName: "UTC",
+			TimeZoneName: scheduleTimeZone(cfg),
 		},
 		Action: &client.ScheduleWorkflowAction{
 			ID:        ScheduledScrapeWorkflowID,
@@ -81,8 +81,12 @@ func notifySchedule(cfg config.Config) client.ScheduleOptions {
 	return client.ScheduleOptions{
 		ID: NotifyScheduleID,
 		Spec: client.ScheduleSpec{
-			Intervals:    []client.ScheduleIntervalSpec{{Every: time.Duration(cfg.NotifyScheduleSeconds) * time.Second}},
-			TimeZoneName: "UTC",
+			Intervals: []client.ScheduleIntervalSpec{{
+				Every:  time.Duration(cfg.NotifyScheduleSeconds) * time.Second,
+				Offset: time.Duration(cfg.NotifyScheduleOffsetSeconds) * time.Second,
+			}},
+			Skip:         notifySkipCalendars(cfg),
+			TimeZoneName: scheduleTimeZone(cfg),
 		},
 		Action: &client.ScheduleWorkflowAction{
 			ID:        ScheduledNotifyWorkflowID,
@@ -91,4 +95,46 @@ func notifySchedule(cfg config.Config) client.ScheduleOptions {
 		},
 		Overlap: enumspb.SCHEDULE_OVERLAP_POLICY_SKIP,
 	}
+}
+
+func scheduleTimeZone(cfg config.Config) string {
+	if cfg.ReportingTimezone != "" {
+		return cfg.ReportingTimezone
+	}
+	return "UTC"
+}
+
+func notifySkipCalendars(cfg config.Config) []client.ScheduleCalendarSpec {
+	sh, sm, eh, em, ok := cfg.NotifyActiveWindow()
+	if !ok {
+		return nil
+	}
+	var skip []client.ScheduleCalendarSpec
+	if sh > 0 {
+		skip = append(skip, client.ScheduleCalendarSpec{
+			Hour: []client.ScheduleRange{{Start: 0, End: sh - 1}},
+		})
+	}
+	if sm > 0 {
+		skip = append(skip, client.ScheduleCalendarSpec{
+			Hour:   []client.ScheduleRange{{Start: sh}},
+			Minute: []client.ScheduleRange{{Start: 0, End: sm - 1}},
+		})
+	}
+	if em == 0 {
+		skip = append(skip, client.ScheduleCalendarSpec{
+			Hour: []client.ScheduleRange{{Start: eh, End: 23}},
+		})
+		return skip
+	}
+	skip = append(skip, client.ScheduleCalendarSpec{
+		Hour:   []client.ScheduleRange{{Start: eh}},
+		Minute: []client.ScheduleRange{{Start: em, End: 59}},
+	})
+	if eh < 23 {
+		skip = append(skip, client.ScheduleCalendarSpec{
+			Hour: []client.ScheduleRange{{Start: eh + 1, End: 23}},
+		})
+	}
+	return skip
 }

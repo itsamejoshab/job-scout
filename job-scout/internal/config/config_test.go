@@ -193,19 +193,34 @@ func TestLoad_HTTPTimeoutAndScrapeBackoffFromEnv(t *testing.T) {
 func TestLoad_ScheduleSecondsDefaults(t *testing.T) {
 	t.Setenv("SCRAPE_SCHEDULE_SECONDS", "")
 	t.Setenv("NOTIFY_SCHEDULE_SECONDS", "")
+	t.Setenv("NOTIFY_SCHEDULE_OFFSET_SECONDS", "")
+	t.Setenv("NOTIFY_ACTIVE_START", "")
+	t.Setenv("NOTIFY_ACTIVE_END", "")
 
 	cfg := Load()
-	if cfg.ScrapeScheduleSeconds != 60 {
-		t.Errorf("SCRAPE_SCHEDULE_SECONDS default = %d, want 60", cfg.ScrapeScheduleSeconds)
+	if cfg.ScrapeScheduleSeconds != 600 {
+		t.Errorf("SCRAPE_SCHEDULE_SECONDS default = %d, want 600", cfg.ScrapeScheduleSeconds)
 	}
-	if cfg.NotifyScheduleSeconds != 300 {
-		t.Errorf("NOTIFY_SCHEDULE_SECONDS default = %d, want 300", cfg.NotifyScheduleSeconds)
+	if cfg.NotifyScheduleSeconds != 600 {
+		t.Errorf("NOTIFY_SCHEDULE_SECONDS default = %d, want 600", cfg.NotifyScheduleSeconds)
+	}
+	if cfg.NotifyScheduleOffsetSeconds != 540 {
+		t.Errorf("NOTIFY_SCHEDULE_OFFSET_SECONDS default = %d, want 540", cfg.NotifyScheduleOffsetSeconds)
+	}
+	if cfg.NotifyActiveStart != "07:30" {
+		t.Errorf("NOTIFY_ACTIVE_START default = %q, want 07:30", cfg.NotifyActiveStart)
+	}
+	if cfg.NotifyActiveEnd != "21:00" {
+		t.Errorf("NOTIFY_ACTIVE_END default = %q, want 21:00", cfg.NotifyActiveEnd)
 	}
 }
 
 func TestLoad_ScheduleSecondsFromEnv(t *testing.T) {
 	t.Setenv("SCRAPE_SCHEDULE_SECONDS", "90")
 	t.Setenv("NOTIFY_SCHEDULE_SECONDS", "450")
+	t.Setenv("NOTIFY_SCHEDULE_OFFSET_SECONDS", "60")
+	t.Setenv("NOTIFY_ACTIVE_START", "8:00")
+	t.Setenv("NOTIFY_ACTIVE_END", "20:15")
 
 	cfg := Load()
 	if cfg.ScrapeScheduleSeconds != 90 {
@@ -213,6 +228,35 @@ func TestLoad_ScheduleSecondsFromEnv(t *testing.T) {
 	}
 	if cfg.NotifyScheduleSeconds != 450 {
 		t.Errorf("NOTIFY_SCHEDULE_SECONDS = %d, want 450", cfg.NotifyScheduleSeconds)
+	}
+	if cfg.NotifyScheduleOffsetSeconds != 60 {
+		t.Errorf("NOTIFY_SCHEDULE_OFFSET_SECONDS = %d, want 60", cfg.NotifyScheduleOffsetSeconds)
+	}
+	if cfg.NotifyActiveStart != "8:00" {
+		t.Errorf("NOTIFY_ACTIVE_START = %q, want 8:00", cfg.NotifyActiveStart)
+	}
+	if cfg.NotifyActiveEnd != "20:15" {
+		t.Errorf("NOTIFY_ACTIVE_END = %q, want 20:15", cfg.NotifyActiveEnd)
+	}
+}
+
+func TestLoad_NotifyOffsetAtLeastEveryIsZero(t *testing.T) {
+	t.Setenv("NOTIFY_SCHEDULE_SECONDS", "300")
+	t.Setenv("NOTIFY_SCHEDULE_OFFSET_SECONDS", "540")
+
+	cfg := Load()
+	if cfg.NotifyScheduleOffsetSeconds != 0 {
+		t.Errorf("offset %d, want 0 when offset is not less than the notify interval", cfg.NotifyScheduleOffsetSeconds)
+	}
+}
+
+func TestLoad_InvalidNotifyClockUsesDefault(t *testing.T) {
+	t.Setenv("NOTIFY_ACTIVE_START", "7")
+	t.Setenv("NOTIFY_ACTIVE_END", "25:00")
+
+	cfg := Load()
+	if cfg.NotifyActiveStart != "07:30" || cfg.NotifyActiveEnd != "21:00" {
+		t.Errorf("invalid clocks start=%q end=%q, want defaults 07:30 and 21:00", cfg.NotifyActiveStart, cfg.NotifyActiveEnd)
 	}
 }
 
@@ -234,10 +278,10 @@ func TestLoad_ScheduleSecondsInvalidProductUsesDefault(t *testing.T) {
 	t.Setenv("NOTIFY_SCHEDULE_SECONDS", "60*0")
 
 	cfg := Load()
-	if cfg.ScrapeScheduleSeconds != 60 {
-		t.Errorf("invalid SCRAPE_SCHEDULE_SECONDS = %d, want default 60", cfg.ScrapeScheduleSeconds)
+	if cfg.ScrapeScheduleSeconds != 600 {
+		t.Errorf("invalid SCRAPE_SCHEDULE_SECONDS = %d, want default 600", cfg.ScrapeScheduleSeconds)
 	}
-	if cfg.NotifyScheduleSeconds != 300 {
-		t.Errorf("invalid NOTIFY_SCHEDULE_SECONDS = %d, want default 300", cfg.NotifyScheduleSeconds)
+	if cfg.NotifyScheduleSeconds != 600 {
+		t.Errorf("invalid NOTIFY_SCHEDULE_SECONDS = %d, want default 600", cfg.NotifyScheduleSeconds)
 	}
 }
