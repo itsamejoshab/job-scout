@@ -65,10 +65,8 @@ const dashboardStats = {
     },
   ],
   daily: [
-    { day: "2026-09-17", job_source: "LINKEDIN", count: 2 },
-    { day: "2026-09-17", job_source: "INDEED", count: 0 },
-    { day: "2026-09-18", job_source: "LINKEDIN", count: 0 },
-    { day: "2026-09-18", job_source: "INDEED", count: 0 },
+    { day: "2026-09-17", total: 2, notified: 1 },
+    { day: "2026-09-18", total: 0, notified: 0 },
   ],
 };
 
@@ -386,7 +384,7 @@ describe("operator shell", () => {
     expect(screen.getByText("Status: disabled")).toBeInTheDocument();
     expect(screen.getByText("pending: 1")).toBeInTheDocument();
     expect(screen.getByText("title_company: 1")).toBeInTheDocument();
-    expect(screen.getByText("Daily jobs (America/New_York)")).toBeInTheDocument();
+    expect(screen.getByText("Jobs over time (America/New_York)")).toBeInTheDocument();
   });
 
   it("polls dashboard every two seconds and pauses while hidden", async () => {
@@ -445,7 +443,7 @@ describe("operator shell", () => {
     await screen.findByText("LINKEDIN");
     const initialDashboardCalls = dashboardCalls();
     const initialJobsCalls = jobsCalls();
-    await user.click(screen.getByRole("button", { name: "Run scrape" }));
+    await user.click(screen.getByRole("button", { name: "Scrape Jobs" }));
 
     expect(fetch).toHaveBeenCalledWith(
       "/api/v0/run?force=1",
@@ -478,7 +476,7 @@ describe("operator shell", () => {
     const user = userEvent.setup();
     renderPath("/dashboard");
 
-    await user.click(await screen.findByRole("button", { name: "Run notify" }));
+    await user.click(await screen.findByRole("button", { name: "Send Notification" }));
 
     expect(fetch).toHaveBeenCalledWith(
       "/api/v0/notify",
@@ -499,8 +497,12 @@ describe("operator shell", () => {
       },
     });
 
-    expect(await screen.findByRole("button", { name: "Run scrape" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Run notify" })).toBeDisabled();
+    const scrape = await screen.findByRole("button", { name: "Scrape Jobs" });
+    const notify = screen.getByRole("button", { name: "Send Notification" });
+    await waitFor(() => {
+      expect(scrape).toBeDisabled();
+      expect(notify).toBeDisabled();
+    });
   });
 
   it("renders job filters with notified and last-24-hours defaults, preview text, and source links", async () => {
@@ -733,9 +735,12 @@ describe("operator shell", () => {
       const user = userEvent.setup();
       const confirm = vi.spyOn(window, "confirm");
       confirm.mockClear();
-      renderPath("/settings", { stats: statsWithRejected(linkedIn, indeed) });
+      renderPath("/dashboard", { stats: statsWithRejected(linkedIn, indeed) });
       const reEvaluate = await screen.findByRole("button", {
         name: /re-evaluate rejected jobs/i,
+      });
+      await waitFor(() => {
+        expect(reEvaluate).toHaveTextContent(String(total));
       });
 
       confirm.mockReturnValueOnce(false);
@@ -756,11 +761,13 @@ describe("operator shell", () => {
   it("posts an empty re-evaluation request and reports the updated row count", async () => {
     const user = userEvent.setup();
     vi.spyOn(window, "confirm").mockReturnValueOnce(true);
-    renderPath("/settings", { stats: statsWithRejected(3, 2), reEvaluatedCount: 7 });
+    renderPath("/jobs", { stats: statsWithRejected(3, 2), reEvaluatedCount: 7 });
 
-    await user.click(
-      await screen.findByRole("button", { name: /re-evaluate rejected jobs/i }),
-    );
+    const reEvaluate = await screen.findByRole("button", { name: /re-evaluate rejected jobs/i });
+    await waitFor(() => {
+      expect(reEvaluate).toHaveTextContent("5");
+    });
+    await user.click(reEvaluate);
 
     const result = await screen.findByRole("status");
     expect(result).toHaveTextContent(/\b7\b/);

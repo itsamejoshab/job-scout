@@ -6,7 +6,6 @@ import {
   RefreshCw,
   RotateCcw,
   Save,
-  Undo2,
   X,
 } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
@@ -49,12 +48,80 @@ const pages = [
 ];
 
 function Header() {
+  const queryClient = useQueryClient();
   const config = useQuery({ queryKey: ["config"], queryFn: getConfig });
   const status = useQuery({
     queryKey: ["status"],
     queryFn: getStatus,
     refetchInterval: 2_000,
   });
+  const dashboard = useQuery({
+    queryKey: ["dashboard-stats"],
+    queryFn: getDashboardStats,
+  });
+
+  const [activeWorkflow, setActiveWorkflow] = useState<WorkflowStart | null>(null);
+  const [runMessage, setRunMessage] = useState("");
+  const completedWorkflow = useRef("");
+  const start = useMutation({
+    mutationFn: (kind: "scrape" | "notify") =>
+      kind === "scrape" ? startScrape() : startNotify(),
+    onSuccess: (workflow) => {
+      completedWorkflow.current = "";
+      setActiveWorkflow(workflow);
+      setRunMessage("Workflow running.");
+    },
+    onError: () => {
+      setRunMessage("Workflow could not start.");
+    },
+  });
+  const workflow = useQuery({
+    queryKey: ["workflow", activeWorkflow?.workflow_id],
+    queryFn: () => getWorkflowStatus(activeWorkflow?.workflow_id ?? ""),
+    enabled: activeWorkflow !== null,
+    refetchInterval: (query) =>
+      workflowFinished(query.state.data?.status) ? false : 1_000,
+  });
+
+  useEffect(() => {
+    if (
+      !activeWorkflow ||
+      !workflowFinished(workflow.data?.status) ||
+      completedWorkflow.current === activeWorkflow.workflow_id
+    ) {
+      return;
+    }
+    completedWorkflow.current = activeWorkflow.workflow_id;
+    setRunMessage("Workflow finished.");
+    void Promise.all([
+      queryClient.refetchQueries({ queryKey: ["dashboard-stats"], type: "all" }),
+      queryClient.refetchQueries({ queryKey: ["jobs"], type: "all" }),
+    ]);
+  }, [activeWorkflow, queryClient, workflow.data?.status]);
+
+  const reEvaluate = useMutation({
+    mutationFn: () => reEvaluateRejectedJobs(),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
+      void queryClient.invalidateQueries({ queryKey: ["jobs"] });
+    },
+  });
+
+  const rejectedCount = (dashboard.data?.providers ?? []).reduce(
+    (total, provider) => total + (provider.by_state.rejected ?? 0),
+    0,
+  );
+
+  const reEvaluateRejected = () => {
+    const confirmed = window.confirm(
+      `Send ${rejectedCount} currently rejected ${rejectedCount === 1 ? "job" : "jobs"} ` +
+        "back to pending for re-evaluation? The count can change before you confirm.",
+    );
+    if (!confirmed) {
+      return;
+    }
+    reEvaluate.mutate();
+  };
 
   const down = status.data
     ? [
@@ -67,6 +134,7 @@ function Header() {
     : down.length > 0
       ? `${down.join(" and ")} down`
       : "All systems operational";
+  const temporalDown = status.data?.temporal.ok === false;
 
   return (
     <header className="sticky top-0 z-20 border-b border-border/70 bg-background/80 backdrop-blur">
@@ -96,7 +164,67 @@ function Header() {
             </NavLink>
           ))}
         </nav>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            size="sm"
+            variant="primary"
+            disabled={temporalDown || start.isPending}
+            onClick={() => start.mutate("scrape")}
+          >
+            Scrape Jobs
+          </Button>
+          <Button
+            size="sm"
+            disabled={temporalDown || start.isPending}
+            onClick={() => start.mutate("notify")}
+          >
+            Send Notification
+          </Button>
+          <Button
+            size="sm"
+            disabled={reEvaluate.isPending}
+            onClick={reEvaluateRejected}
+            title="Send rejected jobs back to pending so the next notify pass applies the current filters."
+          >
+            Re-Evaluate Rejected Jobs
+            {rejectedCount > 0 && (
+              <span className="rounded-full bg-muted px-1.5 py-0.5 text-xs font-semibold tabular-nums text-muted-foreground">
+                {rejectedCount}
+              </span>
+            )}
+          </Button>
+        </div>
         <div className="ml-auto flex flex-wrap items-center justify-end gap-4">
+          {(runMessage || reEvaluate.isPending || reEvaluate.isSuccess || reEvaluate.isError) && (
+            <p
+              role="status"
+              className={cn(
+                "text-sm",
+                reEvaluate.isError ? "text-destructive" : "text-muted-foreground",
+              )}
+            >
+              {reEvaluate.isPending && "Re-evaluating rejected jobs."}
+              {reEvaluate.isSuccess &&
+                `${reEvaluate.data.updated} ${reEvaluate.data.updated === 1 ? "job" : "jobs"} ` +
+                  "moved back to pending."}
+              {reEvaluate.isError && "Re-evaluation failed."}
+              {!reEvaluate.isPending && !reEvaluate.isSuccess && !reEvaluate.isError && runMessage}
+            </p>
+          )}
+          {activeWorkflow && config.data?.temporal_ui_address && (
+            <a
+              className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline"
+              href={temporalWorkflowURL(
+                config.data.temporal_ui_address,
+                activeWorkflow.workflow_id,
+              )}
+              target="_blank"
+              rel="noreferrer"
+            >
+              {activeWorkflow.workflow_id}
+              <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+            </a>
+          )}
           <Badge variant={down.length > 0 ? "destructive" : "secondary"}>
             <span
               className={cn(
@@ -126,7 +254,10 @@ function Header() {
 
 const stateOrder = ["pending", "rejected", "eligible", "notifying", "notified"];
 const rejectReasonOrder = ["duplicate", "title_company", "description", "remote_lie", "detail_failed"];
-const chartColors = ["#2563eb", "#16a34a", "#ea580c", "#7c3aed", "#dc2626"];
+const chartColors = {
+  total: "#2563eb",
+  notified: "#16a34a",
+};
 
 function usePageVisible() {
   const [visible, setVisible] = useState(() => !document.hidden);
@@ -176,77 +307,23 @@ function temporalWorkflowURL(address: string, workflowID: string) {
 
 function DashboardPage() {
   const visible = usePageVisible();
-  const queryClient = useQueryClient();
-  const config = useQuery({ queryKey: ["config"], queryFn: getConfig });
-  const status = useQuery({
-    queryKey: ["status"],
-    queryFn: getStatus,
-    refetchInterval: 2_000,
-  });
   const dashboard = useQuery({
     queryKey: ["dashboard-stats"],
     queryFn: getDashboardStats,
     refetchInterval: visible ? 2_000 : false,
   });
-  const [activeWorkflow, setActiveWorkflow] = useState<WorkflowStart | null>(null);
-  const [runMessage, setRunMessage] = useState("");
-  const completedWorkflow = useRef("");
-  const start = useMutation({
-    mutationFn: (kind: "scrape" | "notify") =>
-      kind === "scrape" ? startScrape() : startNotify(),
-    onSuccess: (workflow) => {
-      completedWorkflow.current = "";
-      setActiveWorkflow(workflow);
-      setRunMessage("Workflow running.");
-    },
-    onError: () => {
-      setRunMessage("Workflow could not start.");
-    },
-  });
-  const workflow = useQuery({
-    queryKey: ["workflow", activeWorkflow?.workflow_id],
-    queryFn: () => getWorkflowStatus(activeWorkflow?.workflow_id ?? ""),
-    enabled: activeWorkflow !== null,
-    refetchInterval: (query) =>
-      workflowFinished(query.state.data?.status) ? false : 1_000,
-  });
-
-  useEffect(() => {
-    if (
-      !activeWorkflow ||
-      !workflowFinished(workflow.data?.status) ||
-      completedWorkflow.current === activeWorkflow.workflow_id
-    ) {
-      return;
-    }
-    completedWorkflow.current = activeWorkflow.workflow_id;
-    setRunMessage("Workflow finished.");
-    void Promise.all([
-      queryClient.refetchQueries({ queryKey: ["dashboard-stats"], type: "all" }),
-      queryClient.refetchQueries({ queryKey: ["jobs"], type: "all" }),
-    ]);
-  }, [activeWorkflow, queryClient, workflow.data?.status]);
 
   const chartData = useMemo(() => {
     if (!dashboard.data) {
       return [];
     }
-    const dayMap = new Map<string, Record<string, number | string>>();
-    for (const point of dashboard.data.daily) {
-      const row = dayMap.get(point.day) ?? { day: point.day };
-      row[point.job_source] = point.count;
-      dayMap.set(point.day, row);
-    }
-    for (const row of dayMap.values()) {
-      for (const provider of dashboard.data.providers) {
-        if (typeof row[provider.job_source] !== "number") {
-          row[provider.job_source] = 0;
-        }
-      }
-    }
-    return [...dayMap.values()].sort((a, b) =>
-      String(a.day).localeCompare(String(b.day)),
-    );
+    return [...dashboard.data.daily]
+      .map((point) => ({
+        day: point.day,
+        "Total jobs": point.total,
+        Notified: point.notified,
+      }))
+      .sort((left, right) => left.day.localeCompare(right.day));
   }, [dashboard.data]);
 
   return (
@@ -310,7 +387,7 @@ function DashboardPage() {
 
           <section className="surface mt-6 p-5">
             <h2 className="text-lg font-semibold tracking-tight">
-              Daily jobs ({dashboard.data.timezone})
+              Jobs over time ({dashboard.data.timezone})
             </h2>
             <div className="mt-4 h-80">
               <ResponsiveContainer width="100%" height="100%" minWidth={320} minHeight={240}>
@@ -320,54 +397,23 @@ function DashboardPage() {
                   <YAxis allowDecimals={false} />
                   <Tooltip />
                   <Legend />
-                  {dashboard.data.providers.map((provider, index) => (
-                    <Line
-                      key={provider.job_source}
-                      type="monotone"
-                      dataKey={provider.job_source}
-                      stroke={chartColors[index % chartColors.length]}
-                      strokeWidth={2}
-                      dot={false}
-                    />
-                  ))}
+                  <Line
+                    type="monotone"
+                    dataKey="Total jobs"
+                    stroke={chartColors.total}
+                    strokeWidth={2}
+                    dot={false}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="Notified"
+                    stroke={chartColors.notified}
+                    strokeWidth={2}
+                    dot={false}
+                  />
                 </LineChart>
               </ResponsiveContainer>
             </div>
-          </section>
-
-          <section className="mt-6">
-            <div className="flex gap-2">
-              <Button
-                variant="primary"
-                disabled={status.data?.temporal.ok === false || start.isPending}
-                onClick={() => start.mutate("scrape")}
-              >
-                Run scrape
-              </Button>
-              <Button
-                disabled={status.data?.temporal.ok === false || start.isPending}
-                onClick={() => start.mutate("notify")}
-              >
-                Run notify
-              </Button>
-            </div>
-            {activeWorkflow && config.data?.temporal_ui_address && (
-              <p className="mt-3 text-sm">
-                Workflow:{" "}
-                <a
-                  className="font-medium text-primary hover:underline"
-                  href={temporalWorkflowURL(
-                    config.data.temporal_ui_address,
-                    activeWorkflow.workflow_id,
-                  )}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  {activeWorkflow.workflow_id}
-                </a>
-              </p>
-            )}
-            {runMessage && <p role="status" className="mt-2 text-sm">{runMessage}</p>}
           </section>
         </>
       )}
@@ -823,10 +869,6 @@ function SettingsPage() {
     queryKey: ["search-settings"],
     queryFn: getSearchSettings,
   });
-  const dashboard = useQuery({
-    queryKey: ["dashboard-stats"],
-    queryFn: getDashboardStats,
-  });
 
   const [base, setBase] = useState<SearchSettingsInput | null>(null);
   const [draft, setDraft] = useState<SearchSettingsInput | null>(null);
@@ -859,19 +901,6 @@ function SettingsPage() {
       queryClient.setQueryData(["search-settings"], stored);
     },
   });
-
-  const reEvaluate = useMutation({
-    mutationFn: () => reEvaluateRejectedJobs(),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
-      void queryClient.invalidateQueries({ queryKey: ["jobs"] });
-    },
-  });
-
-  const rejectedCount = (dashboard.data?.providers ?? []).reduce(
-    (total, provider) => total + (provider.by_state.rejected ?? 0),
-    0,
-  );
 
   const dirty = draft !== null && base !== null && !settingsEqual(draft, base);
 
@@ -913,58 +942,12 @@ function SettingsPage() {
     reset.mutate();
   };
 
-  const reEvaluateRejected = () => {
-    const confirmed = window.confirm(
-      `Send ${rejectedCount} currently rejected ${rejectedCount === 1 ? "job" : "jobs"} ` +
-        "back to pending for re-evaluation? The count can change before you confirm.",
-    );
-    if (!confirmed) {
-      return;
-    }
-    reEvaluate.mutate();
-  };
-
   return (
     <main className="w-full px-6 py-8 lg:px-10">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-semibold tracking-tight">Settings</h1>
-          <p className="mt-1.5 text-muted-foreground">
-            Edit universal filters and provider scrape settings.
-          </p>
-        </div>
-        <div className="flex flex-col items-start gap-2 sm:items-end">
-          <Button
-            variant="secondary"
-            disabled={reEvaluate.isPending}
-            onClick={reEvaluateRejected}
-            title="Send rejected jobs back to pending so the next notify pass applies the current filters."
-          >
-            <Undo2 className="h-4 w-4" aria-hidden="true" />
-            Re-evaluate rejected jobs
-            {rejectedCount > 0 && (
-              <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-semibold tabular-nums text-muted-foreground">
-                {rejectedCount}
-              </span>
-            )}
-          </Button>
-          {(reEvaluate.isPending || reEvaluate.isSuccess || reEvaluate.isError) && (
-            <p
-              role="status"
-              className={cn(
-                "text-sm",
-                reEvaluate.isError ? "text-destructive" : "text-muted-foreground",
-              )}
-            >
-              {reEvaluate.isPending && "Re-evaluating rejected jobs."}
-              {reEvaluate.isSuccess &&
-                `${reEvaluate.data.updated} ${reEvaluate.data.updated === 1 ? "job" : "jobs"} ` +
-                  "moved back to pending."}
-              {reEvaluate.isError && "Re-evaluation failed."}
-            </p>
-          )}
-        </div>
-      </div>
+      <h1 className="text-3xl font-semibold tracking-tight">Settings</h1>
+      <p className="mt-1.5 text-muted-foreground">
+        Edit universal filters and provider scrape settings.
+      </p>
 
       <section className="surface mt-8 bg-muted/40 p-5 lg:p-6">
         <div className="flex flex-wrap items-center justify-between gap-3">

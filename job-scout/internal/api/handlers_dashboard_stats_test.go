@@ -35,9 +35,9 @@ type dashboardProviderStats struct {
 }
 
 type dashboardDailyPoint struct {
-	Day       string `json:"day"`
-	JobSource string `json:"job_source"`
-	Count     int    `json:"count"`
+	Day      string `json:"day"`
+	Total    int    `json:"total"`
+	Notified int    `json:"notified"`
 }
 
 func TestDashboardStats_AggregatesProvidersAndDailySeries(t *testing.T) {
@@ -77,14 +77,15 @@ func TestDashboardStats_AggregatesProvidersAndDailySeries(t *testing.T) {
 				created_at, updated_at, state, reject_reason, state_changed_at
 			) VALUES (
 				'LINKEDIN', 'IT Help Desk', 'Acme', 'Remote', $1,
-				$2::timestamp, $2::timestamp, $3, $4, $2::timestamp
+				$2::timestamp, $2::timestamp, $3, $4, $5
 			)
-		`, url, createdAt, state, reason); err != nil {
+		`, url, createdAt, state, reason, crossMidnightUTC); err != nil {
 			t.Fatalf("insert %s: %v", url, err)
 		}
 	}
 	insertJob("https://www.linkedin.com/jobs/view/dashboard-agg-1/", db.JobStatePending, nil)
 	insertJob("https://www.linkedin.com/jobs/view/dashboard-agg-2/", db.JobStateRejected, "title_company")
+	insertJob("https://www.linkedin.com/jobs/view/dashboard-agg-3/", db.JobStateNotified, nil)
 
 	handler := &Handler{
 		DB:  pool,
@@ -123,11 +124,11 @@ func TestDashboardStats_AggregatesProvidersAndDailySeries(t *testing.T) {
 	if linked.Status != "waiting" {
 		t.Errorf("LINKEDIN status = %q, want waiting", linked.Status)
 	}
-	if linked.TotalJobs != 2 {
-		t.Errorf("LINKEDIN total_jobs = %d, want 2", linked.TotalJobs)
+	if linked.TotalJobs != 3 {
+		t.Errorf("LINKEDIN total_jobs = %d, want 3", linked.TotalJobs)
 	}
 	assertStateCounts(t, linked.ByState, map[string]int{
-		"pending": 1, "rejected": 1, "eligible": 0, "notifying": 0, "notified": 0,
+		"pending": 1, "rejected": 1, "eligible": 0, "notifying": 0, "notified": 1,
 	})
 	assertReasonCounts(t, linked.ByRejectReason, map[string]int{
 		"duplicate": 0, "title_company": 1, "description": 0, "remote_lie": 0, "detail_failed": 0,
@@ -156,32 +157,39 @@ func TestDashboardStats_AggregatesProvidersAndDailySeries(t *testing.T) {
 		"duplicate": 0, "title_company": 0, "description": 0, "remote_lie": 0, "detail_failed": 0,
 	})
 
-	expectedSources := []string{"INDEED", "LINKEDIN"}
 	expectedDays := make([]string, 0, 14)
 	for i := 13; i >= 0; i-- {
 		expectedDays = append(expectedDays, now.In(location).AddDate(0, 0, -i).Format("2006-01-02"))
 	}
-	if len(body.Daily) != len(expectedDays)*len(expectedSources) {
-		t.Fatalf("daily len = %d, want %d", len(body.Daily), len(expectedDays)*len(expectedSources))
+	if len(body.Daily) != len(expectedDays) {
+		t.Fatalf("daily len = %d, want %d", len(body.Daily), len(expectedDays))
 	}
-	dailyCounts := map[string]int{}
+	dailyTotals := map[string]dashboardDailyPoint{}
 	for _, point := range body.Daily {
-		dailyCounts[point.Day+"|"+point.JobSource] = point.Count
+		dailyTotals[point.Day] = point
 	}
 	for _, day := range expectedDays {
-		for _, source := range expectedSources {
-			key := day + "|" + source
-			if _, ok := dailyCounts[key]; !ok {
-				t.Fatalf("daily missing key %s", key)
-			}
+		if _, ok := dailyTotals[day]; !ok {
+			t.Fatalf("daily missing day %s", day)
 		}
 	}
 	shiftedDay := localDay.Format("2006-01-02")
-	if got := dailyCounts[shiftedDay+"|LINKEDIN"]; got != 2 {
-		t.Errorf("daily count for %s LINKEDIN = %d, want 2", shiftedDay, got)
+	if got := dailyTotals[shiftedDay].Total; got != 3 {
+		t.Errorf("daily total for %s = %d, want 3", shiftedDay, got)
 	}
-	if got := dailyCounts[shiftedDay+"|INDEED"]; got != 0 {
-		t.Errorf("daily count for %s INDEED = %d, want 0", shiftedDay, got)
+	if got := dailyTotals[shiftedDay].Notified; got != 1 {
+		t.Errorf("daily notified for %s = %d, want 1", shiftedDay, got)
+	}
+	for _, day := range expectedDays {
+		if day == shiftedDay {
+			continue
+		}
+		if got := dailyTotals[day].Total; got != 0 {
+			t.Errorf("daily total for %s = %d, want 0", day, got)
+		}
+		if got := dailyTotals[day].Notified; got != 0 {
+			t.Errorf("daily notified for %s = %d, want 0", day, got)
+		}
 	}
 }
 

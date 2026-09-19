@@ -26,11 +26,11 @@ type DashboardProviderStats struct {
 	ByRejectReason        map[string]int `json:"by_reject_reason"`
 }
 
-// DashboardDailyPoint is one day+provider bucket in the aggregate series.
+// DashboardDailyPoint is one reporting-day bucket for created jobs and notified jobs.
 type DashboardDailyPoint struct {
-	Day       string    `json:"day"`
-	JobSource JobSource `json:"job_source"`
-	Count     int       `json:"count"`
+	Day      string `json:"day"`
+	Total    int    `json:"total"`
+	Notified int    `json:"notified"`
 }
 
 // DashboardStats is the database-backed dashboard aggregate response payload.
@@ -164,15 +164,19 @@ func loadDashboardDaily(ctx context.Context, database *sql.DB, timezone string) 
 		)
 		SELECT
 			to_char(days.day, 'YYYY-MM-DD') AS day,
-			s.job_source,
-			COUNT(j.id) AS count
+			(
+				SELECT COUNT(*)
+				FROM jobs AS j
+				WHERE ((j.created_at AT TIME ZONE 'UTC') AT TIME ZONE $1)::date = days.day
+			) AS total,
+			(
+				SELECT COUNT(*)
+				FROM jobs AS j
+				WHERE j.state = 'notified'
+				  AND (j.state_changed_at AT TIME ZONE $1)::date = days.day
+			) AS notified
 		FROM days
-		CROSS JOIN scraper_settings AS s
-		LEFT JOIN jobs AS j
-			ON j.job_source = s.job_source
-			AND ((j.created_at AT TIME ZONE 'UTC') AT TIME ZONE $1)::date = days.day
-		GROUP BY days.day, s.job_source
-		ORDER BY days.day, s.job_source
+		ORDER BY days.day
 	`, timezone)
 	if err != nil {
 		return nil, err
@@ -182,7 +186,7 @@ func loadDashboardDaily(ctx context.Context, database *sql.DB, timezone string) 
 	out := []DashboardDailyPoint{}
 	for rows.Next() {
 		var point DashboardDailyPoint
-		if err := rows.Scan(&point.Day, &point.JobSource, &point.Count); err != nil {
+		if err := rows.Scan(&point.Day, &point.Total, &point.Notified); err != nil {
 			return nil, err
 		}
 		out = append(out, point)
