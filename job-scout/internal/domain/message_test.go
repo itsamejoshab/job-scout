@@ -22,15 +22,16 @@ func TestBuildMessage_MatchesSpecFormatIncludingZerosAndClaimedURLs(t *testing.T
 
 	got := BuildMessage(counts, urls)
 	want := "" +
-		"  10 job postings stored.\n" +
+		"Job alert summary:\n" +
+		"  10 job postings scraped\n" +
 		" -3 dont match companies or titles\n" +
 		" -1 dont match descriptions\n" +
 		" -0 are lying about remote\n" +
 		" -2 duplicate title/company\n" +
-		" -1 detail failed\n" +
-		"  pending 1, eligible 2, notifying now 3, notified 0.\n" +
+		" -1 lost due to unforseen circumstances\n" +
+		"\n" +
+		"2 new jobs to check out\n" +
 		"*************\n" +
-		"NEW LEAD: Some new jobs were posted:\n" +
 		"https://www.linkedin.com/jobs/view/older/\n" +
 		"https://www.linkedin.com/jobs/view/newer/"
 	if got != want {
@@ -48,15 +49,16 @@ func TestBuildMessage_PrintsZeroRejectLinesAndClaimedURLsOnly(t *testing.T) {
 	}
 	got := BuildMessage(counts, []string{"https://www.linkedin.com/jobs/view/claimed-only/"})
 	want := "" +
-		"  4 job postings stored.\n" +
+		"Job alert summary:\n" +
+		"  4 job postings scraped\n" +
 		" -0 dont match companies or titles\n" +
 		" -0 dont match descriptions\n" +
 		" -0 are lying about remote\n" +
 		" -0 duplicate title/company\n" +
-		" -0 detail failed\n" +
-		"  pending 0, eligible 1, notifying now 2, notified 1.\n" +
+		" -0 lost due to unforseen circumstances\n" +
+		"\n" +
+		"1 new jobs to check out\n" +
 		"*************\n" +
-		"NEW LEAD: Some new jobs were posted:\n" +
 		"https://www.linkedin.com/jobs/view/claimed-only/"
 	if got != want {
 		t.Errorf("BuildMessage mismatch\ngot:\n%q\nwant:\n%q", got, want)

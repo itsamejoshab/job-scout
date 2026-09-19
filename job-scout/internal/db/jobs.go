@@ -88,6 +88,7 @@ type JobListFilter struct {
 	Query     string
 	DateFrom  string
 	DateTo    string
+	LastHours int // relative window ending at AsOf; 0 means no relative filter
 	AsOf      time.Time
 	Timezone  string
 	Limit     int
@@ -103,7 +104,8 @@ func ListJobsPage(ctx context.Context, database *sql.DB, filter JobListFilter) (
 		  AND ($3 = '' OR job_source::text = $3)
 		  AND ($4 = '' OR title ILIKE '%' || $4 || '%' OR company ILIKE '%' || $4 || '%')
 		  AND ($5 = '' OR ((created_at AT TIME ZONE 'UTC') AT TIME ZONE $7)::date >= $5::date)
-		  AND ($6 = '' OR ((created_at AT TIME ZONE 'UTC') AT TIME ZONE $7)::date <= $6::date)`
+		  AND ($6 = '' OR ((created_at AT TIME ZONE 'UTC') AT TIME ZONE $7)::date <= $6::date)
+		  AND ($8::int = 0 OR created_at > (($1::timestamptz AT TIME ZONE 'UTC') - make_interval(hours => $8::int)))`
 	args := []any{
 		filter.AsOf,
 		filter.State,
@@ -112,6 +114,7 @@ func ListJobsPage(ctx context.Context, database *sql.DB, filter JobListFilter) (
 		filter.DateFrom,
 		filter.DateTo,
 		filter.Timezone,
+		filter.LastHours,
 	}
 
 	var total int
@@ -122,7 +125,7 @@ func ListJobsPage(ctx context.Context, database *sql.DB, filter JobListFilter) (
 		ctx,
 		`SELECT`+jobSelectColumns+where+`
 		ORDER BY created_at DESC, id DESC
-		LIMIT $8 OFFSET $9`,
+		LIMIT $9 OFFSET $10`,
 		append(args, filter.Limit, filter.Offset)...,
 	)
 	if err != nil {
