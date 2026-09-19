@@ -109,10 +109,8 @@ const providerSeed: Record<"LINKEDIN" | "INDEED", ProviderSettings> = {
     id: 1,
     job_source: "LINKEDIN",
     search_queries: [
-      { keywords: "Support", location: "101076143", f_WT: "1" },
-      { keywords: "Support", location: "101076143", f_WT: "2" },
-      { keywords: "Engineer", location: "101076143", f_WT: "1" },
-      { keywords: "Engineer", location: "101076143", f_WT: "2" },
+      { keywords: "Support", location: "101076143", f_WT: "1,2" },
+      { keywords: "Engineer", location: "101076143", f_WT: "1,2" },
     ],
     hardcoded_urls: [
       { url: "https://example.test/jobs", description: "Remote jobs", is_remote: true },
@@ -677,7 +675,7 @@ describe("operator shell", () => {
     expect(screen.getByRole("button", { name: "Save LINKEDIN settings" })).toBeDisabled();
   });
 
-  it("edits LinkedIn queries and location work types as a Cartesian product", async () => {
+  it("edits LinkedIn queries and location work types as combined searches", async () => {
     const user = userEvent.setup();
     renderPath("/settings");
 
@@ -689,6 +687,7 @@ describe("operator shell", () => {
     expect(screen.getByLabelText("LinkedIn location 1 On-Site")).toBeChecked();
     expect(screen.getByLabelText("LinkedIn location 1 Hybrid")).not.toBeChecked();
     expect(screen.getByLabelText("LinkedIn location 1 Remote")).toBeChecked();
+    expect(screen.getByText("1 locations")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Add LinkedIn query" }));
     await user.type(screen.getByLabelText("LinkedIn query 3"), "Analyst");
@@ -697,6 +696,7 @@ describe("operator shell", () => {
     await user.click(screen.getByLabelText("LinkedIn location 2 On-Site"));
     await user.click(screen.getByLabelText("LinkedIn location 2 Hybrid"));
     expect(save).toBeEnabled();
+    expect(screen.getByText("2 locations")).toBeInTheDocument();
 
     await user.click(save);
     await waitFor(() => {
@@ -713,14 +713,11 @@ describe("operator shell", () => {
     );
     const payload = JSON.parse(String((putCall?.[1] as RequestInit | undefined)?.body));
     expect(payload.search_queries).toEqual([
-      { keywords: "Support", location: "101076143", f_WT: "1" },
-      { keywords: "Support", location: "101076143", f_WT: "2" },
+      { keywords: "Support", location: "101076143", f_WT: "1,2" },
       { keywords: "Support", location: "105135351", f_WT: "3" },
-      { keywords: "Engineer", location: "101076143", f_WT: "1" },
-      { keywords: "Engineer", location: "101076143", f_WT: "2" },
+      { keywords: "Engineer", location: "101076143", f_WT: "1,2" },
       { keywords: "Engineer", location: "105135351", f_WT: "3" },
-      { keywords: "Analyst", location: "101076143", f_WT: "1" },
-      { keywords: "Analyst", location: "101076143", f_WT: "2" },
+      { keywords: "Analyst", location: "101076143", f_WT: "1,2" },
       { keywords: "Analyst", location: "105135351", f_WT: "3" },
     ]);
     expect(save).toBeDisabled();

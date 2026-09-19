@@ -51,11 +51,19 @@ function toLinkedInMatrix(searchQueries: ProviderSettings["search_queries"]): Li
       };
       locations.set(query.location, location);
     }
-    if (query.f_WT === "1" || query.f_WT === "2" || query.f_WT === "3") {
-      location.workTypes[query.f_WT] = true;
-    } else if (!query.f_WT) {
+    const codes = (query.f_WT ?? "")
+      .split(/[,\s|]+/)
+      .map((code) => code.trim())
+      .filter(Boolean);
+    if (codes.length === 0) {
       // No LinkedIn work-type filter includes all three modes.
       location.workTypes = { "1": true, "2": true, "3": true };
+      continue;
+    }
+    for (const code of codes) {
+      if (code === "1" || code === "2" || code === "3") {
+        location.workTypes[code] = true;
+      }
     }
   }
 
@@ -64,11 +72,16 @@ function toLinkedInMatrix(searchQueries: ProviderSettings["search_queries"]): Li
 
 function fromLinkedInMatrix(matrix: LinkedInMatrix): ProviderSettings["search_queries"] {
   return matrix.queries.flatMap((keywords) =>
-    matrix.locations.flatMap((location) =>
-      linkedInWorkTypes
+    matrix.locations.flatMap((location) => {
+      const selected = linkedInWorkTypes
         .filter(({ code }) => location.workTypes[code])
-        .map(({ code }) => ({ keywords, location: location.location, f_WT: code })),
-    ),
+        .map(({ code }) => code);
+      if (selected.length === 0) {
+        return [];
+      }
+      const f_WT = selected.length === linkedInWorkTypes.length ? "" : selected.join(",");
+      return [{ keywords, location: location.location, f_WT }];
+    }),
   );
 }
 
@@ -157,68 +170,92 @@ function LinkedInSearchEditor({
         </Button>
       </fieldset>
 
-      <fieldset>
-        <legend className="text-sm font-semibold tracking-tight">Locations and work types</legend>
-        <div className="mt-2 space-y-3">
-          {matrix.locations.map((location, index) => (
-            <div className="rounded-xl border border-border/70 bg-muted/30 p-3" key={index}>
-              <div className="flex gap-2">
-                <input
-                  type="number"
-                  min={1}
-                  step={1}
-                  aria-label={`LinkedIn location ${index + 1}`}
-                  className="field-sm min-w-0 flex-1"
-                  value={location.location}
-                  onChange={(event) => {
-                    const locations = matrix.locations.map((item, itemIndex) =>
-                      itemIndex === index ? { ...item, location: event.target.value } : item
-                    );
-                    onChange({ ...matrix, locations });
-                  }}
-                />
-                <Button
-                  variant="danger"
-                  size="sm"
-                  aria-label={`Remove LinkedIn location ${index + 1}`}
-                  onClick={() => onChange({
-                    ...matrix,
-                    locations: matrix.locations.filter((_, itemIndex) => itemIndex !== index),
-                  })}
-                >
-                  <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
-                  Remove
-                </Button>
-              </div>
-              <div className="mt-2 flex flex-wrap gap-4">
+      <fieldset className="overflow-x-auto">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <legend className="text-sm font-semibold tracking-tight">Locations and work types</legend>
+          <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
+            {matrix.locations.length} locations
+          </span>
+        </div>
+        <p className="mt-1 text-xs text-muted-foreground">
+          LinkedIn geo ID. Selected work types are added to each query as natural-language text.
+        </p>
+        {matrix.locations.length === 0 ? (
+          <p className="mt-3 rounded-xl border border-dashed border-border/70 px-3 py-6 text-center text-sm text-muted-foreground">
+            No locations yet. Add a LinkedIn geo ID to start.
+          </p>
+        ) : (
+          <table className="mt-3 w-full text-left text-sm">
+            <thead>
+              <tr className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                <th className="p-2">Geo ID</th>
                 {linkedInWorkTypes.map(({ code, label }) => (
-                  <label className="flex items-center gap-2 text-sm" key={code}>
+                  <th className="p-2 text-center" key={code}>{label}</th>
+                ))}
+                <th className="p-2">Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {matrix.locations.map((location, index) => (
+                <tr key={index}>
+                  <td className="p-2">
                     <input
-                      type="checkbox"
-                      aria-label={`LinkedIn location ${index + 1} ${label}`}
-                      checked={location.workTypes[code]}
+                      type="number"
+                      min={1}
+                      step={1}
+                      aria-label={`LinkedIn location ${index + 1}`}
+                      className="field-sm min-w-[8rem] w-full"
+                      value={location.location}
                       onChange={(event) => {
                         const locations = matrix.locations.map((item, itemIndex) =>
-                          itemIndex === index
-                            ? {
-                                ...item,
-                                workTypes: {
-                                  ...item.workTypes,
-                                  [code]: event.target.checked,
-                                },
-                              }
-                            : item
+                          itemIndex === index ? { ...item, location: event.target.value } : item
                         );
                         onChange({ ...matrix, locations });
                       }}
                     />
-                    {label}
-                  </label>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
+                  </td>
+                  {linkedInWorkTypes.map(({ code, label }) => (
+                    <td className="p-2 text-center" key={code}>
+                      <input
+                        type="checkbox"
+                        aria-label={`LinkedIn location ${index + 1} ${label}`}
+                        checked={location.workTypes[code]}
+                        onChange={(event) => {
+                          const locations = matrix.locations.map((item, itemIndex) =>
+                            itemIndex === index
+                              ? {
+                                  ...item,
+                                  workTypes: {
+                                    ...item.workTypes,
+                                    [code]: event.target.checked,
+                                  },
+                                }
+                              : item
+                          );
+                          onChange({ ...matrix, locations });
+                        }}
+                      />
+                    </td>
+                  ))}
+                  <td className="p-2">
+                    <Button
+                      variant="danger"
+                      size="sm"
+                      aria-label={`Remove LinkedIn location ${index + 1}`}
+                      onClick={() => onChange({
+                        ...matrix,
+                        locations: matrix.locations.filter((_, itemIndex) => itemIndex !== index),
+                      })}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                      Remove
+                    </Button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
         <Button
           size="sm"
           className="mt-3"

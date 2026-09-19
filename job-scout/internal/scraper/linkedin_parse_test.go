@@ -68,8 +68,8 @@ func TestLinkedIn_GuestSearchURLUsesSeeMoreAPIAndGeoId(t *testing.T) {
 	if !strings.Contains(got, "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?") {
 		t.Errorf("search URL must keep the guest see-more API, got %q", got)
 	}
-	if !strings.Contains(got, "keywords=IT+Help+Desk") && !strings.Contains(got, "keywords=IT%20Help%20Desk") {
-		t.Errorf("search URL must keep current keywords, got %q", got)
+	if !strings.Contains(got, "keywords=Remote+IT+Help+Desk") && !strings.Contains(got, "keywords=Remote%20IT%20Help%20Desk") {
+		t.Errorf("search URL must prepend Remote to keywords, got %q", got)
 	}
 	if !strings.Contains(got, "geoId=101076143") {
 		t.Errorf("search URL must send seed location as geoId, got %q", got)
@@ -80,11 +80,76 @@ func TestLinkedIn_GuestSearchURLUsesSeeMoreAPIAndGeoId(t *testing.T) {
 	if strings.Contains(got, "geoId=&") || strings.HasSuffix(got, "geoId=") {
 		t.Errorf("search URL must not send an empty geoId, got %q", got)
 	}
-	if !strings.Contains(got, "f_WT=2") {
-		t.Errorf("search URL must keep f_WT=2 for remote queries, got %q", got)
+	if strings.Contains(got, "f_WT=") {
+		t.Errorf("search URL must not send f_WT; work type is natural-language keywords, got %q", got)
 	}
 	if !strings.Contains(got, "f_TPR=r84600") {
 		t.Errorf("search URL must keep timespan f_TPR, got %q", got)
+	}
+}
+
+func TestLinkedIn_GuestSearchURLCombinesWorkTypesInKeywords(t *testing.T) {
+	s := NewLinkedIn(db.ScraperSettings{TimespanCode: "r84600"})
+	got := s.buildSearchURL(map[string]string{
+		"keywords": "IT Help Desk",
+		"location": "105135351",
+		"f_WT":     "3,2",
+	})
+	if !strings.Contains(got, "keywords=Remote+or+Hybrid+IT+Help+Desk") &&
+		!strings.Contains(got, "keywords=Remote%20or%20Hybrid%20IT%20Help%20Desk") {
+		t.Errorf("search URL must combine selected work types into keywords, got %q", got)
+	}
+	if strings.Contains(got, "f_WT=") {
+		t.Errorf("search URL must omit f_WT, got %q", got)
+	}
+
+	unrestricted := s.buildSearchURL(map[string]string{
+		"keywords": "IT Help Desk",
+		"location": "101076143",
+		"f_WT":     "",
+	})
+	if !strings.Contains(unrestricted, "keywords=IT+Help+Desk") &&
+		!strings.Contains(unrestricted, "keywords=IT%20Help%20Desk") {
+		t.Errorf("empty f_WT must leave keywords unchanged, got %q", unrestricted)
+	}
+	if strings.Contains(unrestricted, "Remote") || strings.Contains(unrestricted, "Hybrid") || strings.Contains(unrestricted, "On-Site") {
+		t.Errorf("unrestricted search must not prepend work-type words, got %q", unrestricted)
+	}
+}
+
+func TestCombineLinkedInSearchQueries_MergesLegacyRows(t *testing.T) {
+	got := combineLinkedInSearchQueries([]map[string]string{
+		{"keywords": "IT Help Desk", "location": "105135351", "f_WT": "3"},
+		{"keywords": "IT Help Desk", "location": "105135351", "f_WT": "2"},
+		{"keywords": "IT Help Desk", "location": "101076143", "f_WT": ""},
+		{"keywords": "Application Support", "location": "101076143", "f_WT": "2"},
+	})
+	want := []map[string]string{
+		{"keywords": "IT Help Desk", "location": "105135351", "f_WT": "2,3"},
+		{"keywords": "IT Help Desk", "location": "101076143", "f_WT": ""},
+		{"keywords": "Application Support", "location": "101076143", "f_WT": "2"},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("combineLinkedInSearchQueries len = %d, want %d (%#v)", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i]["keywords"] != want[i]["keywords"] ||
+			got[i]["location"] != want[i]["location"] ||
+			got[i]["f_WT"] != want[i]["f_WT"] {
+			t.Errorf("row %d = %#v, want %#v", i, got[i], want[i])
+		}
+	}
+}
+
+func TestIsRemoteOnlyWorkType(t *testing.T) {
+	if !isRemoteOnlyWorkType("2") {
+		t.Error(`f_WT "2" must be remote-only`)
+	}
+	if isRemoteOnlyWorkType("3,2") {
+		t.Error(`mixed remote+hybrid must not stamp all jobs remote`)
+	}
+	if isRemoteOnlyWorkType("") {
+		t.Error(`unrestricted search must not stamp all jobs remote`)
 	}
 }
 

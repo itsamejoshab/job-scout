@@ -128,12 +128,6 @@ func TestRunTick_SuccessSetsLastScrapedAndClearsBackoff(t *testing.T) {
 	if filtered != 0 {
 		t.Errorf("scrape must not run notify filters, non-pending or rejected rows=%d", filtered)
 	}
-	var remote bool
-	if err := pool.QueryRow(`SELECT BOOL_OR(is_remote) FROM jobs`).Scan(&remote); err != nil {
-		t.Errorf("is_remote must persist for f_WT=2 search cards: %v", err)
-	} else if !remote {
-		t.Error("remote cards from f_WT=2 must set is_remote")
-	}
 }
 
 func TestRunTick_PartialFailurePersistsJobsAndAppliesBackoff(t *testing.T) {

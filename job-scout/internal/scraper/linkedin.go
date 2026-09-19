@@ -19,6 +19,17 @@ const linkedInBaseURL = "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJob
 
 var linkedInPagePause = 2 * time.Second
 
+// linkedInWorkTypeOrder is the natural-language order for work-type phrases.
+// LinkedIn no longer honors f_WT; selected types are prepended to keywords.
+var linkedInWorkTypeOrder = []struct {
+	code  string
+	label string
+}{
+	{"2", "Remote"},
+	{"3", "Hybrid"},
+	{"1", "On-Site"},
+}
+
 // LinkedInScraper ports the original LinkedIn guest-API scraper to net/http +
 // golang.org/x/net/html.
 type LinkedInScraper struct {
@@ -52,17 +63,128 @@ func NewLinkedInWithTimeout(settings db.ScraperSettings, timeout time.Duration) 
 
 func (s *LinkedInScraper) Source() db.JobSource { return db.SourceLinkedIn }
 
+// parseLinkedInWorkTypes returns selected work-type codes in phrase order.
+// Empty or all three codes mean unrestricted (no keyword prefix).
+func parseLinkedInWorkTypes(fWT string) []string {
+	fWT = strings.TrimSpace(fWT)
+	if fWT == "" {
+		return nil
+	}
+	seen := map[string]bool{}
+	for _, part := range strings.FieldsFunc(fWT, func(r rune) bool {
+		return r == ',' || r == '|' || r == ' '
+	}) {
+		switch part {
+		case "1", "2", "3":
+			seen[part] = true
+		}
+	}
+	if len(seen) == 0 || (seen["1"] && seen["2"] && seen["3"]) {
+		return nil
+	}
+	out := make([]string, 0, len(seen))
+	for _, wt := range linkedInWorkTypeOrder {
+		if seen[wt.code] {
+			out = append(out, wt.code)
+		}
+	}
+	return out
+}
+
+func linkedInWorkTypePhrase(codes []string) string {
+	if len(codes) == 0 {
+		return ""
+	}
+	labels := make([]string, 0, len(codes))
+	for _, code := range codes {
+		for _, wt := range linkedInWorkTypeOrder {
+			if wt.code == code {
+				labels = append(labels, wt.label)
+				break
+			}
+		}
+	}
+	switch len(labels) {
+	case 0:
+		return ""
+	case 1:
+		return labels[0]
+	case 2:
+		return labels[0] + " or " + labels[1]
+	default:
+		return strings.Join(labels[:len(labels)-1], ", ") + " or " + labels[len(labels)-1]
+	}
+}
+
+func effectiveLinkedInKeywords(keywords, fWT string) string {
+	phrase := linkedInWorkTypePhrase(parseLinkedInWorkTypes(fWT))
+	if phrase == "" {
+		return keywords
+	}
+	return phrase + " " + keywords
+}
+
+func isRemoteOnlyWorkType(fWT string) bool {
+	codes := parseLinkedInWorkTypes(fWT)
+	return len(codes) == 1 && codes[0] == "2"
+}
+
+// combineLinkedInSearchQueries merges legacy one-code-per-row settings into one
+// query per keywords+location with a comma-separated f_WT list.
+func combineLinkedInSearchQueries(queries []map[string]string) []map[string]string {
+	type key struct{ keywords, location string }
+	order := make([]key, 0, len(queries))
+	codesByKey := make(map[key]map[string]bool, len(queries))
+	unrestricted := make(map[key]bool, len(queries))
+
+	for _, q := range queries {
+		k := key{keywords: q["keywords"], location: q["location"]}
+		if _, ok := codesByKey[k]; !ok {
+			order = append(order, k)
+			codesByKey[k] = map[string]bool{}
+		}
+		codes := parseLinkedInWorkTypes(q["f_WT"])
+		if codes == nil {
+			unrestricted[k] = true
+			continue
+		}
+		for _, code := range codes {
+			codesByKey[k][code] = true
+		}
+	}
+
+	out := make([]map[string]string, 0, len(order))
+	for _, k := range order {
+		fWT := ""
+		if !unrestricted[k] {
+			parts := make([]string, 0, 3)
+			for _, wt := range linkedInWorkTypeOrder {
+				if codesByKey[k][wt.code] {
+					parts = append(parts, wt.code)
+				}
+			}
+			if len(parts) > 0 && len(parts) < 3 {
+				fWT = strings.Join(parts, ",")
+			}
+		}
+		out = append(out, map[string]string{
+			"keywords": k.keywords,
+			"location": k.location,
+			"f_WT":     fWT,
+		})
+	}
+	return out
+}
+
 func (s *LinkedInScraper) buildSearchURL(query map[string]string) string {
 	params := []string{}
 	if kw := query["keywords"]; kw != "" {
-		params = append(params, "keywords="+url.QueryEscape(kw))
+		params = append(params, "keywords="+url.QueryEscape(effectiveLinkedInKeywords(kw, query["f_WT"])))
 	}
 	if loc := query["location"]; loc != "" {
 		params = append(params, "geoId="+loc)
 	}
-	if wt := query["f_WT"]; wt != "" {
-		params = append(params, "f_WT="+wt)
-	}
+	// f_WT is ignored by LinkedIn guest search; work type lives in keywords.
 	params = append(params, "f_TPR="+s.timespanCode, "start=0")
 	return linkedInBaseURL + "?" + strings.Join(params, "&")
 }
@@ -81,7 +203,7 @@ func (s *LinkedInScraper) ScrapeJobs(ctx context.Context, query map[string]strin
 		if err != nil {
 			return jobs, err
 		}
-		stampRemote(pageJobs, query["f_WT"] == "2")
+		stampRemote(pageJobs, isRemoteOnlyWorkType(query["f_WT"]))
 		jobs = append(jobs, pageJobs...)
 		if len(pageJobs) == 0 {
 			break

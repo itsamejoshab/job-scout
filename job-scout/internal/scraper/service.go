@@ -230,7 +230,11 @@ func (s *Service) scrapeSource(ctx context.Context, source db.JobSource) (Result
 			}
 		}
 
-		for _, query := range scraperSettings.SearchQueries {
+		queries := scraperSettings.SearchQueries
+		if source == db.SourceLinkedIn {
+			queries = combineLinkedInSearchQueries(queries)
+		}
+		for _, query := range queries {
 			jobs, err := provider.ScrapeJobs(ctx, query)
 			searchContext := querySearchContext(query)
 			stampSearchContext(jobs, searchContext)
