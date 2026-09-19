@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
 
 	"github.com/jobscout/jobscout/internal/db"
 	"github.com/jobscout/jobscout/internal/domain"
@@ -98,6 +99,16 @@ func (a *Activities) ClaimNotifyBatch(ctx context.Context) (ClaimBatch, error) {
 	}
 	for i, j := range jobs {
 		out.Jobs[i] = ClaimedJob{ID: j.ID, JobURL: j.JobURL}
+		slog.Debug(
+			"job included in alert batch",
+			"job_id", j.ID,
+			"title", j.Title,
+			"company", j.Company,
+			"location", j.Location,
+			"is_remote", j.IsRemote,
+			"search_context", j.SearchContext,
+			"job_url", j.JobURL,
+		)
 	}
 	return out, nil
 }

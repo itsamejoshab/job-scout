@@ -27,6 +27,7 @@ type Config struct {
 	ProjectName string
 	Version     string
 	LogLevel    string
+	Debug       bool
 
 	WebhookID   string
 	WebhookURL  string
@@ -94,6 +95,10 @@ func getenvIntAllowZero(key string, def int) int {
 	return n
 }
 
+func getenvBoolFlag(key string) bool {
+	return strings.TrimSpace(os.Getenv(key)) == "1"
+}
+
 // parseIntExpr reads a decimal integer or a product of positive integers
 // such as 60*5 or 60 * 5. Invalid text is not an error here: callers use
 // the configured default.
@@ -137,6 +142,7 @@ func Load() Config {
 		ProjectName:               getenv("PROJECT_NAME", "Job-Scout Service"),
 		Version:                   getenv("VERSION", "1.0.0"),
 		LogLevel:                  getenv("LOG_LEVEL", "INFO"),
+		Debug:                     getenvBoolFlag("DEBUG"),
 		WebhookID:                 getenv("WEBHOOK_ID", ""),
 		WebhookURL:                getenv("WEBHOOK_URL", ""),
 		WebhookBase:               getenv("WEBHOOK_BASE", ""),

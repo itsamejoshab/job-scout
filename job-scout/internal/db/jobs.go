@@ -31,19 +31,25 @@ func InsertJobIfNew(ctx context.Context, db *sql.DB, j Job) (bool, error) {
 
 	res, err := tx.ExecContext(ctx, `
 		INSERT INTO jobs (job_source, title, company, description, location, date, job_url,
-		                  new, duplicate, relevant, promising, notified, is_remote)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, TRUE, FALSE, FALSE, FALSE, FALSE, $8)
+		                  new, duplicate, relevant, promising, notified, is_remote, search_context)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, TRUE, FALSE, FALSE, FALSE, FALSE, $8, $9)
 		ON CONFLICT (job_url) DO NOTHING
 	`, j.JobSource, truncate(j.Title, 100), truncate(j.Company, 100), j.Description,
-		truncate(j.Location, 100), j.Date, url, j.IsRemote)
+		truncate(j.Location, 100), j.Date, url, j.IsRemote, j.SearchContext)
 	if err != nil {
 		return false, err
 	}
 	n, _ := res.RowsAffected()
 
 	if _, err := tx.ExecContext(ctx, `
-		UPDATE jobs SET is_remote = is_remote OR $1 WHERE job_url = $2
-	`, j.IsRemote, url); err != nil {
+		UPDATE jobs SET
+			is_remote = is_remote OR $1,
+			search_context = CASE
+				WHEN search_context = '' THEN $2
+				ELSE search_context
+			END
+		WHERE job_url = $3
+	`, j.IsRemote, j.SearchContext, url); err != nil {
 		return false, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -57,7 +63,7 @@ func ListJobs(ctx context.Context, db *sql.DB, limit, offset int) ([]Job, error)
 	rows, err := db.QueryContext(ctx, `
 		SELECT id, job_source, title, company, description, location, date, job_url,
 		       created_at, updated_at, new, duplicate, relevant, promising, notified,
-		       state, reject_reason, is_remote, detail_attempts, state_changed_at
+		       state, reject_reason, is_remote, search_context, detail_attempts, state_changed_at
 		FROM jobs ORDER BY id LIMIT $1 OFFSET $2
 	`, limit, offset)
 	if err != nil {
@@ -72,7 +78,7 @@ func ListJobs(ctx context.Context, db *sql.DB, limit, offset int) ([]Job, error)
 			&j.ID, &j.JobSource, &j.Title, &j.Company, &j.Description, &j.Location,
 			&j.Date, &j.JobURL, &j.CreatedAt, &j.UpdatedAt, &j.New, &j.Duplicate,
 			&j.Relevant, &j.Promising, &j.Notified, &j.State, &j.RejectReason,
-			&j.IsRemote, &j.DetailAttempts, &j.StateChangedAt,
+			&j.IsRemote, &j.SearchContext, &j.DetailAttempts, &j.StateChangedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -205,7 +211,7 @@ func ListJobsForNotify(ctx context.Context, db *sql.DB) ([]Job, error) {
 	rows, err := db.QueryContext(ctx, `
 		SELECT id, job_source, title, company, description, location, date, job_url,
 		       created_at, updated_at, new, duplicate, relevant, promising, notified,
-		       state, reject_reason, is_remote, detail_attempts, state_changed_at
+		       state, reject_reason, is_remote, search_context, detail_attempts, state_changed_at
 		FROM jobs ORDER BY created_at, id
 	`)
 	if err != nil {
@@ -220,7 +226,7 @@ func ListJobsForNotify(ctx context.Context, db *sql.DB) ([]Job, error) {
 			&j.ID, &j.JobSource, &j.Title, &j.Company, &j.Description, &j.Location,
 			&j.Date, &j.JobURL, &j.CreatedAt, &j.UpdatedAt, &j.New, &j.Duplicate,
 			&j.Relevant, &j.Promising, &j.Notified, &j.State, &j.RejectReason,
-			&j.IsRemote, &j.DetailAttempts, &j.StateChangedAt,
+			&j.IsRemote, &j.SearchContext, &j.DetailAttempts, &j.StateChangedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -266,14 +272,14 @@ func ReEvaluateRejectedJobs(ctx context.Context, database *sql.DB) (int64, error
 const jobSelectColumns = `
 		id, job_source, title, company, description, location, date, job_url,
 		created_at, updated_at, new, duplicate, relevant, promising, notified,
-		state, reject_reason, is_remote, detail_attempts, state_changed_at`
+		state, reject_reason, is_remote, search_context, detail_attempts, state_changed_at`
 
 func scanJob(sc interface{ Scan(...any) error }, j *Job) error {
 	return sc.Scan(
 		&j.ID, &j.JobSource, &j.Title, &j.Company, &j.Description, &j.Location,
 		&j.Date, &j.JobURL, &j.CreatedAt, &j.UpdatedAt, &j.New, &j.Duplicate,
 		&j.Relevant, &j.Promising, &j.Notified, &j.State, &j.RejectReason,
-		&j.IsRemote, &j.DetailAttempts, &j.StateChangedAt,
+		&j.IsRemote, &j.SearchContext, &j.DetailAttempts, &j.StateChangedAt,
 	)
 }
 

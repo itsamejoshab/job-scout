@@ -54,6 +54,7 @@ type Job struct {
 	State          string    `json:"state"`
 	RejectReason   *string   `json:"reject_reason"`
 	IsRemote       bool      `json:"is_remote"`
+	SearchContext  string    `json:"search_context"`
 	DetailAttempts int       `json:"detail_attempts"`
 	StateChangedAt time.Time `json:"state_changed_at"`
 }
