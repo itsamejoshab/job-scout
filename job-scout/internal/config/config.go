@@ -134,7 +134,7 @@ func Load() Config {
 		TemporalUIAddress:         getenv("TEMPORAL_UI_ADDRESS", "http://localhost:8080"),
 		ReportingTimezone:         getenv("REPORTING_TIMEZONE", "America/New_York"),
 		APIPort:                   getenv("API_PORT", "8000"),
-		ProjectName:               getenv("PROJECT_NAME", "Job-Scout Service"),
+		ProjectName:               getenv("PROJECT_NAME", "JobScout"),
 		Version:                   getenv("VERSION", "1.0.0"),
 		LogLevel:                  getenv("LOG_LEVEL", "INFO"),
 		WebhookID:                 getenv("WEBHOOK_ID", ""),

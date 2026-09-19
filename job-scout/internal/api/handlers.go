@@ -508,6 +508,20 @@ func (h *Handler) Jobs(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	lastHours := 0
+	if raw := r.URL.Query().Get("last_hours"); raw != "" {
+		lastHours, err = strconv.Atoi(raw)
+		if err != nil || lastHours < 0 {
+			writeErr(w, http.StatusBadRequest, "last_hours must be a non-negative integer")
+			return
+		}
+	}
+	dateFrom := r.URL.Query().Get("date_from")
+	dateTo := r.URL.Query().Get("date_to")
+	if lastHours > 0 && (dateFrom != "" || dateTo != "") {
+		writeErr(w, http.StatusBadRequest, "last_hours cannot be combined with date_from or date_to")
+		return
+	}
 
 	var anchor time.Time
 	if raw := r.URL.Query().Get("as_of"); raw != "" {
@@ -528,8 +542,9 @@ func (h *Handler) Jobs(w http.ResponseWriter, r *http.Request) {
 		State:     strings.TrimSpace(r.URL.Query().Get("state")),
 		JobSource: source,
 		Query:     strings.TrimSpace(r.URL.Query().Get("q")),
-		DateFrom:  r.URL.Query().Get("date_from"),
-		DateTo:    r.URL.Query().Get("date_to"),
+		DateFrom:  dateFrom,
+		DateTo:    dateTo,
+		LastHours: lastHours,
 		AsOf:      anchor,
 		Timezone:  timezone,
 		Limit:     limit,
@@ -550,34 +565,53 @@ func (h *Handler) Jobs(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+const jobDescriptionPreviewLimit = 160
+
 type jobListItem struct {
-	ID             int64        `json:"id"`
-	JobSource      db.JobSource `json:"job_source"`
-	Title          string       `json:"title"`
-	Company        string       `json:"company"`
-	HasDescription bool         `json:"has_description"`
-	Location       string       `json:"location"`
-	Date           time.Time    `json:"date"`
-	JobURL         string       `json:"job_url"`
-	CreatedAt      time.Time    `json:"created_at"`
-	UpdatedAt      time.Time    `json:"updated_at"`
-	New            bool         `json:"new"`
-	Duplicate      bool         `json:"duplicate"`
-	Relevant       bool         `json:"relevant"`
-	Promising      bool         `json:"promising"`
-	Notified       bool         `json:"notified"`
-	State          string       `json:"state"`
-	RejectReason   *string      `json:"reject_reason"`
-	IsRemote       bool         `json:"is_remote"`
-	DetailAttempts int          `json:"detail_attempts"`
-	StateChangedAt time.Time    `json:"state_changed_at"`
+	ID                 int64        `json:"id"`
+	JobSource          db.JobSource `json:"job_source"`
+	Title              string       `json:"title"`
+	Company            string       `json:"company"`
+	HasDescription     bool         `json:"has_description"`
+	DescriptionPreview string       `json:"description_preview"`
+	Location           string       `json:"location"`
+	Date               time.Time    `json:"date"`
+	JobURL             string       `json:"job_url"`
+	CreatedAt          time.Time    `json:"created_at"`
+	UpdatedAt          time.Time    `json:"updated_at"`
+	New                bool         `json:"new"`
+	Duplicate          bool         `json:"duplicate"`
+	Relevant           bool         `json:"relevant"`
+	Promising          bool         `json:"promising"`
+	Notified           bool         `json:"notified"`
+	State              string       `json:"state"`
+	RejectReason       *string      `json:"reject_reason"`
+	IsRemote           bool         `json:"is_remote"`
+	DetailAttempts     int          `json:"detail_attempts"`
+	StateChangedAt     time.Time    `json:"state_changed_at"`
+}
+
+func descriptionPreview(description *string) string {
+	if description == nil {
+		return ""
+	}
+	collapsed := strings.Join(strings.Fields(*description), " ")
+	if collapsed == "" {
+		return ""
+	}
+	runes := []rune(collapsed)
+	if len(runes) <= jobDescriptionPreviewLimit {
+		return collapsed
+	}
+	return string(runes[:jobDescriptionPreviewLimit-1]) + "…"
 }
 
 func newJobListItem(job db.Job) jobListItem {
+	preview := descriptionPreview(job.Description)
 	return jobListItem{
 		ID: job.ID, JobSource: job.JobSource, Title: job.Title, Company: job.Company,
-		HasDescription: job.Description != nil && strings.TrimSpace(*job.Description) != "",
-		Location:       job.Location, Date: job.Date, JobURL: job.JobURL, CreatedAt: job.CreatedAt,
+		HasDescription: preview != "", DescriptionPreview: preview,
+		Location: job.Location, Date: job.Date, JobURL: job.JobURL, CreatedAt: job.CreatedAt,
 		UpdatedAt: job.UpdatedAt, New: job.New, Duplicate: job.Duplicate,
 		Relevant: job.Relevant, Promising: job.Promising, Notified: job.Notified,
 		State: job.State, RejectReason: job.RejectReason, IsRemote: job.IsRemote,

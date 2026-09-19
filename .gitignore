@@ -125,6 +125,7 @@ data/
 
 # Operator web UI
 node_modules/
+!job-scout/webui/src/lib/
 !job-scout/webui/dist/
 job-scout/webui/dist/*
 !job-scout/webui/dist/index.html

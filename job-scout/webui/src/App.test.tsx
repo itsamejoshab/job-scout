@@ -83,19 +83,15 @@ const jobsPage = {
       job_url: "https://example.test/jobs/42",
       created_at: "2026-09-18T20:00:00Z",
       updated_at: "2026-09-18T20:00:00Z",
-      state: "rejected",
-      reject_reason: "description",
+      state: "notified",
+      reject_reason: null,
       has_description: true,
+      description_preview: "A short job description preview.",
       is_remote: true,
     },
   ],
   total: 51,
   as_of: "2026-09-18T21:00:00Z",
-};
-
-const jobDetail = {
-  ...jobsPage.items[0],
-  description: "A complete job description.",
 };
 
 const filterSeed = {
@@ -228,12 +224,6 @@ function renderPath(path: string, options: RenderOptions = {}) {
     }
     if (url.startsWith("/api/v0/jobs?")) {
       return new Response(JSON.stringify(jobsPage), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
-    }
-    if (url === "/api/v0/jobs/42") {
-      return new Response(JSON.stringify(jobDetail), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       });
@@ -513,23 +503,31 @@ describe("operator shell", () => {
     expect(screen.getByRole("button", { name: "Run notify" })).toBeDisabled();
   });
 
-  it("renders job filters, stable paging data, and row detail", async () => {
+  it("renders job filters with notified and last-24-hours defaults, preview text, and source links", async () => {
     const user = userEvent.setup();
     renderPath("/jobs");
 
     expect(await screen.findByText("Platform Engineer")).toBeInTheDocument();
-    expect(screen.getByText("rejected", { selector: "div" })).toBeInTheDocument();
+    expect(screen.getByText("notified", { selector: "div" })).toBeInTheDocument();
     expect(screen.getByText("51 jobs")).toBeInTheDocument();
-    expect(screen.queryByText("A complete job description.")).not.toBeInTheDocument();
+    expect(screen.getByText("A short job description preview.")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Job detail" })).not.toBeInTheDocument();
     expect(screen.queryByText(/posting date/i)).not.toBeInTheDocument();
+    expect(screen.getByLabelText("State")).toHaveValue("notified");
+    expect(screen.getByLabelText("Created")).toHaveValue("24h");
+    expect(screen.queryByLabelText("Created from")).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: /platform engineer/i }));
-    expect(await screen.findByText("A complete job description.")).toBeInTheDocument();
-    expect(screen.getByText("description", { selector: "dd" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /original posting/i })).toHaveAttribute(
-      "href",
-      "https://example.test/jobs/42",
-    );
+    const titleLink = screen.getByRole("link", { name: /platform engineer/i });
+    expect(titleLink).toHaveAttribute("href", "https://example.test/jobs/42");
+    expect(titleLink).toHaveAttribute("target", "_blank");
+
+    await waitFor(() => {
+      const calls = (fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls
+        .map(([input]) => String(input));
+      expect(calls.some((url) =>
+        url.includes("state=notified") && url.includes("last_hours=24"),
+      )).toBe(true);
+    });
 
     await user.click(screen.getByRole("button", { name: "Next page" }));
     await waitFor(() => {
@@ -548,6 +546,18 @@ describe("operator shell", () => {
         .map(([input]) => String(input));
       expect(calls.some((url) =>
         url.includes("state=rejected") && url.includes("q=platform"),
+      )).toBe(true);
+    });
+
+    await user.selectOptions(screen.getByLabelText("Created"), "custom");
+    expect(screen.getByLabelText("Created from")).toBeInTheDocument();
+    expect(screen.getByLabelText("Created through")).toBeInTheDocument();
+    await user.type(screen.getByLabelText("Created from"), "2026-09-01");
+    await waitFor(() => {
+      const calls = (fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls
+        .map(([input]) => String(input));
+      expect(calls.some((url) =>
+        url.includes("date_from=2026-09-01") && !url.includes("last_hours="),
       )).toBe(true);
     });
   });

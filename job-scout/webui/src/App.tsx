@@ -16,7 +16,6 @@ import {
 import {
   getConfig,
   getDashboardStats,
-  getJob,
   getJobs,
   getSearchSettings,
   getStatus,
@@ -61,10 +60,10 @@ function Header() {
 
   return (
     <header className="border-b bg-background">
-      <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-6 px-6 py-4">
+      <div className="flex w-full flex-wrap items-center gap-4 px-6 py-4">
         <div className="flex items-center gap-2 text-lg font-semibold">
           <Activity className="h-5 w-5 text-primary" aria-hidden="true" />
-          <span>{config.data?.project_name ?? "Job Scout"}</span>
+          <span>{config.data?.project_name ?? "JobScout"}</span>
         </div>
         <nav className="flex gap-1" aria-label="Main navigation">
           {pages.map((page) => (
@@ -82,7 +81,7 @@ function Header() {
             </NavLink>
           ))}
         </nav>
-        <div className="ml-auto flex items-center gap-4">
+        <div className="ml-auto flex flex-wrap items-center justify-end gap-4">
           <Badge variant={down.length > 0 ? "destructive" : "secondary"}>
             {statusText}
           </Badge>
@@ -229,7 +228,7 @@ function DashboardPage() {
   }, [dashboard.data]);
 
   return (
-    <main className="mx-auto max-w-6xl px-6 py-10">
+    <main className="max-w-6xl px-6 py-10">
       <h1 className="text-3xl font-semibold tracking-tight">Dashboard</h1>
       {dashboard.isPending && (
         <p className="mt-2 text-muted-foreground">Loading dashboard statistics.</p>
@@ -355,6 +354,42 @@ function DashboardPage() {
 const jobStates = ["", "pending", "rejected", "eligible", "notifying", "notified"];
 const pageSize = 50;
 
+type CreatedWindow =
+  | "24h"
+  | "3d"
+  | "7d"
+  | "14d"
+  | "30d"
+  | "all"
+  | "custom";
+
+const createdWindowOptions: Array<{ value: CreatedWindow; label: string }> = [
+  { value: "24h", label: "Last 24 hours" },
+  { value: "3d", label: "Last 3 days" },
+  { value: "7d", label: "Last 7 days" },
+  { value: "14d", label: "Last 14 days" },
+  { value: "30d", label: "Last 30 days" },
+  { value: "all", label: "All time" },
+  { value: "custom", label: "Custom range" },
+];
+
+function lastHoursForWindow(window: CreatedWindow): number | null {
+  switch (window) {
+    case "24h":
+      return 24;
+    case "3d":
+      return 72;
+    case "7d":
+      return 168;
+    case "14d":
+      return 336;
+    case "30d":
+      return 720;
+    default:
+      return null;
+  }
+}
+
 function formatAge(value: string) {
   const milliseconds = Date.now() - new Date(value).getTime();
   if (milliseconds < 60 * 60 * 1_000) {
@@ -368,26 +403,27 @@ function formatAge(value: string) {
 
 function JobsPage() {
   const visible = usePageVisible();
-  const [state, setState] = useState("");
+  const [state, setState] = useState("notified");
   const [jobSource, setJobSource] = useState("");
   const [query, setQuery] = useState("");
+  const [createdWindow, setCreatedWindow] = useState<CreatedWindow>("24h");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [offset, setOffset] = useState(0);
   const anchor = useRef("");
-  const [selectedID, setSelectedID] = useState<number | null>(null);
 
   const resetPage = () => {
     setOffset(0);
     anchor.current = "";
-    setSelectedID(null);
   };
+  const lastHours = lastHoursForWindow(createdWindow);
   const filters = {
     state,
     jobSource,
     query,
-    dateFrom,
-    dateTo,
+    dateFrom: createdWindow === "custom" ? dateFrom : "",
+    dateTo: createdWindow === "custom" ? dateTo : "",
+    lastHours,
     limit: pageSize,
     offset,
     asOf: "",
@@ -404,17 +440,12 @@ function JobsPage() {
     }
   }, [jobs.data?.as_of]);
 
-  const detail = useQuery({
-    queryKey: ["job", selectedID],
-    queryFn: () => getJob(selectedID as number),
-    enabled: selectedID !== null,
-  });
   const total = jobs.data?.total ?? 0;
   const pageNumber = Math.floor(offset / pageSize) + 1;
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
 
   return (
-    <main className="mx-auto max-w-6xl px-6 py-10">
+    <main className="max-w-6xl px-6 py-10">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-semibold tracking-tight">Jobs</h1>
@@ -434,7 +465,7 @@ function JobsPage() {
         </button>
       </div>
 
-      <section className="mt-6 grid gap-3 rounded-lg border bg-card p-4 md:grid-cols-5">
+      <section className="mt-6 grid gap-3 rounded-lg border bg-card p-4 md:grid-cols-2 lg:grid-cols-4">
         <label className="text-sm font-medium">
           Search jobs
           <input
@@ -477,116 +508,113 @@ function JobsPage() {
           </select>
         </label>
         <label className="text-sm font-medium">
-          Created from
-          <input
-            type="date"
+          Created
+          <select
             className="mt-1 w-full rounded-md border bg-background px-3 py-2 font-normal"
-            value={dateFrom}
+            value={createdWindow}
             onChange={(event) => {
-              setDateFrom(event.target.value);
+              setCreatedWindow(event.target.value as CreatedWindow);
               resetPage();
             }}
-          />
+          >
+            {createdWindowOptions.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
         </label>
-        <label className="text-sm font-medium">
-          Created through
-          <input
-            type="date"
-            className="mt-1 w-full rounded-md border bg-background px-3 py-2 font-normal"
-            value={dateTo}
-            onChange={(event) => {
-              setDateTo(event.target.value);
-              resetPage();
-            }}
-          />
-        </label>
+        {createdWindow === "custom" && (
+          <>
+            <label className="text-sm font-medium">
+              Created from
+              <input
+                type="date"
+                className="mt-1 w-full rounded-md border bg-background px-3 py-2 font-normal"
+                value={dateFrom}
+                onChange={(event) => {
+                  setDateFrom(event.target.value);
+                  resetPage();
+                }}
+              />
+            </label>
+            <label className="text-sm font-medium">
+              Created through
+              <input
+                type="date"
+                className="mt-1 w-full rounded-md border bg-background px-3 py-2 font-normal"
+                value={dateTo}
+                onChange={(event) => {
+                  setDateTo(event.target.value);
+                  resetPage();
+                }}
+              />
+            </label>
+          </>
+        )}
       </section>
 
       {jobs.isError && <p className="mt-4 text-destructive">Jobs are unavailable.</p>}
-      <div className="mt-6 grid gap-6 lg:grid-cols-[2fr_1fr]">
-        <section className="overflow-x-auto rounded-lg border">
-          <table className="w-full text-left text-sm">
-            <thead className="border-b bg-muted">
-              <tr>
-                <th className="px-4 py-3">Job</th>
-                <th className="px-4 py-3">Source</th>
-                <th className="px-4 py-3">State</th>
-                <th className="px-4 py-3">Age</th>
+      <section className="mt-6 overflow-x-auto rounded-lg border">
+        <table className="w-full text-left text-sm">
+          <thead className="border-b bg-muted">
+            <tr>
+              <th className="px-4 py-3">Job</th>
+              <th className="px-4 py-3">Source</th>
+              <th className="px-4 py-3">State</th>
+              <th className="px-4 py-3">Age</th>
+            </tr>
+          </thead>
+          <tbody>
+            {jobs.data?.items.map((job) => (
+              <tr key={job.id} className="border-b last:border-0 align-top">
+                <td className="px-4 py-3">
+                  <a
+                    className="font-medium text-primary hover:underline"
+                    href={job.job_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    aria-label={`${job.title} at ${job.company}`}
+                  >
+                    {job.title}
+                  </a>
+                  <p className="text-muted-foreground">{job.company} · {job.location}</p>
+                  {job.description_preview ? (
+                    <p className="mt-2 line-clamp-2 text-muted-foreground">
+                      {job.description_preview}
+                    </p>
+                  ) : (
+                    <p className="mt-2 text-muted-foreground">No description is available.</p>
+                  )}
+                </td>
+                <td className="px-4 py-3">{job.job_source}</td>
+                <td className="px-4 py-3"><Badge>{job.state}</Badge></td>
+                <td className="px-4 py-3">{formatAge(job.created_at)}</td>
               </tr>
-            </thead>
-            <tbody>
-              {jobs.data?.items.map((job) => (
-                <tr key={job.id} className="border-b last:border-0">
-                  <td className="px-4 py-3">
-                    <button
-                      type="button"
-                      className="text-left font-medium text-primary hover:underline"
-                      aria-label={`Open ${job.title} at ${job.company}`}
-                      onClick={() => setSelectedID(job.id)}
-                    >
-                      {job.title}
-                    </button>
-                    <p className="text-muted-foreground">{job.company} · {job.location}</p>
-                  </td>
-                  <td className="px-4 py-3">{job.job_source}</td>
-                  <td className="px-4 py-3"><Badge>{job.state}</Badge></td>
-                  <td className="px-4 py-3">{formatAge(job.created_at)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {jobs.data?.items.length === 0 && (
-            <p className="p-6 text-center text-muted-foreground">No jobs match these filters.</p>
-          )}
-          <div className="flex items-center justify-between border-t p-3">
-            <button
-              type="button"
-              className="rounded-md border px-3 py-2 disabled:opacity-50"
-              disabled={offset === 0}
-              onClick={() => setOffset(Math.max(0, offset - pageSize))}
-            >
-              Previous page
-            </button>
-            <span>Page {pageNumber} of {pageCount}</span>
-            <button
-              type="button"
-              className="rounded-md border px-3 py-2 disabled:opacity-50"
-              disabled={offset + pageSize >= total}
-              onClick={() => setOffset(offset + pageSize)}
-            >
-              Next page
-            </button>
-          </div>
-        </section>
-
-        <aside className="rounded-lg border bg-card p-4" aria-label="Job detail">
-          <h2 className="text-lg font-semibold">Job detail</h2>
-          {!selectedID && <p className="mt-2 text-muted-foreground">Select a job to view details.</p>}
-          {detail.isPending && selectedID && <p className="mt-2">Loading job detail.</p>}
-          {detail.data && (
-            <>
-              <h3 className="mt-4 font-semibold">{detail.data.title}</h3>
-              <p>{detail.data.company}</p>
-              <dl className="mt-4 grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 text-sm">
-                <dt className="font-medium">State</dt><dd>{detail.data.state}</dd>
-                <dt className="font-medium">Rejection reason</dt>
-                <dd>{detail.data.reject_reason ?? "None"}</dd>
-              </dl>
-              <p className="mt-4 whitespace-pre-wrap text-sm">
-                {detail.data.description ?? "No description is available."}
-              </p>
-              <a
-                className="mt-4 inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline"
-                href={detail.data.job_url}
-                target="_blank"
-                rel="noreferrer"
-              >
-                Original posting <ExternalLink className="h-4 w-4" aria-hidden="true" />
-              </a>
-            </>
-          )}
-        </aside>
-      </div>
+            ))}
+          </tbody>
+        </table>
+        {jobs.data?.items.length === 0 && (
+          <p className="p-6 text-center text-muted-foreground">No jobs match these filters.</p>
+        )}
+        <div className="flex items-center justify-between border-t p-3">
+          <button
+            type="button"
+            className="rounded-md border px-3 py-2 disabled:opacity-50"
+            disabled={offset === 0}
+            onClick={() => setOffset(Math.max(0, offset - pageSize))}
+          >
+            Previous page
+          </button>
+          <span>Page {pageNumber} of {pageCount}</span>
+          <button
+            type="button"
+            className="rounded-md border px-3 py-2 disabled:opacity-50"
+            disabled={offset + pageSize >= total}
+            onClick={() => setOffset(offset + pageSize)}
+          >
+            Next page
+          </button>
+        </div>
+      </section>
     </main>
   );
 }
@@ -831,7 +859,7 @@ function SettingsPage() {
   };
 
   return (
-    <main className="mx-auto max-w-6xl px-6 py-10">
+    <main className="max-w-6xl px-6 py-10">
       <h1 className="text-3xl font-semibold tracking-tight">Settings</h1>
       <p className="mt-2 text-muted-foreground">
         Edit universal filters and provider scrape settings.

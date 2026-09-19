@@ -57,6 +57,7 @@ export interface JobListItem {
   title: string;
   company: string;
   has_description: boolean;
+  description_preview: string;
   location: string;
   job_url: string;
   created_at: string;
@@ -82,6 +83,7 @@ export interface JobFilters {
   query: string;
   dateFrom: string;
   dateTo: string;
+  lastHours: number | null;
   limit: number;
   offset: number;
   asOf: string;
@@ -196,8 +198,12 @@ export function getJobs(filters: JobFilters) {
   if (filters.state) params.set("state", filters.state);
   if (filters.jobSource) params.set("job_source", filters.jobSource);
   if (filters.query) params.set("q", filters.query);
-  if (filters.dateFrom) params.set("date_from", filters.dateFrom);
-  if (filters.dateTo) params.set("date_to", filters.dateTo);
+  if (filters.lastHours !== null) {
+    params.set("last_hours", String(filters.lastHours));
+  } else {
+    if (filters.dateFrom) params.set("date_from", filters.dateFrom);
+    if (filters.dateTo) params.set("date_to", filters.dateTo);
+  }
   if (filters.asOf) params.set("as_of", filters.asOf);
   return requestJSON<JobsPage>(`/api/v0/jobs?${params.toString()}`);
 }
