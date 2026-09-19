@@ -58,7 +58,7 @@ func TestLinkedIn_ParseSearchCardFixture(t *testing.T) {
 	}
 }
 
-func TestLinkedIn_GuestSearchURLUsesSeeMoreAPIAndFPP(t *testing.T) {
+func TestLinkedIn_GuestSearchURLUsesSeeMoreAPIAndGeoId(t *testing.T) {
 	s := NewLinkedIn(db.ScraperSettings{TimespanCode: "r84600"})
 	got := s.buildSearchURL(map[string]string{
 		"keywords": "IT Help Desk",
@@ -71,8 +71,14 @@ func TestLinkedIn_GuestSearchURLUsesSeeMoreAPIAndFPP(t *testing.T) {
 	if !strings.Contains(got, "keywords=IT+Help+Desk") && !strings.Contains(got, "keywords=IT%20Help%20Desk") {
 		t.Errorf("search URL must keep current keywords, got %q", got)
 	}
-	if !strings.Contains(got, "f_PP=101076143") {
-		t.Errorf("search URL must keep f_PP from the seed location, got %q", got)
+	if !strings.Contains(got, "geoId=101076143") {
+		t.Errorf("search URL must send seed location as geoId, got %q", got)
+	}
+	if strings.Contains(got, "f_PP=") {
+		t.Errorf("search URL must not send f_PP; guest search ignores it, got %q", got)
+	}
+	if strings.Contains(got, "geoId=&") || strings.HasSuffix(got, "geoId=") {
+		t.Errorf("search URL must not send an empty geoId, got %q", got)
 	}
 	if !strings.Contains(got, "f_WT=2") {
 		t.Errorf("search URL must keep f_WT=2 for remote queries, got %q", got)

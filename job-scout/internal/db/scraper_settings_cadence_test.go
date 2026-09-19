@@ -152,7 +152,7 @@ func TestScraperSeedJSON_KeepsHelpDeskQueries(t *testing.T) {
 			t.Errorf("LinkedIn seed keywords = %q, want IT Help Desk or Application Support (not notebook Technology geos)", kw)
 		}
 		if _, ok := wantLocs[q["location"]]; !ok {
-			t.Errorf("LinkedIn seed f_PP location %q is not in the current seed set", q["location"])
+			t.Errorf("LinkedIn seed geoId location %q is not in the current seed set", q["location"])
 		}
 		if strings.Contains(strings.ToLower(kw), "technology") {
 			t.Errorf("LinkedIn seed must not switch to notebook Technology keywords, got %q", kw)
