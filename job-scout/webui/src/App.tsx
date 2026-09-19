@@ -1,6 +1,15 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Activity, ExternalLink } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  Activity,
+  ExternalLink,
+  Plus,
+  RefreshCw,
+  RotateCcw,
+  Save,
+  Undo2,
+  X,
+} from "lucide-react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { BrowserRouter, NavLink, Navigate, Route, Routes } from "react-router-dom";
 import {
   CartesianGrid,
@@ -29,6 +38,7 @@ import {
   type WorkflowStart,
 } from "./api";
 import { Badge } from "./components/ui/badge";
+import { Button } from "./components/ui/button";
 import { cn } from "./lib/utils";
 import { ProviderSettingsEditor } from "./ProviderSettingsEditor";
 
@@ -59,21 +69,26 @@ function Header() {
       : "All systems operational";
 
   return (
-    <header className="border-b bg-background">
-      <div className="flex w-full flex-wrap items-center gap-4 px-6 py-4">
-        <div className="flex items-center gap-2 text-lg font-semibold">
-          <Activity className="h-5 w-5 text-primary" aria-hidden="true" />
+    <header className="sticky top-0 z-20 border-b border-border/70 bg-background/80 backdrop-blur">
+      <div className="flex w-full flex-wrap items-center gap-4 px-6 py-3 lg:px-10">
+        <div className="flex items-center gap-2.5 text-base font-semibold tracking-tight">
+          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
+            <Activity className="h-4 w-4" aria-hidden="true" />
+          </span>
           <span>{config.data?.project_name ?? "JobScout"}</span>
         </div>
-        <nav className="flex gap-1" aria-label="Main navigation">
+        <nav
+          className="flex gap-1 rounded-xl border border-border/70 bg-card/70 p-1 shadow-sm"
+          aria-label="Main navigation"
+        >
           {pages.map((page) => (
             <NavLink
               key={page.path}
               to={page.path}
               className={({ isActive }) =>
                 cn(
-                  "rounded-md px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground",
-                  isActive && "bg-muted text-foreground",
+                  "rounded-lg px-3 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground",
+                  isActive && "bg-primary text-primary-foreground shadow-sm hover:text-primary-foreground",
                 )
               }
             >
@@ -83,6 +98,13 @@ function Header() {
         </nav>
         <div className="ml-auto flex flex-wrap items-center justify-end gap-4">
           <Badge variant={down.length > 0 ? "destructive" : "secondary"}>
+            <span
+              className={cn(
+                "mr-1.5 h-1.5 w-1.5 rounded-full",
+                down.length > 0 ? "bg-destructive-foreground" : "bg-emerald-500",
+              )}
+              aria-hidden="true"
+            />
             {statusText}
           </Badge>
           {config.data?.temporal_ui_address && (
@@ -228,7 +250,7 @@ function DashboardPage() {
   }, [dashboard.data]);
 
   return (
-    <main className="max-w-6xl px-6 py-10">
+    <main className="w-full px-6 py-8 lg:px-10">
       <h1 className="text-3xl font-semibold tracking-tight">Dashboard</h1>
       {dashboard.isPending && (
         <p className="mt-2 text-muted-foreground">Loading dashboard statistics.</p>
@@ -238,38 +260,43 @@ function DashboardPage() {
       )}
       {dashboard.data && (
         <>
-          <p className="mt-2 text-muted-foreground">
+          <p className="mt-1.5 text-muted-foreground">
             Generated at {formatTimestamp(dashboard.data.generated_at)}
           </p>
 
           <section className="mt-8 grid gap-4 md:grid-cols-2" aria-label="Provider cards">
             {dashboard.data.providers.map((provider) => (
-              <article key={provider.job_source} className="rounded-lg border bg-card p-4">
+              <article key={provider.job_source} className="surface p-5">
                 <div className="flex items-center justify-between">
-                  <h2 className="text-lg font-semibold">{provider.job_source}</h2>
+                  <h2 className="text-lg font-semibold tracking-tight">{provider.job_source}</h2>
                   <Badge variant={provider.status === "due" ? "destructive" : "secondary"}>
                     {provider.status}
                   </Badge>
                 </div>
-                <p className="mt-2 text-sm">Status: {provider.status}</p>
-                <p className="text-sm">Implemented: {provider.implemented ? "yes" : "no"}</p>
-                <p className="text-sm">Enabled: {provider.enabled ? "yes" : "no"}</p>
-                <p className="text-sm">Interval seconds: {provider.scrape_interval_seconds}</p>
-                <p className="text-sm">Last scraped: {formatTimestamp(provider.last_scraped_at)}</p>
-                <p className="text-sm">Failure backoff: {formatTimestamp(provider.next_eligible_at)}</p>
-                <p className="text-sm">Total stored jobs: {provider.total_jobs}</p>
+                <div className="mt-4 grid gap-1 text-sm text-muted-foreground sm:grid-cols-2">
+                  <p>Status: {provider.status}</p>
+                  <p>Implemented: {provider.implemented ? "yes" : "no"}</p>
+                  <p>Enabled: {provider.enabled ? "yes" : "no"}</p>
+                  <p>Interval seconds: {provider.scrape_interval_seconds}</p>
+                  <p>Last scraped: {formatTimestamp(provider.last_scraped_at)}</p>
+                  <p>Failure backoff: {formatTimestamp(provider.next_eligible_at)}</p>
+                  <p>Total stored jobs: {provider.total_jobs}</p>
+                </div>
 
-                <div className="mt-3 text-sm">
+                <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-5">
                   {stateOrder.map((state) => (
-                    <p key={state}>
+                    <p
+                      key={state}
+                      className="rounded-lg bg-muted px-2.5 py-2 text-xs font-medium text-muted-foreground"
+                    >
                       {state}: {provider.by_state[state] ?? 0}
                     </p>
                   ))}
                 </div>
 
-                <details className="mt-3 text-sm" open>
+                <details className="mt-4 text-sm" open>
                   <summary className="cursor-pointer font-medium">Rejection reasons</summary>
-                  <div className="mt-2">
+                  <div className="mt-2 grid gap-1 text-muted-foreground sm:grid-cols-2">
                     {rejectReasonOrder.map((reason) => (
                       <p key={reason}>
                         {reason}: {provider.by_reject_reason[reason] ?? 0}
@@ -281,8 +308,8 @@ function DashboardPage() {
             ))}
           </section>
 
-          <section className="mt-8 rounded-lg border bg-card p-4">
-            <h2 className="text-lg font-semibold">
+          <section className="surface mt-6 p-5">
+            <h2 className="text-lg font-semibold tracking-tight">
               Daily jobs ({dashboard.data.timezone})
             </h2>
             <div className="mt-4 h-80">
@@ -308,24 +335,21 @@ function DashboardPage() {
             </div>
           </section>
 
-          <section className="mt-8">
+          <section className="mt-6">
             <div className="flex gap-2">
-              <button
-                type="button"
+              <Button
+                variant="primary"
                 disabled={status.data?.temporal.ok === false || start.isPending}
-                className="rounded-md border px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50"
                 onClick={() => start.mutate("scrape")}
               >
                 Run scrape
-              </button>
-              <button
-                type="button"
+              </Button>
+              <Button
                 disabled={status.data?.temporal.ok === false || start.isPending}
-                className="rounded-md border px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50"
                 onClick={() => start.mutate("notify")}
               >
                 Run notify
-              </button>
+              </Button>
             </div>
             {activeWorkflow && config.data?.temporal_ui_address && (
               <p className="mt-3 text-sm">
@@ -445,31 +469,30 @@ function JobsPage() {
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
 
   return (
-    <main className="max-w-6xl px-6 py-10">
+    <main className="w-full px-6 py-8 lg:px-10">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-semibold tracking-tight">Jobs</h1>
-          <p className="mt-2 text-muted-foreground">
+          <p className="mt-1.5 text-muted-foreground">
             {total} {total === 1 ? "job" : "jobs"}
           </p>
         </div>
-        <button
-          type="button"
-          className="rounded-md border px-3 py-2 text-sm"
+        <Button
           onClick={() => {
             resetPage();
             void jobs.refetch();
           }}
         >
+          <RefreshCw className="h-4 w-4" aria-hidden="true" />
           Refresh
-        </button>
+        </Button>
       </div>
 
-      <section className="mt-6 grid gap-3 rounded-lg border bg-card p-4 md:grid-cols-2 lg:grid-cols-4">
+      <section className="surface mt-6 grid gap-3 p-5 md:grid-cols-2 lg:grid-cols-4">
         <label className="text-sm font-medium">
           Search jobs
           <input
-            className="mt-1 w-full rounded-md border bg-background px-3 py-2 font-normal"
+            className="field mt-1.5 font-normal"
             value={query}
             onChange={(event) => {
               setQuery(event.target.value);
@@ -480,7 +503,7 @@ function JobsPage() {
         <label className="text-sm font-medium">
           State
           <select
-            className="mt-1 w-full rounded-md border bg-background px-3 py-2 font-normal"
+            className="field mt-1.5 font-normal"
             value={state}
             onChange={(event) => {
               setState(event.target.value);
@@ -495,7 +518,7 @@ function JobsPage() {
         <label className="text-sm font-medium">
           Job source
           <select
-            className="mt-1 w-full rounded-md border bg-background px-3 py-2 font-normal"
+            className="field mt-1.5 font-normal"
             value={jobSource}
             onChange={(event) => {
               setJobSource(event.target.value);
@@ -510,7 +533,7 @@ function JobsPage() {
         <label className="text-sm font-medium">
           Created
           <select
-            className="mt-1 w-full rounded-md border bg-background px-3 py-2 font-normal"
+            className="field mt-1.5 font-normal"
             value={createdWindow}
             onChange={(event) => {
               setCreatedWindow(event.target.value as CreatedWindow);
@@ -528,7 +551,7 @@ function JobsPage() {
               Created from
               <input
                 type="date"
-                className="mt-1 w-full rounded-md border bg-background px-3 py-2 font-normal"
+                className="field mt-1.5 font-normal"
                 value={dateFrom}
                 onChange={(event) => {
                   setDateFrom(event.target.value);
@@ -540,7 +563,7 @@ function JobsPage() {
               Created through
               <input
                 type="date"
-                className="mt-1 w-full rounded-md border bg-background px-3 py-2 font-normal"
+                className="field mt-1.5 font-normal"
                 value={dateTo}
                 onChange={(event) => {
                   setDateTo(event.target.value);
@@ -553,20 +576,23 @@ function JobsPage() {
       </section>
 
       {jobs.isError && <p className="mt-4 text-destructive">Jobs are unavailable.</p>}
-      <section className="mt-6 overflow-x-auto rounded-lg border">
+      <section className="surface mt-6 overflow-hidden">
         <table className="w-full text-left text-sm">
-          <thead className="border-b bg-muted">
-            <tr>
-              <th className="px-4 py-3">Job</th>
-              <th className="px-4 py-3">Source</th>
-              <th className="px-4 py-3">State</th>
-              <th className="px-4 py-3">Age</th>
+          <thead className="border-b bg-muted/60">
+            <tr className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              <th className="px-5 py-3">Job</th>
+              <th className="px-5 py-3">Source</th>
+              <th className="px-5 py-3">State</th>
+              <th className="px-5 py-3">Age</th>
             </tr>
           </thead>
           <tbody>
             {jobs.data?.items.map((job) => (
-              <tr key={job.id} className="border-b last:border-0 align-top">
-                <td className="px-4 py-3">
+              <tr
+                key={job.id}
+                className="border-b border-border/70 align-top transition-colors last:border-0 hover:bg-muted/40"
+              >
+                <td className="px-5 py-4">
                   <a
                     className="font-medium text-primary hover:underline"
                     href={job.job_url}
@@ -585,9 +611,11 @@ function JobsPage() {
                     <p className="mt-2 text-muted-foreground">No description is available.</p>
                   )}
                 </td>
-                <td className="px-4 py-3">{job.job_source}</td>
-                <td className="px-4 py-3"><Badge>{job.state}</Badge></td>
-                <td className="px-4 py-3">{formatAge(job.created_at)}</td>
+                <td className="px-5 py-4 text-muted-foreground">{job.job_source}</td>
+                <td className="px-5 py-4"><Badge>{job.state}</Badge></td>
+                <td className="px-5 py-4 tabular-nums text-muted-foreground">
+                  {formatAge(job.created_at)}
+                </td>
               </tr>
             ))}
           </tbody>
@@ -595,24 +623,24 @@ function JobsPage() {
         {jobs.data?.items.length === 0 && (
           <p className="p-6 text-center text-muted-foreground">No jobs match these filters.</p>
         )}
-        <div className="flex items-center justify-between border-t p-3">
-          <button
-            type="button"
-            className="rounded-md border px-3 py-2 disabled:opacity-50"
+        <div className="flex items-center justify-between border-t border-border/70 bg-muted/30 p-3">
+          <Button
+            size="sm"
             disabled={offset === 0}
             onClick={() => setOffset(Math.max(0, offset - pageSize))}
           >
             Previous page
-          </button>
-          <span>Page {pageNumber} of {pageCount}</span>
-          <button
-            type="button"
-            className="rounded-md border px-3 py-2 disabled:opacity-50"
+          </Button>
+          <span className="text-sm text-muted-foreground">
+            Page {pageNumber} of {pageCount}
+          </span>
+          <Button
+            size="sm"
             disabled={offset + pageSize >= total}
             onClick={() => setOffset(offset + pageSize)}
           >
             Next page
-          </button>
+          </Button>
         </div>
       </section>
     </main>
@@ -621,36 +649,54 @@ function JobsPage() {
 
 type FilterKey = keyof SearchSettingsInput;
 
-const filterEditors: Array<{ key: FilterKey; heading: string; addLabel: string }> = [
+const filterEditors: Array<{
+  key: FilterKey;
+  heading: string;
+  noun: string;
+  hint: string;
+  tone: "include" | "exclude";
+}> = [
   {
     key: "desc_include_words",
     heading: "Description include words",
-    addLabel: "Add description include word",
+    noun: "description include word",
+    hint: "A job description must contain one of these words.",
+    tone: "include",
   },
   {
     key: "desc_exclude_words",
     heading: "Description exclude words",
-    addLabel: "Add description exclude word",
+    noun: "description exclude word",
+    hint: "A job is rejected when its description contains one of these words.",
+    tone: "exclude",
   },
   {
     key: "title_include",
     heading: "Title include words",
-    addLabel: "Add title include word",
+    noun: "title include word",
+    hint: "A job title must contain one of these words.",
+    tone: "include",
   },
   {
     key: "title_exclude",
     heading: "Title exclude words",
-    addLabel: "Add title exclude word",
+    noun: "title exclude word",
+    hint: "A job is rejected when its title contains one of these words.",
+    tone: "exclude",
   },
   {
     key: "company_exclude",
     heading: "Company exclude words",
-    addLabel: "Add company exclude word",
+    noun: "company exclude word",
+    hint: "A job is rejected when its company name contains one of these words.",
+    tone: "exclude",
   },
   {
     key: "non_remote_phrases",
     heading: "Non-remote phrases",
-    addLabel: "Add non-remote phrase",
+    noun: "non-remote phrase",
+    hint: "These phrases show that a job which claims to be remote is not remote.",
+    tone: "exclude",
   },
 ];
 
@@ -679,18 +725,23 @@ function toFilterLists(input: SearchSettingsInput): SearchSettingsInput {
 
 function FilterWordEditor({
   heading,
-  addLabel,
+  noun,
+  hint,
+  tone,
   values,
   onAdd,
   onRemove,
 }: {
   heading: string;
-  addLabel: string;
+  noun: string;
+  hint: string;
+  tone: "include" | "exclude";
   values: string[];
   onAdd: (value: string) => void;
   onRemove: (index: number) => void;
 }) {
   const [entry, setEntry] = useState("");
+  const inputID = useId();
 
   const add = () => {
     const value = entry.trim();
@@ -702,34 +753,51 @@ function FilterWordEditor({
   };
 
   return (
-    <fieldset className="rounded-md border p-3">
-      <legend className="px-1 text-sm font-semibold">{heading}</legend>
+    <section className="w-full rounded-xl border border-border/70 bg-card p-5 shadow-soft">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+        <h3 className="text-sm font-semibold tracking-tight">{heading}</h3>
+        <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium tabular-nums text-muted-foreground">
+          {values.length} {values.length === 1 ? "entry" : "entries"}
+        </span>
+        <p className="w-full text-sm text-muted-foreground">{hint}</p>
+      </div>
+
       {values.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No entries.</p>
+        <p className="mt-4 rounded-lg border border-dashed border-border px-3 py-4 text-center text-sm text-muted-foreground">
+          No entries.
+        </p>
       ) : (
-        <ul className="flex flex-wrap gap-2">
+        <ul className="mt-4 flex flex-wrap gap-2">
           {values.map((value, index) => (
             <li key={`${value}-${index}`}>
               <button
                 type="button"
-                className="rounded-full border px-3 py-1 text-sm hover:bg-muted"
+                className={cn(
+                  "group inline-flex items-center gap-1.5 rounded-full border py-1 pl-3 pr-2 text-sm transition-colors",
+                  tone === "include"
+                    ? "border-accent bg-accent text-accent-foreground hover:border-accent-foreground/30"
+                    : "border-border bg-muted text-foreground hover:border-destructive/40 hover:text-destructive",
+                )}
                 onClick={() => onRemove(index)}
                 aria-label={`Remove ${value}`}
               >
-                {value} ×
+                {value}
+                <X
+                  className="h-3.5 w-3.5 opacity-50 transition-opacity group-hover:opacity-100"
+                  aria-hidden="true"
+                />
               </button>
             </li>
           ))}
         </ul>
       )}
-      <div className="mt-3 flex gap-2">
-        <label className="sr-only" htmlFor={addLabel}>
-          {addLabel}
-        </label>
+
+      <div className="mt-4 flex gap-2">
         <input
-          id={addLabel}
-          aria-label={addLabel}
-          className="w-full rounded-md border bg-background px-3 py-2"
+          id={inputID}
+          aria-label={`Add ${noun}`}
+          placeholder={`Add a ${noun}`}
+          className="field flex-1"
           value={entry}
           onChange={(event) => setEntry(event.target.value)}
           onKeyDown={(event) => {
@@ -739,15 +807,13 @@ function FilterWordEditor({
             }
           }}
         />
-        <button
-          type="button"
-          className="rounded-md border px-3 py-2 text-sm"
-          onClick={add}
-        >
-          {addLabel}
-        </button>
+        <Button variant="primary" onClick={add} disabled={entry.trim() === ""}>
+          <Plus className="h-4 w-4" aria-hidden="true" />
+          Add
+          <span className="sr-only"> {noun}</span>
+        </Button>
       </div>
-    </fieldset>
+    </section>
   );
 }
 
@@ -859,82 +925,111 @@ function SettingsPage() {
   };
 
   return (
-    <main className="max-w-6xl px-6 py-10">
-      <h1 className="text-3xl font-semibold tracking-tight">Settings</h1>
-      <p className="mt-2 text-muted-foreground">
-        Edit universal filters and provider scrape settings.
-      </p>
+    <main className="w-full px-6 py-8 lg:px-10">
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-semibold tracking-tight">Settings</h1>
+          <p className="mt-1.5 text-muted-foreground">
+            Edit universal filters and provider scrape settings.
+          </p>
+        </div>
+        <div className="flex flex-col items-start gap-2 sm:items-end">
+          <Button
+            variant="secondary"
+            disabled={reEvaluate.isPending}
+            onClick={reEvaluateRejected}
+            title="Send rejected jobs back to pending so the next notify pass applies the current filters."
+          >
+            <Undo2 className="h-4 w-4" aria-hidden="true" />
+            Re-evaluate rejected jobs
+            {rejectedCount > 0 && (
+              <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-semibold tabular-nums text-muted-foreground">
+                {rejectedCount}
+              </span>
+            )}
+          </Button>
+          {(reEvaluate.isPending || reEvaluate.isSuccess || reEvaluate.isError) && (
+            <p
+              role="status"
+              className={cn(
+                "text-sm",
+                reEvaluate.isError ? "text-destructive" : "text-muted-foreground",
+              )}
+            >
+              {reEvaluate.isPending && "Re-evaluating rejected jobs."}
+              {reEvaluate.isSuccess &&
+                `${reEvaluate.data.updated} ${reEvaluate.data.updated === 1 ? "job" : "jobs"} ` +
+                  "moved back to pending."}
+              {reEvaluate.isError && "Re-evaluation failed."}
+            </p>
+          )}
+        </div>
+      </div>
 
-      <section className="mt-6 rounded-lg border bg-card p-4">
-        <h2 className="text-xl font-semibold">Filter word lists</h2>
-        {!draft && settings.isPending && (
-          <p className="mt-2 text-muted-foreground">Loading filter settings.</p>
-        )}
-        {!draft && settings.isError && (
-          <p className="mt-2 text-destructive">Filter settings are unavailable.</p>
-        )}
-        {draft && (
-          <>
-            <div className="mt-4 grid gap-3 md:grid-cols-2">
-              {filterEditors.map((editor) => (
-                <FilterWordEditor
-                  key={editor.key}
-                  heading={editor.heading}
-                  addLabel={editor.addLabel}
-                  values={draft[editor.key]}
-                  onAdd={(value) => addEntry(editor.key, value)}
-                  onRemove={(index) => removeEntry(editor.key, index)}
-                />
-              ))}
-            </div>
-            <div className="mt-4 flex gap-2">
-              <button
-                type="button"
-                className="rounded-md border px-3 py-2 text-sm disabled:opacity-50"
-                disabled={!dirty || save.isPending || reset.isPending}
-                onClick={saveFilterSettings}
-              >
-                Save filter settings
-              </button>
-              <button
-                type="button"
-                className="rounded-md border px-3 py-2 text-sm disabled:opacity-50"
+      <section className="surface mt-8 bg-muted/40 p-5 lg:p-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold tracking-tight">Filter word lists</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Every list applies to all providers.
+            </p>
+          </div>
+          {draft && (
+            <div className="flex items-center gap-2">
+              {dirty && (
+                <span className="text-sm font-medium text-accent-foreground">
+                  Unsaved changes
+                </span>
+              )}
+              <Button
+                variant="ghost"
                 disabled={save.isPending || reset.isPending}
                 onClick={resetFilterSettings}
               >
+                <RotateCcw className="h-4 w-4" aria-hidden="true" />
                 Reset filter settings
-              </button>
+              </Button>
+              <Button
+                variant="primary"
+                disabled={!dirty || save.isPending || reset.isPending}
+                onClick={saveFilterSettings}
+              >
+                <Save className="h-4 w-4" aria-hidden="true" />
+                Save filter settings
+              </Button>
             </div>
-          </>
+          )}
+        </div>
+
+        {!draft && settings.isPending && (
+          <p className="mt-4 text-muted-foreground">Loading filter settings.</p>
+        )}
+        {!draft && settings.isError && (
+          <p className="mt-4 text-destructive">Filter settings are unavailable.</p>
+        )}
+        {draft && (
+          <div className="mt-5 flex flex-col gap-4">
+            {filterEditors.map((editor) => (
+              <FilterWordEditor
+                key={editor.key}
+                heading={editor.heading}
+                noun={editor.noun}
+                hint={editor.hint}
+                tone={editor.tone}
+                values={draft[editor.key]}
+                onAdd={(value) => addEntry(editor.key, value)}
+                onRemove={(index) => removeEntry(editor.key, index)}
+              />
+            ))}
+          </div>
         )}
       </section>
 
-      <section className="mt-6 rounded-lg border bg-card p-4">
-        <h2 className="text-xl font-semibold">Rejected jobs</h2>
-        <p className="mt-2 text-muted-foreground">
-          Send rejected jobs back to pending so the next notify pass applies the current filters.
+      <section className="surface mt-6 bg-muted/40 p-5 lg:p-6">
+        <h2 className="text-lg font-semibold tracking-tight">Provider settings</h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Each provider keeps its own schedule and search queries.
         </p>
-        <button
-          type="button"
-          className="mt-4 rounded-md border px-3 py-2 text-sm disabled:opacity-50"
-          disabled={reEvaluate.isPending}
-          onClick={reEvaluateRejected}
-        >
-          Re-evaluate rejected jobs
-        </button>
-        {(reEvaluate.isPending || reEvaluate.isSuccess || reEvaluate.isError) && (
-          <p role="status" className="mt-3 text-sm">
-            {reEvaluate.isPending && "Re-evaluating rejected jobs."}
-            {reEvaluate.isSuccess &&
-              `${reEvaluate.data.updated} ${reEvaluate.data.updated === 1 ? "job" : "jobs"} ` +
-                "moved back to pending."}
-            {reEvaluate.isError && "Re-evaluation failed."}
-          </p>
-        )}
-      </section>
-
-      <section className="mt-6 rounded-lg border bg-card p-4">
-        <h2 className="text-xl font-semibold">Provider settings</h2>
         <ProviderSettingsEditor />
       </section>
     </main>
