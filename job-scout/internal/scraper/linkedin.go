@@ -58,12 +58,12 @@ func (s *LinkedInScraper) buildSearchURL(query map[string]string) string {
 		params = append(params, "keywords="+url.QueryEscape(kw))
 	}
 	if loc := query["location"]; loc != "" {
-		params = append(params, "f_PP="+loc)
+		params = append(params, "geoId="+loc)
 	}
 	if wt := query["f_WT"]; wt != "" {
 		params = append(params, "f_WT="+wt)
 	}
-	params = append(params, "geoId=", "f_TPR="+s.timespanCode, "start=0")
+	params = append(params, "f_TPR="+s.timespanCode, "start=0")
 	return linkedInBaseURL + "?" + strings.Join(params, "&")
 }
 
