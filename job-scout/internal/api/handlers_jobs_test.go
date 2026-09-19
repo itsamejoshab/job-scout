@@ -234,7 +234,7 @@ func TestJobs_DescriptionPreviewIsWhitespaceCollapsedAndTruncated(t *testing.T) 
 	if err := db.Migrate(pool); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	long := strings.Repeat("word ", 80)
+	long := strings.Repeat("word ", 200)
 	description := "  Line one.\n\nLine   two.  " + long
 	if _, err := db.InsertJobIfNew(t.Context(), pool, db.Job{
 		JobSource:   db.SourceLinkedIn,
@@ -271,8 +271,8 @@ func TestJobs_DescriptionPreviewIsWhitespaceCollapsedAndTruncated(t *testing.T) 
 		t.Errorf("preview=%q, want collapsed leading text", preview)
 	}
 	runes := []rune(preview)
-	if len(runes) != 160 || !strings.HasSuffix(preview, "…") {
-		t.Errorf("preview length=%d suffix=%q, want 160 chars ending in ellipsis", len(runes), preview[len(preview)-1:])
+	if len(runes) != 480 || !strings.HasSuffix(preview, "…") {
+		t.Errorf("preview length=%d suffix=%q, want 480 chars ending in ellipsis", len(runes), preview[len(preview)-1:])
 	}
 	if _, exists := page.Items[0]["description"]; exists {
 		t.Error("list item must omit full description")

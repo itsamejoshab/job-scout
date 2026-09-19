@@ -580,10 +580,10 @@ function JobsPage() {
         <table className="w-full text-left text-sm">
           <thead className="border-b bg-muted/60">
             <tr className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              <th className="px-5 py-3">Job</th>
-              <th className="px-5 py-3">Source</th>
-              <th className="px-5 py-3">State</th>
-              <th className="px-5 py-3">Age</th>
+              <th className="w-full px-5 py-3">Job</th>
+              <th className="whitespace-nowrap px-5 py-3">Source</th>
+              <th className="whitespace-nowrap px-5 py-3">State</th>
+              <th className="whitespace-nowrap px-5 py-3">Age</th>
             </tr>
           </thead>
           <tbody>
@@ -604,7 +604,7 @@ function JobsPage() {
                   </a>
                   <p className="text-muted-foreground">{job.company} · {job.location}</p>
                   {job.description_preview ? (
-                    <p className="mt-2 line-clamp-2 text-muted-foreground">
+                    <p className="mt-2 line-clamp-3 text-muted-foreground">
                       {job.description_preview}
                     </p>
                   ) : (

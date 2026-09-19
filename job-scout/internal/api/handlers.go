@@ -565,7 +565,7 @@ func (h *Handler) Jobs(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-const jobDescriptionPreviewLimit = 160
+const jobDescriptionPreviewLimit = 480
 
 type jobListItem struct {
 	ID                 int64        `json:"id"`
