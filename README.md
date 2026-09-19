@@ -19,11 +19,11 @@ Inspiration:
 
 Add PNG files in `docs/screenshots/` with these names. The slots below show those files when they exist.
 
-![Job list](docs/screenshots/jobs.png)
+![Dashboard](docs/screenshots/dashboard.png)
 
-![Temporal UI](docs/screenshots/temporal-ui.png)
+![Filtering](docs/screenshots/settings.png)
 
-![Notify in action](docs/screenshots/notify.png)
+![Jobs and Notifications](docs/screenshots/jobs.png)
 
 ## Architecture
 
