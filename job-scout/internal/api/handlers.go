@@ -23,6 +23,7 @@ import (
 
 // temporalAPI is the subset of client.Client used by HTTP handlers.
 type temporalAPI interface {
+	pipeline.SignalStarter
 	ExecuteWorkflow(ctx context.Context, options client.StartWorkflowOptions, workflow interface{}, args ...interface{}) (client.WorkflowRun, error)
 	DescribeWorkflowExecution(ctx context.Context, workflowID, runID string) (*workflowservice.DescribeWorkflowExecutionResponse, error)
 	CheckHealth(ctx context.Context, request *client.CheckHealthRequest) (*client.CheckHealthResponse, error)
@@ -40,6 +41,23 @@ type Handler struct {
 // InstallSchedules creates or updates scrape and notify Temporal schedules.
 func (h *Handler) InstallSchedules(ctx context.Context) error {
 	return pipeline.EnsureSchedules(ctx, h.Schedules, h.Cfg)
+}
+
+// StartProcessPending starts the pending dispatcher singleton at API boot. A
+// dispatcher that already runs is left alone.
+func (h *Handler) StartProcessPending(ctx context.Context) error {
+	return pipeline.WakeProcessPending(ctx, h.Temporal)
+}
+
+// wakeProcessPending drains pending rows soon instead of at the next idle
+// poll. A failed wake must not fail the request that caused it.
+func (h *Handler) wakeProcessPending(ctx context.Context) {
+	if h.Temporal == nil {
+		return
+	}
+	if err := pipeline.WakeProcessPending(ctx, h.Temporal); err != nil {
+		slog.Error("wake process-pending failed", "err", err)
+	}
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -123,6 +141,7 @@ func (h *Handler) Scrape(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, result.Error)
 		return
 	}
+	h.wakeProcessPending(r.Context())
 	writeJSON(w, http.StatusOK, result)
 }
 
@@ -571,6 +590,7 @@ type jobListItem struct {
 	IsRemote           bool         `json:"is_remote"`
 	DetailAttempts     int          `json:"detail_attempts"`
 	StateChangedAt     time.Time    `json:"state_changed_at"`
+	NotifiedAt         *time.Time   `json:"notified_at"`
 }
 
 func descriptionPreview(description *string) string {
@@ -598,6 +618,7 @@ func newJobListItem(job db.Job) jobListItem {
 		Relevant: job.Relevant, Promising: job.Promising, Notified: job.Notified,
 		State: job.State, RejectReason: job.RejectReason, IsRemote: job.IsRemote,
 		DetailAttempts: job.DetailAttempts, StateChangedAt: job.StateChangedAt,
+		NotifiedAt: job.NotifiedAt,
 	}
 }
 
@@ -620,12 +641,61 @@ func (h *Handler) Job(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, job)
 }
 
+type reviewJobRequest struct {
+	Action string `json:"action"`
+}
+
+// POST /api/v0/jobs/{id}/review
+func (h *Handler) ReviewJob(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "job id must be numeric")
+		return
+	}
+	var in reviewJobRequest
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&in); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid review body")
+		return
+	}
+	if in.Action != db.JobStateApplied && in.Action != db.JobStateDismissed {
+		writeErr(w, http.StatusBadRequest, "action must be applied or dismissed")
+		return
+	}
+	updated, err := db.ReviewReadyJob(r.Context(), h.DB, id, in.Action)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if !updated {
+		if _, err := db.GetJob(r.Context(), h.DB, id); errors.Is(err, sql.ErrNoRows) {
+			writeErr(w, http.StatusNotFound, "job not found")
+			return
+		} else if err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeErr(w, http.StatusConflict, "job is not ready for review")
+		return
+	}
+	job, err := db.GetJob(r.Context(), h.DB, id)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, job)
+}
+
 // POST /api/v0/jobs/re-evaluate
 func (h *Handler) ReEvaluateJobs(w http.ResponseWriter, r *http.Request) {
 	updated, err := db.ReEvaluateRejectedJobs(r.Context(), h.DB)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+	if updated > 0 {
+		h.wakeProcessPending(r.Context())
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"updated": updated})
 }
@@ -718,6 +788,7 @@ func (h *Handler) DashboardStats(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"generated_at": now(),
 		"timezone":     stats.Timezone,
+		"notified":     stats.Notified,
 		"providers":    providers,
 		"daily":        daily,
 	})

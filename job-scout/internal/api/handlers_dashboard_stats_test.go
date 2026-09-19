@@ -17,6 +17,7 @@ const dashboardStatsPath = "/api/v0/dashboard/stats"
 type dashboardStatsBody struct {
 	GeneratedAt string                   `json:"generated_at"`
 	Timezone    string                   `json:"timezone"`
+	Notified    int                      `json:"notified"`
 	Providers   []dashboardProviderStats `json:"providers"`
 	Daily       []dashboardDailyPoint    `json:"daily"`
 }
@@ -74,10 +75,11 @@ func TestDashboardStats_AggregatesProvidersAndDailySeries(t *testing.T) {
 		if _, err := pool.Exec(`
 			INSERT INTO jobs (
 				job_source, title, company, location, job_url,
-				created_at, updated_at, state, reject_reason, state_changed_at
+				created_at, updated_at, state, reject_reason, state_changed_at, notified_at
 			) VALUES (
 				'LINKEDIN', 'IT Help Desk', 'Acme', 'Remote', $1,
-				$2::timestamp, $2::timestamp, $3, $4, $5
+				$2::timestamp, $2::timestamp, $3, $4, $5::timestamptz,
+				CASE WHEN $3 = 'ready' THEN $5::timestamptz ELSE NULL END
 			)
 		`, url, createdAt, state, reason, crossMidnightUTC); err != nil {
 			t.Fatalf("insert %s: %v", url, err)
@@ -85,7 +87,7 @@ func TestDashboardStats_AggregatesProvidersAndDailySeries(t *testing.T) {
 	}
 	insertJob("https://www.linkedin.com/jobs/view/dashboard-agg-1/", db.JobStatePending, nil)
 	insertJob("https://www.linkedin.com/jobs/view/dashboard-agg-2/", db.JobStateRejected, "title_company")
-	insertJob("https://www.linkedin.com/jobs/view/dashboard-agg-3/", db.JobStateNotified, nil)
+	insertJob("https://www.linkedin.com/jobs/view/dashboard-agg-3/", db.JobStateReady, nil)
 
 	handler := &Handler{
 		DB:  pool,
@@ -101,6 +103,9 @@ func TestDashboardStats_AggregatesProvidersAndDailySeries(t *testing.T) {
 	}
 	if body.Timezone != reportingTZ {
 		t.Fatalf("timezone = %q, want %q", body.Timezone, reportingTZ)
+	}
+	if body.Notified != 1 {
+		t.Errorf("notified = %d, want 1 from notified_at", body.Notified)
 	}
 	if len(body.Providers) < 2 {
 		t.Fatalf("providers len = %d, want at least 2", len(body.Providers))
@@ -128,10 +133,10 @@ func TestDashboardStats_AggregatesProvidersAndDailySeries(t *testing.T) {
 		t.Errorf("LINKEDIN total_jobs = %d, want 3", linked.TotalJobs)
 	}
 	assertStateCounts(t, linked.ByState, map[string]int{
-		"pending": 1, "rejected": 1, "eligible": 0, "notifying": 0, "notified": 1,
+		"pending": 1, "rejected": 1, "ready": 1, "applied": 0, "dismissed": 0,
 	})
 	assertReasonCounts(t, linked.ByRejectReason, map[string]int{
-		"duplicate": 0, "title_company": 1, "description": 0, "detail_failed": 0,
+		"duplicate": 0, "title_company": 1, "description": 0, "detail_failed": 0, "unsupported_source": 0,
 	})
 
 	indeed, ok := providers["INDEED"]
@@ -151,10 +156,10 @@ func TestDashboardStats_AggregatesProvidersAndDailySeries(t *testing.T) {
 		t.Errorf("INDEED total_jobs = %d, want 0", indeed.TotalJobs)
 	}
 	assertStateCounts(t, indeed.ByState, map[string]int{
-		"pending": 0, "rejected": 0, "eligible": 0, "notifying": 0, "notified": 0,
+		"pending": 0, "rejected": 0, "ready": 0, "applied": 0, "dismissed": 0,
 	})
 	assertReasonCounts(t, indeed.ByRejectReason, map[string]int{
-		"duplicate": 0, "title_company": 0, "description": 0, "detail_failed": 0,
+		"duplicate": 0, "title_company": 0, "description": 0, "detail_failed": 0, "unsupported_source": 0,
 	})
 
 	expectedDays := make([]string, 0, 14)

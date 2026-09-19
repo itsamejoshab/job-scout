@@ -36,27 +36,29 @@ func ParseJobSource(s string) (JobSource, error) {
 
 // Job mirrors the `jobs` table.
 type Job struct {
-	ID             int64     `json:"id"`
-	JobSource      JobSource `json:"job_source"`
-	Title          string    `json:"title"`
-	Company        string    `json:"company"`
-	Description    *string   `json:"description"`
-	Location       string    `json:"location"`
-	Date           time.Time `json:"date"`
-	JobURL         string    `json:"job_url"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
-	New            bool      `json:"new"`
-	Duplicate      bool      `json:"duplicate"`
-	Relevant       bool      `json:"relevant"`
-	Promising      bool      `json:"promising"`
-	Notified       bool      `json:"notified"`
-	State          string    `json:"state"`
-	RejectReason   *string   `json:"reject_reason"`
-	IsRemote       bool      `json:"is_remote"`
-	SearchContext  string    `json:"search_context"`
-	DetailAttempts int       `json:"detail_attempts"`
-	StateChangedAt time.Time `json:"state_changed_at"`
+	ID              int64      `json:"id"`
+	JobSource       JobSource  `json:"job_source"`
+	Title           string     `json:"title"`
+	Company         string     `json:"company"`
+	Description     *string    `json:"description"`
+	Location        string     `json:"location"`
+	Date            time.Time  `json:"date"`
+	JobURL          string     `json:"job_url"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
+	New             bool       `json:"new"`
+	Duplicate       bool       `json:"duplicate"`
+	Relevant        bool       `json:"relevant"`
+	Promising       bool       `json:"promising"`
+	Notified        bool       `json:"notified"`
+	State           string     `json:"state"`
+	RejectReason    *string    `json:"reject_reason"`
+	IsRemote        bool       `json:"is_remote"`
+	SearchContext   string     `json:"search_context"`
+	DetailAttempts  int        `json:"detail_attempts"`
+	StateChangedAt  time.Time  `json:"state_changed_at"`
+	NotifiedAt      *time.Time `json:"notified_at"`
+	NotifyClaimedAt *time.Time `json:"-"`
 }
 
 // SearchSettings mirrors the universal `search_settings` table.

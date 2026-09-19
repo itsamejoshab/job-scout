@@ -166,6 +166,10 @@ func (f *statusTemporalFake) ExecuteWorkflow(context.Context, client.StartWorkfl
 	panic("ExecuteWorkflow unused in status tests")
 }
 
+func (f *statusTemporalFake) SignalWithStartWorkflow(context.Context, string, string, interface{}, client.StartWorkflowOptions, interface{}, ...interface{}) (client.WorkflowRun, error) {
+	panic("SignalWithStartWorkflow unused in status tests")
+}
+
 func (f *statusTemporalFake) DescribeWorkflowExecution(context.Context, string, string) (*workflowservice.DescribeWorkflowExecutionResponse, error) {
 	panic("DescribeWorkflowExecution unused in status tests")
 }

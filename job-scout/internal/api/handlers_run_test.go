@@ -227,6 +227,10 @@ func (f *runTemporalFake) ExecuteWorkflow(_ context.Context, options client.Star
 	return &runWorkflowFake{id: options.ID, parent: f}, nil
 }
 
+func (f *runTemporalFake) SignalWithStartWorkflow(context.Context, string, string, interface{}, client.StartWorkflowOptions, interface{}, ...interface{}) (client.WorkflowRun, error) {
+	panic("SignalWithStartWorkflow unused in POST /api/v0/run")
+}
+
 func (f *runTemporalFake) DescribeWorkflowExecution(context.Context, string, string) (*workflowservice.DescribeWorkflowExecutionResponse, error) {
 	panic("DescribeWorkflowExecution unused in POST /api/v0/run")
 }

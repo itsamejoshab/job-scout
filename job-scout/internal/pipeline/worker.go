@@ -17,10 +17,16 @@ type Registrar interface {
 // Register attaches production workflows and activities to a Temporal worker.
 func Register(r Registrar, acts *Activities) {
 	r.RegisterWorkflowWithOptions(ScrapeWorkflow, workflow.RegisterOptions{Name: "ScrapeWorkflow"})
+	r.RegisterWorkflowWithOptions(ProcessPendingWorkflow, workflow.RegisterOptions{Name: "ProcessPendingWorkflow"})
+	r.RegisterWorkflowWithOptions(ProcessJobWorkflow, workflow.RegisterOptions{Name: "ProcessJobWorkflow"})
 	r.RegisterWorkflowWithOptions(NotifyWorkflow, workflow.RegisterOptions{Name: "NotifyWorkflow"})
 
 	r.RegisterActivityWithOptions(acts.scrape_jobs, activity.RegisterOptions{Name: ActivityScrapeJobs})
-	r.RegisterActivityWithOptions(acts.load_jobs_for_filtering, activity.RegisterOptions{Name: ActivityLoadJobsForFiltering})
+	r.RegisterActivityWithOptions(acts.wake_process_pending, activity.RegisterOptions{Name: ActivityWakeProcessPending})
+	r.RegisterActivityWithOptions(acts.load_next_pending_job, activity.RegisterOptions{Name: ActivityLoadNextPendingJob})
+	r.RegisterActivityWithOptions(acts.load_process_job, activity.RegisterOptions{Name: ActivityLoadProcessJob})
+	r.RegisterActivityWithOptions(acts.load_duplicate_group, activity.RegisterOptions{Name: ActivityLoadDuplicateGroup})
+	r.RegisterActivityWithOptions(acts.load_filter_lists, activity.RegisterOptions{Name: ActivityLoadFilterLists})
 	r.RegisterActivityWithOptions(acts.get_job_description, activity.RegisterOptions{Name: ActivityGetJobDescription})
 	r.RegisterActivityWithOptions(acts.save_job_filter_result, activity.RegisterOptions{Name: ActivitySaveJobFilterResult})
 	r.RegisterActivityWithOptions(acts.claim_notification_batch, activity.RegisterOptions{Name: ActivityClaimNotificationBatch})

@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestListJobsForNotify_ReturnsWholeTableIncludingNonPending(t *testing.T) {
+func TestListJobsForNotify_ReturnsWholeTableIncludingReviewedRows(t *testing.T) {
 	pool := migratedPool(t)
 	ctx := context.Background()
 	if _, err := InsertJobIfNew(ctx, pool, sampleJob("https://www.linkedin.com/jobs/view/notify-a/")); err != nil {
@@ -15,8 +15,8 @@ func TestListJobsForNotify_ReturnsWholeTableIncludingNonPending(t *testing.T) {
 	if _, err := InsertJobIfNew(ctx, pool, sampleJob("https://www.linkedin.com/jobs/view/notify-b/")); err != nil {
 		t.Fatalf("insert b: %v", err)
 	}
-	if _, err := pool.Exec(`UPDATE jobs SET state = 'notified' WHERE job_url LIKE '%notify-a/'`); err != nil {
-		t.Fatalf("mark notified: %v", err)
+	if _, err := pool.Exec(`UPDATE jobs SET state = 'applied', notified_at = now() WHERE job_url LIKE '%notify-a/'`); err != nil {
+		t.Fatalf("mark applied: %v", err)
 	}
 
 	jobs, err := ListJobsForNotify(ctx, pool)
@@ -24,18 +24,18 @@ func TestListJobsForNotify_ReturnsWholeTableIncludingNonPending(t *testing.T) {
 		t.Fatalf("ListJobsForNotify: %v", err)
 	}
 	if len(jobs) != 2 {
-		t.Errorf("ListJobsForNotify len=%d, want 2 (whole table including notified, for duplicate check)", len(jobs))
+		t.Errorf("ListJobsForNotify len=%d, want 2 (whole table including reviewed rows, for duplicate check)", len(jobs))
 	}
 	states := map[string]int{}
 	for _, j := range jobs {
 		states[j.State]++
 	}
-	if states[JobStateNotified] != 1 || states[JobStatePending] != 1 {
-		t.Errorf("ListJobsForNotify by state = %v, want one notified and one pending", states)
+	if states[JobStateApplied] != 1 || states[JobStatePending] != 1 {
+		t.Errorf("ListJobsForNotify by state = %v, want one applied and one pending", states)
 	}
 }
 
-func TestUpdateJobNotifyState_MarksEligibleAndKeepsRow(t *testing.T) {
+func TestUpdateJobNotifyState_MarksReadyAndKeepsRow(t *testing.T) {
 	pool := migratedPool(t)
 	ctx := context.Background()
 	if _, err := InsertJobIfNew(ctx, pool, sampleJob("https://www.linkedin.com/jobs/view/notify-keep/")); err != nil {
@@ -47,7 +47,7 @@ func TestUpdateJobNotifyState_MarksEligibleAndKeepsRow(t *testing.T) {
 		t.Fatalf("id: %v", err)
 	}
 	desc := "computer windows"
-	if err := UpdateJobNotifyState(ctx, pool, id, JobStateEligible, nil, &desc, 0); err != nil {
+	if err := UpdateJobNotifyState(ctx, pool, id, JobStateReady, nil, &desc, 0); err != nil {
 		t.Fatalf("UpdateJobNotifyState: %v", err)
 	}
 
@@ -68,8 +68,8 @@ func TestUpdateJobNotifyState_MarksEligibleAndKeepsRow(t *testing.T) {
 		Scan(&state, &reason, &body, &attempts); err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if state != JobStateEligible {
-		t.Errorf("state = %q, want eligible", state)
+	if state != JobStateReady {
+		t.Errorf("state = %q, want ready", state)
 	}
 	if reason.Valid {
 		t.Errorf("reject_reason = %q, want nil", reason.String)

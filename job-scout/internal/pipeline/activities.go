@@ -3,8 +3,11 @@ package pipeline
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"fmt"
 	"log/slog"
+	"strings"
+	"time"
 
 	"github.com/jobscout/jobscout/internal/db"
 	"github.com/jobscout/jobscout/internal/domain"
@@ -14,10 +17,18 @@ import (
 // Activities holds dependencies for pipeline activities. Registering the struct
 // with the worker registers all of its methods as activities.
 type Activities struct {
-	Scraper       *scraper.Service
-	DB            *sql.DB
-	Webhook       *WebhookClient
-	NotifyMaxJobs int
+	Scraper                   *scraper.Service
+	DB                        *sql.DB
+	Webhook                   *WebhookClient
+	Temporal                  SignalStarter
+	NotifyMaxJobs             int
+	NotifyClaimTimeoutSeconds int
+}
+
+// wake_process_pending signals or starts the pending dispatcher singleton.
+// Workflows cannot signal-with-start, so they call this activity.
+func (a *Activities) wake_process_pending(ctx context.Context) error {
+	return WakeProcessPending(ctx, a.Temporal)
 }
 
 // scrape_jobs fetches due (or forced) enabled providers and persists jobs.
@@ -25,14 +36,79 @@ func (a *Activities) scrape_jobs(ctx context.Context, input scraper.TickInput) (
 	return a.Scraper.RunTick(ctx, input)
 }
 
-// load_jobs_for_filtering reads live filter lists and all jobs.
-func (a *Activities) load_jobs_for_filtering(ctx context.Context) (NotifySnapshot, error) {
-	return LoadNotifySnapshot(ctx, a.DB)
+// load_next_pending_job returns the oldest pending row not skipped by this run.
+func (a *Activities) load_next_pending_job(ctx context.Context, input LoadNextPendingInput) (int64, error) {
+	return db.NextPendingJobID(ctx, a.DB, input.SkipIDs)
 }
 
-// get_job_description GETs LinkedIn job-detail HTML once.
-func (a *Activities) get_job_description(ctx context.Context, jobURL string) (string, error) {
-	return a.Scraper.FetchJobDescription(ctx, jobURL)
+// load_process_job loads the current row before any processing decision.
+func (a *Activities) load_process_job(ctx context.Context, jobID int64) (ProcessJob, error) {
+	row, err := db.GetJob(ctx, a.DB, jobID)
+	if err != nil {
+		return ProcessJob{}, err
+	}
+	return processJobFromDB(row), nil
+}
+
+// load_duplicate_group loads title+company peers without filtering by state.
+func (a *Activities) load_duplicate_group(ctx context.Context, _ DuplicateGroupInput) ([]domain.Job, error) {
+	rows, err := db.ListDuplicateCandidates(ctx, a.DB)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]domain.Job, len(rows))
+	for i, row := range rows {
+		out[i] = domainJobFromDB(row)
+	}
+	return out, nil
+}
+
+// load_filter_lists reads the current word lists for one processing decision.
+func (a *Activities) load_filter_lists(ctx context.Context) (domain.Lists, error) {
+	settings, err := db.GetSearchSettings(ctx, a.DB)
+	if err != nil {
+		return domain.Lists{}, err
+	}
+	if settings == nil {
+		return domain.Lists{}, nil
+	}
+	return domain.Lists{
+		TitleInclude: settings.TitleInclude, TitleExclude: settings.TitleExclude,
+		CompanyExclude: settings.CompanyExclude, DescInclude: settings.DescIncludeWords,
+		DescExclude: settings.DescExcludeWords,
+	}, nil
+}
+
+// get_job_description holds the source lock only while it GETs LinkedIn detail.
+func (a *Activities) get_job_description(ctx context.Context, in DetailFetchInput) (DetailFetchResult, error) {
+	conn, err := a.DB.Conn(ctx)
+	if err != nil {
+		return DetailFetchResult{}, err
+	}
+	defer conn.Close()
+
+	source := db.JobSource(in.JobSource)
+	locked, err := db.TryLockJobSource(ctx, conn, source)
+	if err != nil {
+		return DetailFetchResult{}, err
+	}
+	if !locked {
+		return DetailFetchResult{LockBusy: true}, nil
+	}
+	defer func() {
+		unlockCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := db.UnlockJobSource(unlockCtx, conn, source); err != nil {
+			slog.Error("job detail advisory unlock failed; discarding connection", "source", source, "err", err)
+			_ = conn.Raw(func(any) error { return driver.ErrBadConn })
+		}
+	}()
+
+	description, err := a.Scraper.FetchJobDescription(ctx, in.JobURL)
+	if err != nil || strings.TrimSpace(description) == "" {
+		return DetailFetchResult{FetchFailed: true}, nil
+	}
+	return DetailFetchResult{Description: description}, nil
 }
 
 // save_job_filter_result persists one filter decision. It does not claim or notify.
@@ -56,45 +132,28 @@ type ClaimedJob struct {
 	JobURL string
 }
 
-// ClaimBatch is the claimed jobs plus inventory counts after claim.
+// ClaimBatch is the claimed ready jobs.
 type ClaimBatch struct {
-	Jobs   []ClaimedJob
-	Counts domain.MessageCounts
+	Jobs []ClaimedJob
 }
 
-// FinishNotifyBatchInput sets the claimed batch to notified or eligible.
+// FinishNotifyBatchInput identifies a failed batch whose markers must clear.
 type FinishNotifyBatchInput struct {
-	IDs   []int64
-	State string
+	IDs []int64
 }
 
-// claim_notification_batch claims up to NOTIFY_MAX_JOBS oldest eligible jobs.
+// claim_notification_batch claims up to NOTIFY_MAX_JOBS oldest ready jobs.
 func (a *Activities) claim_notification_batch(ctx context.Context) (ClaimBatch, error) {
 	limit := a.NotifyMaxJobs
 	if limit <= 0 {
 		limit = 25
 	}
-	jobs, err := db.ClaimEligibleJobs(ctx, a.DB, limit)
-	if err != nil {
-		return ClaimBatch{}, err
-	}
-	inv, err := db.LoadNotifyInventory(ctx, a.DB)
+	jobs, err := db.ClaimReadyJobs(ctx, a.DB, limit, a.NotifyClaimTimeoutSeconds)
 	if err != nil {
 		return ClaimBatch{}, err
 	}
 	out := ClaimBatch{
 		Jobs: make([]ClaimedJob, len(jobs)),
-		Counts: domain.MessageCounts{
-			Total:        inv.Total,
-			TitleCompany: inv.TitleCompany,
-			Description:  inv.Description,
-			Duplicate:    inv.Duplicate,
-			DetailFailed: inv.DetailFailed,
-			Pending:      inv.Pending,
-			Eligible:     inv.Eligible,
-			Notifying:    inv.Notifying,
-			Notified:     inv.Notified,
-		},
 	}
 	for i, j := range jobs {
 		out.Jobs[i] = ClaimedJob{ID: j.ID, JobURL: j.JobURL}
@@ -119,15 +178,35 @@ func (a *Activities) send_notification(ctx context.Context, message string) erro
 	return a.Webhook.PostMessage(ctx, message)
 }
 
-// finish_notification_batch writes notified after HTTP 200, or eligible after failure.
+// finish_notification_batch clears dedupe markers after a failed POST.
 func (a *Activities) finish_notification_batch(ctx context.Context, in FinishNotifyBatchInput) error {
-	return db.SetJobsState(ctx, a.DB, in.IDs, in.State)
+	return db.ClearNotifyClaims(ctx, a.DB, in.IDs)
 }
 
 func persistDescription(d domain.Decision) bool {
 	if d.Description != "" {
 		return true
 	}
-	return d.State == domain.StateEligible ||
+	return d.State == domain.StateReady ||
 		d.RejectReason == domain.ReasonDescription
+}
+
+func processJobFromDB(row db.Job) ProcessJob {
+	return ProcessJob{
+		Job:       domainJobFromDB(row),
+		State:     row.State,
+		JobSource: string(row.JobSource),
+	}
+}
+
+func domainJobFromDB(row db.Job) domain.Job {
+	description := ""
+	if row.Description != nil {
+		description = *row.Description
+	}
+	return domain.Job{
+		ID: row.ID, Title: row.Title, Company: row.Company,
+		Description: description, JobURL: row.JobURL,
+		CreatedAt: row.CreatedAt, DetailAttempts: row.DetailAttempts,
+	}
 }

@@ -29,6 +29,7 @@ import {
   getStatus,
   getWorkflowStatus,
   reEvaluateRejectedJobs,
+  reviewJob,
   replaceSearchSettings,
   resetSearchSettings,
   startNotify,
@@ -254,8 +255,8 @@ function Header() {
   );
 }
 
-const stateOrder = ["pending", "rejected", "eligible", "notifying", "notified"];
-const rejectReasonOrder = ["duplicate", "title_company", "description", "detail_failed"];
+const stateOrder = ["pending", "rejected", "ready", "applied", "dismissed"];
+const rejectReasonOrder = ["duplicate", "title_company", "description", "detail_failed", "unsupported_source"];
 const chartColors = {
   total: "#2563eb",
   notified: "#16a34a",
@@ -342,6 +343,9 @@ function DashboardPage() {
           <p className="mt-1.5 text-muted-foreground">
             Generated at {formatTimestamp(dashboard.data.generated_at)}
           </p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Jobs emailed: {dashboard.data.notified}
+          </p>
 
           <section className="mt-8 grid gap-4 md:grid-cols-2" aria-label="Provider cards">
             {dashboard.data.providers.map((provider) => (
@@ -368,7 +372,7 @@ function DashboardPage() {
                       key={state}
                       className="rounded-lg bg-muted px-2.5 py-2 text-xs font-medium text-muted-foreground"
                     >
-                      {state}: {provider.by_state[state] ?? 0}
+                      {state === "ready" ? "Ready for review" : state}: {provider.by_state[state] ?? 0}
                     </p>
                   ))}
                 </div>
@@ -423,7 +427,7 @@ function DashboardPage() {
   );
 }
 
-const jobStates = ["", "pending", "rejected", "eligible", "notifying", "notified"];
+const jobStates = ["", "pending", "rejected", "ready", "applied", "dismissed"];
 const pageSize = 50;
 
 type CreatedWindow =
@@ -475,7 +479,7 @@ function formatAge(value: string) {
 
 function JobsPage() {
   const visible = usePageVisible();
-  const [state, setState] = useState("notified");
+  const [state, setState] = useState("ready");
   const [jobSource, setJobSource] = useState("");
   const [query, setQuery] = useState("");
   const [createdWindow, setCreatedWindow] = useState<CreatedWindow>("24h");
@@ -505,6 +509,15 @@ function JobsPage() {
     queryFn: () => getJobs({ ...filters, asOf: anchor.current }),
     refetchInterval: visible ? 5_000 : false,
     placeholderData: keepPreviousData,
+  });
+  const queryClient = useQueryClient();
+  const review = useMutation({
+    mutationFn: ({ id, action }: { id: number; action: "applied" | "dismissed" }) =>
+      reviewJob(id, action),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["jobs"] });
+      void queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
+    },
   });
   useEffect(() => {
     if (!anchor.current && jobs.data?.as_of) {
@@ -559,7 +572,9 @@ function JobsPage() {
             }}
           >
             {jobStates.map((value) => (
-              <option key={value} value={value}>{value || "All states"}</option>
+              <option key={value} value={value}>
+                {value === "ready" ? "Ready for review" : value || "All states"}
+              </option>
             ))}
           </select>
         </label>
@@ -632,6 +647,7 @@ function JobsPage() {
               <th className="whitespace-nowrap px-5 py-3">Source</th>
               <th className="whitespace-nowrap px-5 py-3">State</th>
               <th className="whitespace-nowrap px-5 py-3">Age</th>
+              <th className="whitespace-nowrap px-5 py-3">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -660,9 +676,31 @@ function JobsPage() {
                   )}
                 </td>
                 <td className="px-5 py-4 text-muted-foreground">{job.job_source}</td>
-                <td className="px-5 py-4"><Badge>{job.state}</Badge></td>
+                <td className="px-5 py-4">
+                  <Badge>{job.state === "ready" ? "Ready for review" : job.state}</Badge>
+                </td>
                 <td className="px-5 py-4 tabular-nums text-muted-foreground">
                   {formatAge(job.created_at)}
+                </td>
+                <td className="px-5 py-4">
+                  {job.state === "ready" && (
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        disabled={review.isPending}
+                        onClick={() => review.mutate({ id: job.id, action: "applied" })}
+                      >
+                        Applied
+                      </Button>
+                      <Button
+                        size="sm"
+                        disabled={review.isPending}
+                        onClick={() => review.mutate({ id: job.id, action: "dismissed" })}
+                      >
+                        Reject
+                      </Button>
+                    </div>
+                  )}
                 </td>
               </tr>
             ))}

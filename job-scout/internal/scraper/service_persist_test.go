@@ -70,20 +70,20 @@ func TestSaveJobs_UsesSameUniquenessAndRemoteOR(t *testing.T) {
 		}
 	}
 
-	if _, err := pool.Exec(`UPDATE jobs SET state = 'notified' WHERE job_url = $1`, url); err != nil {
+	if _, err := pool.Exec(`UPDATE jobs SET state = 'applied', notified_at = now() WHERE job_url = $1`, url); err != nil {
 		t.Errorf("debug scrape must use the jobs store state column: %v", err)
 		return
 	}
 	if _, err := s.saveJobs(ctx, []JobData{
 		{Title: "Other", Company: "Acme", Location: "Remote", JobURL: url, Source: db.SourceLinkedIn, IsRemote: false},
 	}); err != nil {
-		t.Fatalf("save after notified: %v", err)
+		t.Fatalf("save after applied: %v", err)
 	}
 	var state string
 	if err := pool.QueryRow(`SELECT state FROM jobs WHERE job_url = $1`, url).Scan(&state); err != nil {
 		t.Fatalf("load state after scrape persist: %v", err)
 	}
-	if state != "notified" {
-		t.Errorf("POST /api/v0/scrape persist path changed state to %q, want notified", state)
+	if state != "applied" {
+		t.Errorf("POST /api/v0/scrape persist path changed state to %q, want applied", state)
 	}
 }

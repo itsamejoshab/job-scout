@@ -74,8 +74,8 @@ func TestLoad_NotifyAndWebhookKnobDefaults(t *testing.T) {
 	if cfg.NotifyMaxJobs != 25 {
 		t.Errorf("NOTIFY_MAX_JOBS default = %d, want 25", cfg.NotifyMaxJobs)
 	}
-	if cfg.NotifyClaimTimeoutSeconds != 0 {
-		t.Errorf("NOTIFY_CLAIM_TIMEOUT_SECONDS default = %d, want 0 (no auto-unstick)", cfg.NotifyClaimTimeoutSeconds)
+	if cfg.NotifyClaimTimeoutSeconds != 900 {
+		t.Errorf("NOTIFY_CLAIM_TIMEOUT_SECONDS default = %d, want 900", cfg.NotifyClaimTimeoutSeconds)
 	}
 	if cfg.HTTPTimeoutSeconds != 30 {
 		t.Errorf("HTTP_TIMEOUT_SECONDS default = %d, want 30 (webhook client reuses this)", cfg.HTTPTimeoutSeconds)
