@@ -36,7 +36,7 @@ Add PNG files in `docs/screenshots/` with these names. The slots below show thos
 
 The API and the worker are the same Go binary. The first argument selects the process: `jobscout api` or `jobscout worker`.
 
-`make up` starts Postgres, Temporal, the API, and the worker. On boot, the API creates or updates two Temporal interval schedules: `jobscout-scrape` and `jobscout-notify`.
+`make up` starts Postgres, Temporal, the API, and the worker. On boot, the API creates or updates two Temporal schedules: `jobscout-scrape` and `jobscout-notify`. The default scrape interval is 10 minutes. The default notify interval is the same period, with a 9-minute offset, and only between 07:30 and 21:00 in `REPORTING_TIMEZONE`.
 
 The worker must open TCP to the host in `WEBHOOK_BASE`. A timeout or connect error is an environment failure, not a filter failure.
 

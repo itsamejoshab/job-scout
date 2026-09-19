@@ -21,6 +21,10 @@ var errScheduleCreate = errors.New("temporal schedule create failed")
 func TestEnsureSchedules_UsesProductScheduleEnv(t *testing.T) {
 	t.Setenv("SCRAPE_SCHEDULE_SECONDS", "60*5")
 	t.Setenv("NOTIFY_SCHEDULE_SECONDS", "60*10")
+	t.Setenv("NOTIFY_SCHEDULE_OFFSET_SECONDS", "")
+	t.Setenv("NOTIFY_ACTIVE_START", "")
+	t.Setenv("NOTIFY_ACTIVE_END", "")
+	t.Setenv("REPORTING_TIMEZONE", "")
 	cfg := config.Load()
 
 	fake := newFakeSchedules()
@@ -28,8 +32,29 @@ func TestEnsureSchedules_UsesProductScheduleEnv(t *testing.T) {
 		t.Fatalf("EnsureSchedules: %v", err)
 	}
 	byID := scheduleCreatesByID(t, fake.creates)
-	assertIntervalSchedule(t, byID["jobscout-scrape"], 300*time.Second)
-	assertIntervalSchedule(t, byID["jobscout-notify"], 600*time.Second)
+	assertIntervalSchedule(t, byID["jobscout-scrape"], 300*time.Second, 0, "America/New_York")
+	assertIntervalSchedule(t, byID["jobscout-notify"], 600*time.Second, 540*time.Second, "America/New_York")
+	assertNotifyQuietHours(t, byID["jobscout-notify"])
+}
+
+func TestEnsureSchedules_DefaultNotifyOffsetAndQuietHours(t *testing.T) {
+	t.Setenv("SCRAPE_SCHEDULE_SECONDS", "")
+	t.Setenv("NOTIFY_SCHEDULE_SECONDS", "")
+	t.Setenv("NOTIFY_SCHEDULE_OFFSET_SECONDS", "")
+	t.Setenv("NOTIFY_ACTIVE_START", "")
+	t.Setenv("NOTIFY_ACTIVE_END", "")
+	t.Setenv("REPORTING_TIMEZONE", "")
+	cfg := config.Load()
+
+	fake := newFakeSchedules()
+	if err := EnsureSchedules(context.Background(), fake, cfg); err != nil {
+		t.Fatalf("EnsureSchedules: %v", err)
+	}
+	byID := scheduleCreatesByID(t, fake.creates)
+	assertIntervalSchedule(t, byID["jobscout-scrape"], 600*time.Second, 0, "America/New_York")
+	assertIntervalSchedule(t, byID["jobscout-notify"], 600*time.Second, 540*time.Second, "America/New_York")
+	assertNotifyQuietHours(t, byID["jobscout-notify"])
+	assertScheduledActions(t, byID["jobscout-scrape"], byID["jobscout-notify"])
 }
 
 func TestEnsureSchedules_CreatesUTCIntervalSchedulesWithSkip(t *testing.T) {
@@ -44,8 +69,11 @@ func TestEnsureSchedules_CreatesUTCIntervalSchedulesWithSkip(t *testing.T) {
 	}
 
 	byID := scheduleCreatesByID(t, fake.creates)
-	assertIntervalSchedule(t, byID["jobscout-scrape"], 90*time.Second)
-	assertIntervalSchedule(t, byID["jobscout-notify"], 450*time.Second)
+	assertIntervalSchedule(t, byID["jobscout-scrape"], 90*time.Second, 0, "UTC")
+	assertIntervalSchedule(t, byID["jobscout-notify"], 450*time.Second, 0, "UTC")
+	if len(byID["jobscout-notify"].Spec.Skip) != 0 {
+		t.Errorf("notify skip=%v, want none when the active window is unset", byID["jobscout-notify"].Spec.Skip)
+	}
 	assertScheduledActions(t, byID["jobscout-scrape"], byID["jobscout-notify"])
 }
 
@@ -89,8 +117,8 @@ func TestEnsureSchedules_UpdatesExistingSchedulesIdempotently(t *testing.T) {
 	if !ok {
 		t.Fatalf("second boot must update jobscout-notify, updates=%v", updateIDs(fake.updates))
 	}
-	assertIntervalSchedule(t, scrape, 120*time.Second)
-	assertIntervalSchedule(t, notify, 600*time.Second)
+	assertIntervalSchedule(t, scrape, 120*time.Second, 0, "UTC")
+	assertIntervalSchedule(t, notify, 600*time.Second, 0, "UTC")
 	assertScheduledActions(t, scrape, notify)
 }
 
@@ -106,22 +134,51 @@ func TestEnsureSchedules_CreateErrorStopsBoot(t *testing.T) {
 	}
 }
 
-func assertIntervalSchedule(t *testing.T, opts client.ScheduleOptions, every time.Duration) {
+func TestNotifySkipCalendars_DefaultMorningToEvening(t *testing.T) {
+	got := notifySkipCalendars(config.Config{NotifyActiveStart: "07:30", NotifyActiveEnd: "21:00"})
+	want := []client.ScheduleCalendarSpec{
+		{Hour: []client.ScheduleRange{{Start: 0, End: 6}}},
+		{Hour: []client.ScheduleRange{{Start: 7}}, Minute: []client.ScheduleRange{{Start: 0, End: 29}}},
+		{Hour: []client.ScheduleRange{{Start: 21, End: 23}}},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("notify skip = %#v, want %#v", got, want)
+	}
+}
+
+func TestNotifySkipCalendars_EmptyWindowIsNone(t *testing.T) {
+	if got := notifySkipCalendars(config.Config{}); got != nil {
+		t.Errorf("empty notify window skip = %#v, want none", got)
+	}
+}
+
+func assertIntervalSchedule(t *testing.T, opts client.ScheduleOptions, every, offset time.Duration, tz string) {
 	t.Helper()
-	if opts.Spec.TimeZoneName != "UTC" {
-		t.Errorf("schedule %s timezone = %q, want UTC", opts.ID, opts.Spec.TimeZoneName)
+	if opts.Spec.TimeZoneName != tz {
+		t.Errorf("schedule %s timezone = %q, want %s", opts.ID, opts.Spec.TimeZoneName, tz)
 	}
 	if opts.Overlap != enumspb.SCHEDULE_OVERLAP_POLICY_SKIP {
 		t.Errorf("schedule %s overlap = %v, want SKIP so a running tick is not stacked", opts.ID, opts.Overlap)
 	}
 	if len(opts.Spec.Calendars) != 0 || len(opts.Spec.CronExpressions) != 0 {
-		t.Errorf("schedule %s must be interval-only, calendars=%d cron=%d", opts.ID, len(opts.Spec.Calendars), len(opts.Spec.CronExpressions))
+		t.Errorf("schedule %s must be interval-based, calendars=%d cron=%d", opts.ID, len(opts.Spec.Calendars), len(opts.Spec.CronExpressions))
 	}
 	if len(opts.Spec.Intervals) != 1 {
 		t.Fatalf("schedule %s intervals=%v, want one", opts.ID, opts.Spec.Intervals)
 	}
 	if opts.Spec.Intervals[0].Every != every {
 		t.Errorf("schedule %s interval = %s, want %s", opts.ID, opts.Spec.Intervals[0].Every, every)
+	}
+	if opts.Spec.Intervals[0].Offset != offset {
+		t.Errorf("schedule %s offset = %s, want %s", opts.ID, opts.Spec.Intervals[0].Offset, offset)
+	}
+}
+
+func assertNotifyQuietHours(t *testing.T, opts client.ScheduleOptions) {
+	t.Helper()
+	want := notifySkipCalendars(config.Config{NotifyActiveStart: "07:30", NotifyActiveEnd: "21:00"})
+	if !reflect.DeepEqual(opts.Spec.Skip, want) {
+		t.Errorf("notify skip = %#v, want %#v", opts.Spec.Skip, want)
 	}
 }
 
