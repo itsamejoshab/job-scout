@@ -134,15 +134,21 @@ func TestEnsureSchedules_CreateErrorStopsBoot(t *testing.T) {
 	}
 }
 
+// wantDefaultNotifySkip is the literal 07:30–21:00 skip spec. Every entry must
+// carry whole minute and second ranges, or the server only excludes HH:00:00.
+func wantDefaultNotifySkip() []client.ScheduleCalendarSpec {
+	whole := []client.ScheduleRange{{Start: 0, End: 59}}
+	return []client.ScheduleCalendarSpec{
+		{Hour: []client.ScheduleRange{{Start: 0, End: 6}}, Minute: whole, Second: whole},
+		{Hour: []client.ScheduleRange{{Start: 7, End: 7}}, Minute: []client.ScheduleRange{{Start: 0, End: 29}}, Second: whole},
+		{Hour: []client.ScheduleRange{{Start: 21, End: 23}}, Minute: whole, Second: whole},
+	}
+}
+
 func TestNotifySkipCalendars_DefaultMorningToEvening(t *testing.T) {
 	got := notifySkipCalendars(config.Config{NotifyActiveStart: "07:30", NotifyActiveEnd: "21:00"})
-	want := []client.ScheduleCalendarSpec{
-		{Hour: []client.ScheduleRange{{Start: 0, End: 6}}},
-		{Hour: []client.ScheduleRange{{Start: 7}}, Minute: []client.ScheduleRange{{Start: 0, End: 29}}},
-		{Hour: []client.ScheduleRange{{Start: 21, End: 23}}},
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("notify skip = %#v, want %#v", got, want)
+	if !reflect.DeepEqual(got, wantDefaultNotifySkip()) {
+		t.Errorf("notify skip = %#v, want %#v", got, wantDefaultNotifySkip())
 	}
 }
 
@@ -150,6 +156,67 @@ func TestNotifySkipCalendars_EmptyWindowIsNone(t *testing.T) {
 	if got := notifySkipCalendars(config.Config{}); got != nil {
 		t.Errorf("empty notify window skip = %#v, want none", got)
 	}
+}
+
+func TestNotifySkipCalendars_ExcludeEveryTickOutsideTheWindow(t *testing.T) {
+	skip := notifySkipCalendars(config.Config{NotifyActiveStart: "07:30", NotifyActiveEnd: "21:00"})
+	for _, tc := range []struct {
+		clock   string
+		skipped bool
+	}{
+		{"00:09", true},
+		{"03:39", true},
+		{"06:59", true},
+		{"07:09", true},
+		{"07:29", true},
+		{"07:30", false},
+		{"07:39", false},
+		{"12:19", false},
+		{"20:59", false},
+		{"21:09", true},
+		{"23:59", true},
+	} {
+		hour, minute, ok := config.ParseClockHM(tc.clock)
+		if !ok {
+			t.Fatalf("bad test clock %q", tc.clock)
+		}
+		tick := time.Date(2026, time.September, 19, hour, minute, 0, 0, time.UTC)
+		if got := skipExcludes(skip, tick); got != tc.skipped {
+			t.Errorf("notify tick %s skipped = %t, want %t", tc.clock, got, tc.skipped)
+		}
+	}
+}
+
+// skipExcludes reports whether Temporal drops a schedule time. It repeats the
+// SDK field defaults, so an unset Minute or Second means 0 and nothing else.
+func skipExcludes(skip []client.ScheduleCalendarSpec, tick time.Time) bool {
+	for _, spec := range skip {
+		if rangesCover(spec.Hour, tick.Hour()) &&
+			rangesCover(spec.Minute, tick.Minute()) &&
+			rangesCover(spec.Second, tick.Second()) {
+			return true
+		}
+	}
+	return false
+}
+
+func rangesCover(ranges []client.ScheduleRange, v int) bool {
+	if ranges == nil {
+		ranges = []client.ScheduleRange{{Start: 0}}
+	}
+	for _, r := range ranges {
+		end, step := r.End, r.Step
+		if end < r.Start {
+			end = r.Start
+		}
+		if step < 1 {
+			step = 1
+		}
+		if v >= r.Start && v <= end && (v-r.Start)%step == 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func assertIntervalSchedule(t *testing.T, opts client.ScheduleOptions, every, offset time.Duration, tz string) {
@@ -176,7 +243,7 @@ func assertIntervalSchedule(t *testing.T, opts client.ScheduleOptions, every, of
 
 func assertNotifyQuietHours(t *testing.T, opts client.ScheduleOptions) {
 	t.Helper()
-	want := notifySkipCalendars(config.Config{NotifyActiveStart: "07:30", NotifyActiveEnd: "21:00"})
+	want := wantDefaultNotifySkip()
 	if !reflect.DeepEqual(opts.Spec.Skip, want) {
 		t.Errorf("notify skip = %#v, want %#v", opts.Spec.Skip, want)
 	}
