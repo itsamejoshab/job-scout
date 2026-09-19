@@ -141,27 +141,27 @@ func assertScheduledActions(t *testing.T, scrape, notify client.ScheduleOptions)
 	if notifyAction.ID == ManualNotifyWorkflowID(time.Now()) {
 		t.Error("scheduled notify workflow ID must not be a manual notify ID")
 	}
-	if name := workflowFuncName(scrapeAction.Workflow); name != "ScrapeTick" {
-		t.Errorf("scrape schedule must start ScrapeTick, got %s", name)
+	if name := workflowFuncName(scrapeAction.Workflow); name != "ScrapeWorkflow" {
+		t.Errorf("scrape schedule must start ScrapeWorkflow, got %s", name)
 	}
-	if name := workflowFuncName(notifyAction.Workflow); name != "NotifyTick" {
-		t.Errorf("notify schedule must start NotifyTick, got %s", name)
+	if name := workflowFuncName(notifyAction.Workflow); name != "NotifyWorkflow" {
+		t.Errorf("notify schedule must start NotifyWorkflow, got %s", name)
 	}
 	if scrapeAction.TaskQueue != config.TaskQueue || notifyAction.TaskQueue != config.TaskQueue {
 		t.Errorf("schedules must use task queue %q, scrape=%q notify=%q", config.TaskQueue, scrapeAction.TaskQueue, notifyAction.TaskQueue)
 	}
 	if len(scrapeAction.Args) != 1 {
-		t.Fatalf("scheduled ScrapeTick args=%v, want one TickInput", scrapeAction.Args)
+		t.Fatalf("scheduled ScrapeWorkflow args=%v, want one TickInput", scrapeAction.Args)
 	}
 	in, ok := scrapeAction.Args[0].(scraper.TickInput)
 	if !ok {
-		t.Fatalf("scheduled ScrapeTick arg type %T, want scraper.TickInput", scrapeAction.Args[0])
+		t.Fatalf("scheduled ScrapeWorkflow arg type %T, want scraper.TickInput", scrapeAction.Args[0])
 	}
 	if in.Force {
 		t.Error("scheduled scrape must not set force")
 	}
 	if len(notifyAction.Args) != 0 {
-		t.Errorf("scheduled NotifyTick args=%v, want none", notifyAction.Args)
+		t.Errorf("scheduled NotifyWorkflow args=%v, want none", notifyAction.Args)
 	}
 }
 

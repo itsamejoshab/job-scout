@@ -79,7 +79,7 @@ func TestActivities_ClaimNotifyBatchUsesMaxJobsThenPostAndFinish(t *testing.T) {
 		t.Fatalf("HA client timeout = %v, want 12s from HTTP_TIMEOUT_SECONDS", acts.Webhook.Client.Timeout)
 	}
 
-	batch, err := acts.ClaimNotifyBatch(ctx)
+	batch, err := acts.claim_notification_batch(ctx)
 	if err != nil {
 		t.Fatalf("ClaimNotifyBatch: %v", err)
 	}
@@ -94,7 +94,7 @@ func TestActivities_ClaimNotifyBatchUsesMaxJobsThenPostAndFinish(t *testing.T) {
 	}
 
 	msg := domain.BuildMessage(batch.Counts, []string{batch.Jobs[0].JobURL, batch.Jobs[1].JobURL})
-	if err := acts.NotifyWebhook(ctx, msg); err != nil {
+	if err := acts.send_notification(ctx, msg); err != nil {
 		t.Fatalf("NotifyWebhook: %v", err)
 	}
 	if hits != 1 || gotMethod != http.MethodPost || gotPath != "/api/webhook" || gotCT != "application/json" {
@@ -112,7 +112,7 @@ func TestActivities_ClaimNotifyBatchUsesMaxJobsThenPostAndFinish(t *testing.T) {
 	}
 
 	ids := []int64{batch.Jobs[0].ID, batch.Jobs[1].ID}
-	if err := acts.FinishNotifyBatch(ctx, FinishNotifyBatchInput{IDs: ids, State: domain.StateNotified}); err != nil {
+	if err := acts.finish_notification_batch(ctx, FinishNotifyBatchInput{IDs: ids, State: domain.StateNotified}); err != nil {
 		t.Fatalf("FinishNotifyBatch: %v", err)
 	}
 	var notified, eligible int

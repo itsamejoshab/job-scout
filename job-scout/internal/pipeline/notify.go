@@ -21,7 +21,7 @@ func ManualNotifyWorkflowID(now time.Time) string {
 	return manualNotifyIDPrefix + now.UTC().Format(time.RFC3339Nano)
 }
 
-// NotifySnapshot is the DB view NotifyTick needs to filter pending jobs.
+// NotifySnapshot is the DB view NotifyWorkflow needs to filter pending jobs.
 type NotifySnapshot struct {
 	Pending []domain.Job
 	All     []domain.Job

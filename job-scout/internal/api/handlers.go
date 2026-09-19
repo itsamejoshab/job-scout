@@ -76,7 +76,7 @@ func (h *Handler) Run(w http.ResponseWriter, r *http.Request) {
 		ID:        pipeline.ManualScrapeWorkflowID(time.Now()),
 		TaskQueue: config.TaskQueue,
 	}
-	we, err := h.Temporal.ExecuteWorkflow(r.Context(), opts, pipeline.ScrapeTick, in)
+	we, err := h.Temporal.ExecuteWorkflow(r.Context(), opts, pipeline.ScrapeWorkflow, in)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -89,13 +89,13 @@ func (h *Handler) Run(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// POST /api/v0/notify -> start NotifyTick asynchronously.
+// POST /api/v0/notify -> start NotifyWorkflow asynchronously.
 func (h *Handler) Notify(w http.ResponseWriter, r *http.Request) {
 	opts := client.StartWorkflowOptions{
 		ID:        pipeline.ManualNotifyWorkflowID(time.Now()),
 		TaskQueue: config.TaskQueue,
 	}
-	we, err := h.Temporal.ExecuteWorkflow(r.Context(), opts, pipeline.NotifyTick)
+	we, err := h.Temporal.ExecuteWorkflow(r.Context(), opts, pipeline.NotifyWorkflow)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return

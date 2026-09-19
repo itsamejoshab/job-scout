@@ -15,6 +15,7 @@ import (
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/converter"
 	"go.temporal.io/sdk/testsuite"
+	"go.temporal.io/sdk/workflow"
 )
 
 func TestRegister_ScrapeAndNotifyAreProductionPath(t *testing.T) {
@@ -24,41 +25,41 @@ func TestRegister_ScrapeAndNotifyAreProductionPath(t *testing.T) {
 	if rec.hasWorkflow("MainWorkflow") {
 		t.Errorf("MainWorkflow must not be the production path; registered %v", rec.workflows)
 	}
-	if !rec.hasWorkflow("ScrapeTick") {
-		t.Errorf("worker must register ScrapeTick; registered %v", rec.workflows)
+	if !rec.hasWorkflow("ScrapeWorkflow") {
+		t.Errorf("worker must register ScrapeWorkflow; registered %v", rec.workflows)
 	}
-	if !rec.hasWorkflow("NotifyTick") {
-		t.Errorf("worker must register NotifyTick; registered %v", rec.workflows)
+	if !rec.hasWorkflow("NotifyWorkflow") {
+		t.Errorf("worker must register NotifyWorkflow; registered %v", rec.workflows)
 	}
-	if !rec.hasActivity("Scrape") {
-		t.Errorf("worker must register Scrape activity; registered %v", rec.activities)
+	if !rec.hasActivity(ActivityScrapeJobs) {
+		t.Errorf("worker must register %s; registered %v", ActivityScrapeJobs, rec.activities)
 	}
-	if !rec.hasActivity("LoadNotifySnapshot") {
-		t.Errorf("worker must register LoadNotifySnapshot; registered %v", rec.activities)
+	if !rec.hasActivity(ActivityLoadJobsForFiltering) {
+		t.Errorf("worker must register %s; registered %v", ActivityLoadJobsForFiltering, rec.activities)
 	}
-	if !rec.hasActivity("FetchJobDescription") {
-		t.Errorf("worker must register FetchJobDescription (LinkedIn detail GET); registered %v", rec.activities)
+	if !rec.hasActivity(ActivityGetJobDescription) {
+		t.Errorf("worker must register %s; registered %v", ActivityGetJobDescription, rec.activities)
 	}
-	if !rec.hasActivity("ApplyJobDecision") {
-		t.Errorf("worker must register ApplyJobDecision; registered %v", rec.activities)
+	if !rec.hasActivity(ActivitySaveJobFilterResult) {
+		t.Errorf("worker must register %s; registered %v", ActivitySaveJobFilterResult, rec.activities)
 	}
-	if !rec.hasActivity("ClaimNotifyBatch") {
-		t.Errorf("worker must register ClaimNotifyBatch; registered %v", rec.activities)
+	if !rec.hasActivity(ActivityClaimNotificationBatch) {
+		t.Errorf("worker must register %s; registered %v", ActivityClaimNotificationBatch, rec.activities)
 	}
-	if !rec.hasActivity("NotifyWebhook") {
-		t.Errorf("worker must register NotifyWebhook; registered %v", rec.activities)
+	if !rec.hasActivity(ActivitySendNotification) {
+		t.Errorf("worker must register %s; registered %v", ActivitySendNotification, rec.activities)
 	}
-	if !rec.hasActivity("FinishNotifyBatch") {
-		t.Errorf("worker must register FinishNotifyBatch; registered %v", rec.activities)
+	if !rec.hasActivity(ActivityFinishNotificationBatch) {
+		t.Errorf("worker must register %s; registered %v", ActivityFinishNotificationBatch, rec.activities)
 	}
 
 	for _, stub := range []string{
-		"SmartFilter",
-		"DuplicateRemover",
-		"BasicFilter",
-		"Detailer",
-		"AdvancedFilter",
-		"Notifier",
+		"smart_filter",
+		"duplicate_remover",
+		"basic_filter",
+		"job_detailer",
+		"advanced_filter",
+		"notifier",
 	} {
 		if rec.hasActivity(stub) {
 			t.Errorf("stub pipeline stage %s must not be the production path; registered %v", stub, rec.activities)
@@ -69,7 +70,7 @@ func TestRegister_ScrapeAndNotifyAreProductionPath(t *testing.T) {
 func TestScrapeTick_StoresJobsWithoutSmartFilter(t *testing.T) {
 	env, started, probe := newWorkflowEnv()
 
-	env.ExecuteWorkflow(ScrapeTick, scraper.TickInput{JobSource: "LINKEDIN"})
+	env.ExecuteWorkflow(ScrapeWorkflow, scraper.TickInput{JobSource: "LINKEDIN"})
 
 	if !env.IsWorkflowCompleted() {
 		t.Fatal("ScrapeTick must complete")
@@ -89,14 +90,14 @@ func TestScrapeTick_StoresJobsWithoutSmartFilter(t *testing.T) {
 	if probe.scrape != 1 {
 		t.Errorf("ScrapeTick must fetch and store jobs once, scrape calls=%d", probe.scrape)
 	}
-	assertActivityNames(t, *started, "Scrape")
+	assertActivityNames(t, *started, ActivityScrapeJobs)
 }
 
 func TestScrapeTick_LinkedInSearchActivityRunsOnce(t *testing.T) {
 	env, started, probe := newWorkflowEnv()
 	probe.scrapeErr = errors.New("linkedin search failed")
 
-	env.ExecuteWorkflow(ScrapeTick, scraper.TickInput{JobSource: "LINKEDIN"})
+	env.ExecuteWorkflow(ScrapeWorkflow, scraper.TickInput{JobSource: "LINKEDIN"})
 
 	if !env.IsWorkflowCompleted() {
 		t.Fatal("ScrapeTick must complete after a single failed LinkedIn GET")
@@ -115,21 +116,22 @@ func TestScrapeTick_LinkedInSearchActivityRunsOnce(t *testing.T) {
 	if probe.scrape != 1 {
 		t.Errorf("LinkedIn search GET activity retry policy MaximumAttempts must be 1, got %d attempts", probe.scrape)
 	}
-	assertActivityNames(t, *started, "Scrape")
+	assertActivityNames(t, *started, ActivityScrapeJobs)
 }
 
 func TestScrapeTick_ScrapeActivityAllowsFortyFiveMinutes(t *testing.T) {
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestWorkflowEnvironment()
-	env.RegisterActivity(&activityProbe{})
+	probe := &activityProbe{}
+	registerProbeActivities(env, probe)
 	var timeout time.Duration
 	env.SetOnActivityStartedListener(func(info *activity.Info, _ context.Context, _ converter.EncodedValues) {
-		if info.ActivityType.Name == "Scrape" {
+		if info.ActivityType.Name == ActivityScrapeJobs {
 			timeout = info.StartToCloseTimeout
 		}
 	})
 
-	env.ExecuteWorkflow(ScrapeTick, scraper.TickInput{JobSource: "LINKEDIN"})
+	env.ExecuteWorkflow(ScrapeWorkflow, scraper.TickInput{JobSource: "LINKEDIN"})
 
 	if err := env.GetWorkflowError(); err != nil {
 		t.Fatalf("ScrapeTick error: %v", err)
@@ -142,7 +144,7 @@ func TestScrapeTick_ScrapeActivityAllowsFortyFiveMinutes(t *testing.T) {
 func TestNotifyTick_CompletesWithoutLinkedInSearchOrWebhook(t *testing.T) {
 	env, started, probe := newWorkflowEnv()
 
-	env.ExecuteWorkflow(NotifyTick)
+	env.ExecuteWorkflow(NotifyWorkflow)
 
 	if !env.IsWorkflowCompleted() {
 		t.Fatal("NotifyTick must complete")
@@ -159,7 +161,7 @@ func TestNotifyTick_CompletesWithoutLinkedInSearchOrWebhook(t *testing.T) {
 	if probe.detailGet != 0 {
 		t.Errorf("empty pending set must not GET LinkedIn job detail, detail calls=%d", probe.detailGet)
 	}
-	assertActivityNames(t, *started, "LoadNotifySnapshot", "ClaimNotifyBatch")
+	assertActivityNames(t, *started, ActivityLoadJobsForFiltering, ActivityClaimNotificationBatch)
 }
 
 func TestNotifyTick_DetailGETRunsOnce(t *testing.T) {
@@ -175,7 +177,7 @@ func TestNotifyTick_DetailGETRunsOnce(t *testing.T) {
 	}
 	probe.detailErr = errors.New("linkedin detail failed")
 
-	env.ExecuteWorkflow(NotifyTick)
+	env.ExecuteWorkflow(NotifyWorkflow)
 
 	if !env.IsWorkflowCompleted() {
 		t.Fatal("NotifyTick must complete after a single failed LinkedIn detail GET")
@@ -198,7 +200,7 @@ func TestNotifyTick_DetailGETRunsOnce(t *testing.T) {
 	if len(probe.applied) != 1 || probe.applied[0].Decision.State != "pending" || probe.applied[0].Decision.DetailAttempts != 1 {
 		t.Errorf("first detail failure must leave job pending with detail_attempts=1, got %+v", probe.applied)
 	}
-	assertActivityContains(t, *started, "LoadNotifySnapshot", "FetchJobDescription", "ApplyJobDecision")
+	assertActivityContains(t, *started, ActivityLoadJobsForFiltering, ActivityGetJobDescription, ActivitySaveJobFilterResult)
 }
 
 func TestNotifyTick_DetailGETOncePerJobThenEligible(t *testing.T) {
@@ -217,7 +219,7 @@ func TestNotifyTick_DetailGETOncePerJobThenEligible(t *testing.T) {
 		},
 	}
 
-	env.ExecuteWorkflow(NotifyTick)
+	env.ExecuteWorkflow(NotifyWorkflow)
 
 	if !env.IsWorkflowCompleted() {
 		t.Fatal("NotifyTick must complete")
@@ -277,7 +279,7 @@ func TestNotifyTick_ClaimsBatchPostsOnceAndMarksNotified(t *testing.T) {
 		},
 	}
 
-	env.ExecuteWorkflow(NotifyTick)
+	env.ExecuteWorkflow(NotifyWorkflow)
 
 	if !env.IsWorkflowCompleted() {
 		t.Fatal("NotifyTick must complete")
@@ -315,7 +317,7 @@ func TestNotifyTick_ClaimsBatchPostsOnceAndMarksNotified(t *testing.T) {
 			t.Errorf("finish IDs = %v, want claimed [8 9]", probe.finished[0].IDs)
 		}
 	}
-	assertActivityNames(t, *started, "LoadNotifySnapshot", "ApplyJobDecision", "ClaimNotifyBatch", "NotifyWebhook", "FinishNotifyBatch")
+	assertActivityNames(t, *started, ActivityLoadJobsForFiltering, ActivitySaveJobFilterResult, ActivityClaimNotificationBatch, ActivitySendNotification, ActivityFinishNotificationBatch)
 }
 
 func TestNotifyTick_EmptyClaimDoesNotPost(t *testing.T) {
@@ -331,7 +333,7 @@ func TestNotifyTick_EmptyClaimDoesNotPost(t *testing.T) {
 		},
 	}
 
-	env.ExecuteWorkflow(NotifyTick)
+	env.ExecuteWorkflow(NotifyWorkflow)
 
 	if !env.IsWorkflowCompleted() {
 		t.Fatal("NotifyTick must complete")
@@ -348,7 +350,7 @@ func TestNotifyTick_EmptyClaimDoesNotPost(t *testing.T) {
 	if probe.finish != 0 {
 		t.Errorf("zero claimed rows must not finish a batch, finish calls=%d", probe.finish)
 	}
-	assertActivityNames(t, *started, "LoadNotifySnapshot", "ApplyJobDecision", "ClaimNotifyBatch")
+	assertActivityNames(t, *started, ActivityLoadJobsForFiltering, ActivitySaveJobFilterResult, ActivityClaimNotificationBatch)
 }
 
 func TestNotifyTick_WebhookFailureFinishesBatchThenFailsWorkflow(t *testing.T) {
@@ -369,7 +371,7 @@ func TestNotifyTick_WebhookFailureFinishesBatchThenFailsWorkflow(t *testing.T) {
 	}
 	probe.webhookErr = errors.New("webhook HTTP 500")
 
-	env.ExecuteWorkflow(NotifyTick)
+	env.ExecuteWorkflow(NotifyWorkflow)
 
 	if !env.IsWorkflowCompleted() {
 		t.Fatal("NotifyTick must complete after a single failed webhook POST")
@@ -401,7 +403,7 @@ func TestNotifyTick_PassersBecomeEligibleWithoutWebhook(t *testing.T) {
 		},
 	}
 
-	env.ExecuteWorkflow(NotifyTick)
+	env.ExecuteWorkflow(NotifyWorkflow)
 
 	if !env.IsWorkflowCompleted() {
 		t.Fatal("NotifyTick must complete")
@@ -424,7 +426,7 @@ func TestScrapeTick_PassesForceAndCompletesWhenSkipped(t *testing.T) {
 	env, started, probe := newWorkflowEnv()
 	probe.result = scraper.Result{Status: "skipped"}
 
-	env.ExecuteWorkflow(ScrapeTick, scraper.TickInput{Force: true})
+	env.ExecuteWorkflow(ScrapeWorkflow, scraper.TickInput{Force: true})
 
 	if !env.IsWorkflowCompleted() {
 		t.Fatal("ScrapeTick must complete when no provider is due")
@@ -445,19 +447,29 @@ func TestScrapeTick_PassesForceAndCompletesWhenSkipped(t *testing.T) {
 	if probe.scrape != 1 {
 		t.Errorf("Scrape activity MaximumAttempts must stay 1, got %d", probe.scrape)
 	}
-	assertActivityNames(t, *started, "Scrape")
+	assertActivityNames(t, *started, ActivityScrapeJobs)
 }
 
 func newWorkflowEnv() (*testsuite.TestWorkflowEnvironment, *[]string, *activityProbe) {
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestWorkflowEnvironment()
 	probe := &activityProbe{}
-	env.RegisterActivity(probe)
+	registerProbeActivities(env, probe)
 	var started []string
 	env.SetOnActivityStartedListener(func(info *activity.Info, _ context.Context, _ converter.EncodedValues) {
 		started = append(started, info.ActivityType.Name)
 	})
 	return env, &started, probe
+}
+
+func registerProbeActivities(env *testsuite.TestWorkflowEnvironment, probe *activityProbe) {
+	env.RegisterActivityWithOptions(probe.Scrape, activity.RegisterOptions{Name: ActivityScrapeJobs})
+	env.RegisterActivityWithOptions(probe.LoadNotifySnapshot, activity.RegisterOptions{Name: ActivityLoadJobsForFiltering})
+	env.RegisterActivityWithOptions(probe.FetchJobDescription, activity.RegisterOptions{Name: ActivityGetJobDescription})
+	env.RegisterActivityWithOptions(probe.ApplyJobDecision, activity.RegisterOptions{Name: ActivitySaveJobFilterResult})
+	env.RegisterActivityWithOptions(probe.ClaimNotifyBatch, activity.RegisterOptions{Name: ActivityClaimNotificationBatch})
+	env.RegisterActivityWithOptions(probe.NotifyWebhook, activity.RegisterOptions{Name: ActivitySendNotification})
+	env.RegisterActivityWithOptions(probe.FinishNotifyBatch, activity.RegisterOptions{Name: ActivityFinishNotificationBatch})
 }
 
 func assertActivityNames(t *testing.T, got []string, want ...string) {
@@ -580,19 +592,12 @@ type registryRecorder struct {
 	activities []string
 }
 
-func (r *registryRecorder) RegisterWorkflow(w interface{}) {
-	r.workflows = append(r.workflows, funcBaseName(w))
+func (r *registryRecorder) RegisterWorkflowWithOptions(_ interface{}, options workflow.RegisterOptions) {
+	r.workflows = append(r.workflows, options.Name)
 }
 
-func (r *registryRecorder) RegisterActivity(a interface{}) {
-	t := reflect.TypeOf(a)
-	if t != nil && t.Kind() == reflect.Pointer && t.Elem().Kind() == reflect.Struct {
-		for i := 0; i < t.NumMethod(); i++ {
-			r.activities = append(r.activities, t.Method(i).Name)
-		}
-		return
-	}
-	r.activities = append(r.activities, funcBaseName(a))
+func (r *registryRecorder) RegisterActivityWithOptions(_ interface{}, options activity.RegisterOptions) {
+	r.activities = append(r.activities, options.Name)
 }
 
 func (r *registryRecorder) hasWorkflow(name string) bool {
