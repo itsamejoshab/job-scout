@@ -15,9 +15,9 @@ Inspiration:
 
 **Start here:** [QUICKSTART.md](QUICKSTART.md) — clone the repo, set `.env`, and start the stack on Windows, macOS, or a Raspberry Pi.
 
-## Screenshots
+----
 
-Add PNG files in `docs/screenshots/` with these names. The slots below show those files when they exist.
+## Screenshots
 
 ![Dashboard](docs/screenshots/dashboard.png)
 
@@ -183,16 +183,6 @@ It accepts `limit`, `offset`, `as_of`, `state`, `job_source`, `q`, `date_from`, 
 ## Monitoring
 
 - Temporal UI: http://localhost:8082
-
-## Ideas
-
-- Custom LLM resume, customized for each job
-- LLM filtering step (not everything can be simple rules, though simple rules are _fast_)
-
-## Inspiration
-
-- [JobScout by Krishna](https://github.com/krishnavalliappan/JobScout)
-- [JobScout.ai by abhinav-m22](https://github.com/abhinav-m22/JobScout.ai) | [App](https://jobscout-ai.vercel.app/)
 
 ## Contributing
 
