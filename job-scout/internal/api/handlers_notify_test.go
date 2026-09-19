@@ -77,7 +77,7 @@ func assertManualNotifyStart(t *testing.T, start workflowStart, responseID strin
 	if ts.Before(before) || ts.After(after) {
 		t.Errorf("manual notify workflow ID timestamp %s is outside request window [%s, %s]", ts, before, after)
 	}
-	if name := workflowFuncName(start.workflow); name != "NotifyTick" {
-		t.Errorf("POST /api/v0/notify must start NotifyTick asynchronously, got %s (%T)", name, start.workflow)
+	if name := workflowFuncName(start.workflow); name != "NotifyWorkflow" {
+		t.Errorf("POST /api/v0/notify must start NotifyWorkflow asynchronously, got %s (%T)", name, start.workflow)
 	}
 }

@@ -28,7 +28,7 @@ type Result struct {
 	Error          string `json:"error,omitempty"`
 }
 
-// TickInput is the scrape-tick request from ScrapeTick / POST /run.
+// TickInput is the scrape request from ScrapeWorkflow / POST /run.
 type TickInput struct {
 	Force     bool   `json:"force"`
 	JobSource string `json:"job_source,omitempty"`

@@ -13,6 +13,14 @@ const (
 	// ScheduledScrapeWorkflowID is the reserved ID for the scrape schedule.
 	ScheduledScrapeWorkflowID = "jobscout-scrape-scheduled"
 	manualScrapeIDPrefix      = "jobscout-scrape-manual-"
+
+	ActivityScrapeJobs              = "scrape_jobs"
+	ActivityLoadJobsForFiltering    = "load_jobs_for_filtering"
+	ActivityGetJobDescription       = "get_job_description"
+	ActivitySaveJobFilterResult     = "save_job_filter_result"
+	ActivityClaimNotificationBatch  = "claim_notification_batch"
+	ActivitySendNotification        = "send_notification"
+	ActivityFinishNotificationBatch = "finish_notification_batch"
 )
 
 // ManualScrapeWorkflowID returns a unique operator scrape ID that cannot collide
@@ -21,11 +29,11 @@ func ManualScrapeWorkflowID(now time.Time) string {
 	return manualScrapeIDPrefix + now.UTC().Format(time.RFC3339Nano)
 }
 
-// ScrapeTick fetches LinkedIn search results and stores jobs. It does not filter
-// or notify.
-func ScrapeTick(ctx workflow.Context, input scraper.TickInput) (scraper.Result, error) {
+// ScrapeWorkflow fetches provider search results and stores distinct jobs. It
+// does not filter or notify.
+func ScrapeWorkflow(ctx workflow.Context, input scraper.TickInput) (scraper.Result, error) {
 	logger := workflow.GetLogger(ctx)
-	logger.Info("ScrapeTick starting", "force", input.Force, "jobSource", input.JobSource)
+	logger.Info("ScrapeWorkflow starting", "force", input.Force, "jobSource", input.JobSource)
 
 	ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
 		StartToCloseTimeout: 45 * time.Minute,
@@ -34,21 +42,21 @@ func ScrapeTick(ctx workflow.Context, input scraper.TickInput) (scraper.Result, 
 		},
 	})
 
-	var a *Activities
 	var result scraper.Result
-	if err := workflow.ExecuteActivity(ctx, a.Scrape, input).Get(ctx, &result); err != nil {
+	if err := workflow.ExecuteActivity(ctx, ActivityScrapeJobs, input).Get(ctx, &result); err != nil {
 		logger.Error("Scrape activity failed", "err", err)
 		return scraper.Result{Status: "error", JobSource: input.JobSource, Error: err.Error()}, nil
 	}
 
-	logger.Info("ScrapeTick complete", "result", result)
+	logger.Info("ScrapeWorkflow complete", "result", result)
 	return result, nil
 }
 
-// NotifyTick filters pending jobs to eligible, claims a batch, and POSTs once.
-func NotifyTick(ctx workflow.Context) error {
+// NotifyWorkflow filters pending jobs to eligible, claims a batch, and POSTs
+// one notification.
+func NotifyWorkflow(ctx workflow.Context) error {
 	logger := workflow.GetLogger(ctx)
-	logger.Info("NotifyTick starting")
+	logger.Info("NotifyWorkflow starting")
 
 	dbCtx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
 		StartToCloseTimeout: 30 * time.Second,
@@ -63,9 +71,8 @@ func NotifyTick(ctx workflow.Context) error {
 		},
 	})
 
-	var a *Activities
 	var snap NotifySnapshot
-	if err := workflow.ExecuteActivity(dbCtx, a.LoadNotifySnapshot).Get(ctx, &snap); err != nil {
+	if err := workflow.ExecuteActivity(dbCtx, ActivityLoadJobsForFiltering).Get(ctx, &snap); err != nil {
 		return err
 	}
 
@@ -73,7 +80,7 @@ func NotifyTick(ctx workflow.Context) error {
 		d := domain.FilterPending(job, snap.All, snap.Lists)
 		if d.NeedFetch {
 			var desc string
-			err := workflow.ExecuteActivity(httpCtx, a.FetchJobDescription, job.JobURL).Get(ctx, &desc)
+			err := workflow.ExecuteActivity(httpCtx, ActivityGetJobDescription, job.JobURL).Get(ctx, &desc)
 			if err != nil {
 				d = domain.OnDetailFetchFailure(job)
 			} else {
@@ -81,7 +88,7 @@ func NotifyTick(ctx workflow.Context) error {
 				d = domain.FilterAfterDescription(job, snap.Lists)
 			}
 		}
-		if err := workflow.ExecuteActivity(dbCtx, a.ApplyJobDecision, ApplyJobDecisionInput{
+		if err := workflow.ExecuteActivity(dbCtx, ActivitySaveJobFilterResult, ApplyJobDecisionInput{
 			JobID:    job.ID,
 			Decision: d,
 		}).Get(ctx, nil); err != nil {
@@ -90,7 +97,7 @@ func NotifyTick(ctx workflow.Context) error {
 	}
 
 	var batch ClaimBatch
-	if err := workflow.ExecuteActivity(dbCtx, a.ClaimNotifyBatch).Get(ctx, &batch); err != nil {
+	if err := workflow.ExecuteActivity(dbCtx, ActivityClaimNotificationBatch).Get(ctx, &batch); err != nil {
 		return err
 	}
 	if len(batch.Jobs) == 0 {
@@ -105,12 +112,12 @@ func NotifyTick(ctx workflow.Context) error {
 		ids[i] = j.ID
 	}
 	msg := domain.BuildMessage(batch.Counts, urls)
-	postErr := workflow.ExecuteActivity(httpCtx, a.NotifyWebhook, msg).Get(ctx, nil)
+	postErr := workflow.ExecuteActivity(httpCtx, ActivitySendNotification, msg).Get(ctx, nil)
 	state := domain.StateNotified
 	if postErr != nil {
 		state = domain.StateEligible
 	}
-	if err := workflow.ExecuteActivity(dbCtx, a.FinishNotifyBatch, FinishNotifyBatchInput{
+	if err := workflow.ExecuteActivity(dbCtx, ActivityFinishNotificationBatch, FinishNotifyBatchInput{
 		IDs:   ids,
 		State: state,
 	}).Get(ctx, nil); err != nil {
@@ -120,6 +127,6 @@ func NotifyTick(ctx workflow.Context) error {
 		return postErr
 	}
 
-	logger.Info("NotifyTick complete")
+	logger.Info("NotifyWorkflow complete")
 	return nil
 }

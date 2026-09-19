@@ -19,23 +19,23 @@ type Activities struct {
 	NotifyMaxJobs int
 }
 
-// Scrape fetches due (or forced) enabled providers and persists jobs.
-func (a *Activities) Scrape(ctx context.Context, input scraper.TickInput) (scraper.Result, error) {
+// scrape_jobs fetches due (or forced) enabled providers and persists jobs.
+func (a *Activities) scrape_jobs(ctx context.Context, input scraper.TickInput) (scraper.Result, error) {
 	return a.Scraper.RunTick(ctx, input)
 }
 
-// LoadNotifySnapshot reads live filter lists and all jobs.
-func (a *Activities) LoadNotifySnapshot(ctx context.Context) (NotifySnapshot, error) {
+// load_jobs_for_filtering reads live filter lists and all jobs.
+func (a *Activities) load_jobs_for_filtering(ctx context.Context) (NotifySnapshot, error) {
 	return LoadNotifySnapshot(ctx, a.DB)
 }
 
-// FetchJobDescription GETs LinkedIn job-detail HTML once.
-func (a *Activities) FetchJobDescription(ctx context.Context, jobURL string) (string, error) {
+// get_job_description GETs LinkedIn job-detail HTML once.
+func (a *Activities) get_job_description(ctx context.Context, jobURL string) (string, error) {
 	return a.Scraper.FetchJobDescription(ctx, jobURL)
 }
 
-// ApplyJobDecision persists one filter decision. It does not claim or notify.
-func (a *Activities) ApplyJobDecision(ctx context.Context, in ApplyJobDecisionInput) error {
+// save_job_filter_result persists one filter decision. It does not claim or notify.
+func (a *Activities) save_job_filter_result(ctx context.Context, in ApplyJobDecisionInput) error {
 	var reason *string
 	if in.Decision.RejectReason != "" {
 		r := in.Decision.RejectReason
@@ -67,8 +67,8 @@ type FinishNotifyBatchInput struct {
 	State string
 }
 
-// ClaimNotifyBatch claims up to NOTIFY_MAX_JOBS oldest eligible jobs.
-func (a *Activities) ClaimNotifyBatch(ctx context.Context) (ClaimBatch, error) {
+// claim_notification_batch claims up to NOTIFY_MAX_JOBS oldest eligible jobs.
+func (a *Activities) claim_notification_batch(ctx context.Context) (ClaimBatch, error) {
 	limit := a.NotifyMaxJobs
 	if limit <= 0 {
 		limit = 25
@@ -102,16 +102,16 @@ func (a *Activities) ClaimNotifyBatch(ctx context.Context) (ClaimBatch, error) {
 	return out, nil
 }
 
-// NotifyWebhook POSTs the lead message once. MaximumAttempts must be 1.
-func (a *Activities) NotifyWebhook(ctx context.Context, message string) error {
+// send_notification POSTs the lead message once. MaximumAttempts must be 1.
+func (a *Activities) send_notification(ctx context.Context, message string) error {
 	if a.Webhook == nil {
 		return fmt.Errorf("webhook client is not configured")
 	}
 	return a.Webhook.PostMessage(ctx, message)
 }
 
-// FinishNotifyBatch writes notified after HTTP 200, or eligible after failure.
-func (a *Activities) FinishNotifyBatch(ctx context.Context, in FinishNotifyBatchInput) error {
+// finish_notification_batch writes notified after HTTP 200, or eligible after failure.
+func (a *Activities) finish_notification_batch(ctx context.Context, in FinishNotifyBatchInput) error {
 	return db.SetJobsState(ctx, a.DB, in.IDs, in.State)
 }
 

@@ -69,7 +69,7 @@ func scrapeSchedule(cfg config.Config) client.ScheduleOptions {
 		},
 		Action: &client.ScheduleWorkflowAction{
 			ID:        ScheduledScrapeWorkflowID,
-			Workflow:  ScrapeTick,
+			Workflow:  ScrapeWorkflow,
 			Args:      []interface{}{scraper.TickInput{}},
 			TaskQueue: config.TaskQueue,
 		},
@@ -86,7 +86,7 @@ func notifySchedule(cfg config.Config) client.ScheduleOptions {
 		},
 		Action: &client.ScheduleWorkflowAction{
 			ID:        ScheduledNotifyWorkflowID,
-			Workflow:  NotifyTick,
+			Workflow:  NotifyWorkflow,
 			TaskQueue: config.TaskQueue,
 		},
 		Overlap: enumspb.SCHEDULE_OVERLAP_POLICY_SKIP,
