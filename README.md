@@ -4,6 +4,15 @@ Job Scout is a homegrown application that monitors job sites, filters job postin
 
 The architecture is more complex than a single script, but it separates scraping, filtering, notification, and durable workflow state. This structure also gives contributors clear places to add providers and pipeline stages.
 
+**Future Ideas**
+- A UI
+- Custom LLM resume, customized for each job
+- LLM filtering step (not everything can be simple rules, though simple rules are _fast_)
+
+Inspiration: 
+- [JobScout by Krishna](https://github.com/krishnavalliappan/JobScout)
+- [JobScout.ai by abhinav-m22 ](https://github.com/abhinav-m22/JobScout.ai) | [App](https://jobscout-ai.vercel.app/)
+
 **Start here:** [QUICKSTART.md](QUICKSTART.md) — clone the repo, set `.env`, and start the stack on Windows, macOS, or a Raspberry Pi.
 
 ## Screenshots
