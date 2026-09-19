@@ -289,15 +289,16 @@ func TestNotifyTick_ClaimsBatchPostsOnceAndMarksNotified(t *testing.T) {
 		t.Errorf("claimed batch must POST Home Assistant once, webhook calls=%d", probe.webhook)
 	}
 	wantMsg := "" +
-		"  5 job postings stored.\n" +
+		"Job alert summary:\n" +
+		"  5 job postings scraped\n" +
 		" -0 dont match companies or titles\n" +
 		" -0 dont match descriptions\n" +
 		" -0 are lying about remote\n" +
 		" -0 duplicate title/company\n" +
-		" -0 detail failed\n" +
-		"  pending 4, eligible 0, notifying now 2, notified 0.\n" +
+		" -0 lost due to unforseen circumstances\n" +
+		"\n" +
+		"2 new jobs to check out\n" +
 		"*************\n" +
-		"NEW LEAD: Some new jobs were posted:\n" +
 		older + "\n" +
 		newer
 	if probe.lastMessage != wantMsg {

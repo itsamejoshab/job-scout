@@ -8,16 +8,20 @@ import (
 func TestLoad_OperatorUIDefaultsAndEnvironment(t *testing.T) {
 	t.Setenv("TEMPORAL_UI_ADDRESS", "")
 	t.Setenv("REPORTING_TIMEZONE", "")
+	t.Setenv("PROJECT_NAME", "")
 
 	cfg := Load()
-	assertConfigStringField(t, cfg, "TemporalUIAddress", "http://localhost:8080")
+	assertConfigStringField(t, cfg, "TemporalUIAddress", "http://localhost:8082")
 	assertConfigStringField(t, cfg, "ReportingTimezone", "America/New_York")
+	assertConfigStringField(t, cfg, "ProjectName", "JobScout")
 
 	t.Setenv("TEMPORAL_UI_ADDRESS", "http://temporal.example:9090")
 	t.Setenv("REPORTING_TIMEZONE", "America/Chicago")
+	t.Setenv("PROJECT_NAME", "Custom Scout")
 	cfg = Load()
 	assertConfigStringField(t, cfg, "TemporalUIAddress", "http://temporal.example:9090")
 	assertConfigStringField(t, cfg, "ReportingTimezone", "America/Chicago")
+	assertConfigStringField(t, cfg, "ProjectName", "Custom Scout")
 }
 
 func assertConfigStringField(t *testing.T, cfg Config, name, want string) {

@@ -117,6 +117,9 @@ func TestJobs_ListFiltersOrdersPagesAndOmitsDescription(t *testing.T) {
 	if page.Items[0]["has_description"] != false {
 		t.Errorf("has_description=%v, want false", page.Items[0]["has_description"])
 	}
+	if page.Items[0]["description_preview"] != "" {
+		t.Errorf("description_preview=%v, want empty", page.Items[0]["description_preview"])
+	}
 
 	if _, err := pool.Exec(`
 		INSERT INTO jobs (job_source, title, company, location, date, job_url, created_at)
@@ -145,6 +148,134 @@ func TestJobs_ListFiltersOrdersPagesAndOmitsDescription(t *testing.T) {
 	}
 	if page.Items[0]["has_description"] != true {
 		t.Errorf("has_description=%v, want true", page.Items[0]["has_description"])
+	}
+	if page.Items[0]["description_preview"] != "Full private description" {
+		t.Errorf("description_preview=%v, want truncated preview text", page.Items[0]["description_preview"])
+	}
+	if _, exists := page.Items[0]["description"]; exists {
+		t.Error("list item must omit full description")
+	}
+}
+
+func TestJobs_LastHoursFilterIsRelativeToAsOf(t *testing.T) {
+	pool := pgtest.Open(t)
+	if err := db.Migrate(pool); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	for _, job := range []db.Job{
+		{
+			JobSource: db.SourceLinkedIn,
+			Title:     "Recent Engineer",
+			Company:   "Acme",
+			Location:  "Remote",
+			JobURL:    "https://example.test/jobs/recent",
+		},
+		{
+			JobSource: db.SourceLinkedIn,
+			Title:     "Older Engineer",
+			Company:   "Acme",
+			Location:  "Remote",
+			JobURL:    "https://example.test/jobs/older",
+		},
+	} {
+		if _, err := db.InsertJobIfNew(t.Context(), pool, job); err != nil {
+			t.Fatalf("insert: %v", err)
+		}
+	}
+	if _, err := pool.Exec(`
+		UPDATE jobs SET created_at = '2026-09-18 20:00:00+00', state = 'notified'
+		WHERE job_url = 'https://example.test/jobs/recent';
+		UPDATE jobs SET created_at = '2026-09-17 18:00:00+00', state = 'notified'
+		WHERE job_url = 'https://example.test/jobs/older';
+	`); err != nil {
+		t.Fatalf("prepare jobs: %v", err)
+	}
+
+	h := &Handler{DB: pool, Cfg: config.Config{ReportingTimezone: "America/New_York"}}
+	asOf := "2026-09-18T21:00:00Z"
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v0/jobs?state=notified&last_hours=24&as_of="+asOf,
+		nil,
+	)
+	rec := httptest.NewRecorder()
+	NewServer("", h).Handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v0/jobs status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var page struct {
+		Items []map[string]any `json:"items"`
+		Total int              `json:"total"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil {
+		t.Fatalf("jobs JSON: %v", err)
+	}
+	if page.Total != 1 || len(page.Items) != 1 {
+		t.Fatalf("page = %#v, want only the recent job", page)
+	}
+	if page.Items[0]["job_url"] != "https://example.test/jobs/recent" {
+		t.Errorf("job_url=%v, want recent job", page.Items[0]["job_url"])
+	}
+
+	req = httptest.NewRequest(
+		http.MethodGet,
+		"/api/v0/jobs?last_hours=24&date_from=2026-09-18",
+		nil,
+	)
+	rec = httptest.NewRecorder()
+	NewServer("", h).Handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("combined filters status=%d body=%s, want 400", rec.Code, rec.Body.String())
+	}
+}
+
+func TestJobs_DescriptionPreviewIsWhitespaceCollapsedAndTruncated(t *testing.T) {
+	pool := pgtest.Open(t)
+	if err := db.Migrate(pool); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	long := strings.Repeat("word ", 80)
+	description := "  Line one.\n\nLine   two.  " + long
+	if _, err := db.InsertJobIfNew(t.Context(), pool, db.Job{
+		JobSource:   db.SourceLinkedIn,
+		Title:       "Preview Engineer",
+		Company:     "Acme",
+		Description: &description,
+		Location:    "Remote",
+		JobURL:      "https://example.test/jobs/preview",
+	}); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+
+	h := &Handler{DB: pool, Cfg: config.Config{ReportingTimezone: "America/New_York"}}
+	req := httptest.NewRequest(http.MethodGet, "/api/v0/jobs", nil)
+	rec := httptest.NewRecorder()
+	NewServer("", h).Handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v0/jobs status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var page struct {
+		Items []map[string]any `json:"items"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil {
+		t.Fatalf("jobs JSON: %v", err)
+	}
+	if len(page.Items) != 1 {
+		t.Fatalf("items=%d, want 1", len(page.Items))
+	}
+	preview, _ := page.Items[0]["description_preview"].(string)
+	if strings.Contains(preview, "\n") || strings.Contains(preview, "  ") {
+		t.Errorf("preview must collapse whitespace, got %q", preview)
+	}
+	if !strings.HasPrefix(preview, "Line one. Line two.") {
+		t.Errorf("preview=%q, want collapsed leading text", preview)
+	}
+	runes := []rune(preview)
+	if len(runes) != 160 || !strings.HasSuffix(preview, "…") {
+		t.Errorf("preview length=%d suffix=%q, want 160 chars ending in ellipsis", len(runes), preview[len(preview)-1:])
+	}
+	if _, exists := page.Items[0]["description"]; exists {
+		t.Error("list item must omit full description")
 	}
 }
 

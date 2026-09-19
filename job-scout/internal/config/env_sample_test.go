@@ -21,7 +21,7 @@ func TestEnvSample_DocumentsEveryRuntimeKnob(t *testing.T) {
 		"POSTGRES_PORT":                "5432",
 		"POSTGRES_DB":                  "jobsearch",
 		"TEMPORAL_ADDRESS":             "temporal:7233",
-		"TEMPORAL_UI_ADDRESS":          "http://localhost:8080",
+		"TEMPORAL_UI_ADDRESS":          "http://localhost:8082",
 		"REPORTING_TIMEZONE":           "America/New_York",
 		"API_PORT":                     "8000",
 		"WEBHOOK_BASE":                 "https://hooks.example/api/webhook",

@@ -23,16 +23,15 @@ type MessageCounts struct {
 // urls are this claimed batch only, oldest first.
 func BuildMessage(counts MessageCounts, urls []string) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "  %d job postings stored.\n", counts.Total)
+	b.WriteString("Job alert summary:\n")
+	fmt.Fprintf(&b, "  %d job postings scraped\n", counts.Total)
 	fmt.Fprintf(&b, " -%d dont match companies or titles\n", counts.TitleCompany)
 	fmt.Fprintf(&b, " -%d dont match descriptions\n", counts.Description)
 	fmt.Fprintf(&b, " -%d are lying about remote\n", counts.RemoteLie)
 	fmt.Fprintf(&b, " -%d duplicate title/company\n", counts.Duplicate)
-	fmt.Fprintf(&b, " -%d detail failed\n", counts.DetailFailed)
-	fmt.Fprintf(&b, "  pending %d, eligible %d, notifying now %d, notified %d.\n",
-		counts.Pending, counts.Eligible, counts.Notifying, counts.Notified)
-	b.WriteString("*************\n")
-	b.WriteString("NEW LEAD: Some new jobs were posted:")
+	fmt.Fprintf(&b, " -%d lost due to unforseen circumstances\n", counts.DetailFailed)
+	fmt.Fprintf(&b, "\n%d new jobs to check out\n", len(urls))
+	b.WriteString("*************")
 	if len(urls) > 0 {
 		b.WriteByte('\n')
 		b.WriteString(strings.Join(urls, "\n"))
