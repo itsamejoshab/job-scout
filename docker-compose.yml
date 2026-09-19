@@ -45,6 +45,7 @@ services:
     env_file: [ ./job-scout/.env ]
     environment:
       TEMPORAL_ADDRESS: temporal:7233
+      TZ: America/New_York
     depends_on:
       temporal:
         condition: service_healthy
@@ -71,6 +72,7 @@ services:
     env_file: [ ./job-scout/.env ]
     environment:
       TEMPORAL_ADDRESS: temporal:7233
+      TZ: America/New_York
     depends_on:
       temporal:
         condition: service_healthy
@@ -99,6 +101,7 @@ services:
       - DYNAMIC_CONFIG_FILE_PATH=config/dynamicconfig/development.yaml
       - TEMPORAL_ADDRESS=temporal:7233
       - TEMPORAL_CLI_ADDRESS=temporal:7233
+      - TZ=America/New_York
     volumes:
       - ./config/dynamicconfig:/etc/temporal/config/dynamicconfig
     depends_on:
@@ -125,6 +128,7 @@ services:
     environment:
       - TEMPORAL_ADDRESS=temporal:7233
       - TEMPORAL_CORS_ORIGINS=http://localhost:3000
+      - TZ=America/New_York
     depends_on:
       - temporal
     ports: [ "8082:8080" ]

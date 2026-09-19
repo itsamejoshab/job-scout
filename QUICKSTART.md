@@ -324,7 +324,7 @@ make notify
 
 Confirm the downstream notify automation after the POST.
 
-Scheduled scrape (default every 10 minutes) and notify (default minute 9 of each 10 minutes, 07:30–21:00 in `REPORTING_TIMEZONE`) also run after the API starts.
+Scheduled scrape (default every 10 minutes) and notify (default 07:39, 17:39, and 20:39 in `America/New_York`) also run after the API starts.
 
 ## Operator API
 
