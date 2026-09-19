@@ -10,14 +10,15 @@ import (
 // JobData is the standardized job record produced by every provider, mirroring
 // the old Python JobData dataclass.
 type JobData struct {
-	Title       string
-	Company     string
-	Location    string
-	JobURL      string
-	Description string
-	Date        time.Time
-	Source      db.JobSource
-	IsRemote    bool
+	Title         string
+	Company       string
+	Location      string
+	JobURL        string
+	Description   string
+	Date          time.Time
+	Source        db.JobSource
+	IsRemote      bool
+	SearchContext string
 }
 
 // Provider is implemented by each job-site scraper.

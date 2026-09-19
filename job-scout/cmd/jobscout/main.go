@@ -21,6 +21,7 @@ func main() {
 	}
 
 	cfg := config.Load()
+	configureLogging(cfg.Debug)
 
 	switch mode {
 	case "api":
@@ -31,6 +32,16 @@ func main() {
 		slog.Error("unknown mode (expected 'api' or 'worker')", "mode", mode)
 		os.Exit(1)
 	}
+}
+
+func configureLogging(debug bool) {
+	level := slog.LevelInfo
+	if debug {
+		level = slog.LevelDebug
+	}
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+		Level: level,
+	})))
 }
 
 func runAPI(cfg config.Config) {

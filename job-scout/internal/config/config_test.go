@@ -5,6 +5,23 @@ import (
 	"testing"
 )
 
+func TestLoad_DebugFlag(t *testing.T) {
+	t.Setenv("DEBUG", "")
+	if Load().Debug {
+		t.Error("DEBUG must be off by default")
+	}
+
+	t.Setenv("DEBUG", "1")
+	if !Load().Debug {
+		t.Error("DEBUG=1 must enable debug logging")
+	}
+
+	t.Setenv("DEBUG", "true")
+	if Load().Debug {
+		t.Error("only DEBUG=1 must enable debug logging")
+	}
+}
+
 func TestLoad_OperatorUIDefaultsAndEnvironment(t *testing.T) {
 	t.Setenv("TEMPORAL_UI_ADDRESS", "")
 	t.Setenv("REPORTING_TIMEZONE", "")

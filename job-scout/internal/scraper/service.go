@@ -217,6 +217,9 @@ func (s *Service) scrapeSource(ctx context.Context, source db.JobSource) (Result
 	for round := 0; round < rounds; round++ {
 		for _, urlCfg := range scraperSettings.HardcodedURLs {
 			jobs, err := provider.ScrapeHardcodedURL(ctx, urlCfg)
+			searchContext := hardcodedSearchContext(urlCfg)
+			stampSearchContext(jobs, searchContext)
+			slog.Debug("search completed", "source", source, "round", round+1, "search_context", searchContext, "matches", len(jobs))
 			all = append(all, jobs...)
 			if err != nil {
 				slog.Error("scraping hardcoded url failed", "round", round+1, "err", err)
@@ -229,6 +232,9 @@ func (s *Service) scrapeSource(ctx context.Context, source db.JobSource) (Result
 
 		for _, query := range scraperSettings.SearchQueries {
 			jobs, err := provider.ScrapeJobs(ctx, query)
+			searchContext := querySearchContext(query)
+			stampSearchContext(jobs, searchContext)
+			slog.Debug("search completed", "source", source, "round", round+1, "search_context", searchContext, "matches", len(jobs))
 			all = append(all, jobs...)
 			if err != nil {
 				slog.Error("scraping query failed", "round", round+1, "query", query, "err", err)
@@ -284,14 +290,15 @@ func (s *Service) saveJobs(ctx context.Context, jobs []JobData) (int, error) {
 			desc = &d
 		}
 		inserted, err := db.InsertJobIfNew(ctx, s.db, db.Job{
-			JobSource:   j.Source,
-			Title:       j.Title,
-			Company:     j.Company,
-			Description: desc,
-			Location:    j.Location,
-			Date:        j.Date,
-			JobURL:      j.JobURL,
-			IsRemote:    j.IsRemote,
+			JobSource:     j.Source,
+			Title:         j.Title,
+			Company:       j.Company,
+			Description:   desc,
+			Location:      j.Location,
+			Date:          j.Date,
+			JobURL:        j.JobURL,
+			IsRemote:      j.IsRemote,
+			SearchContext: j.SearchContext,
 		})
 		if err != nil {
 			slog.Error("saving job failed", "title", j.Title, "err", err)
@@ -302,6 +309,33 @@ func (s *Service) saveJobs(ctx context.Context, jobs []JobData) (int, error) {
 		}
 	}
 	return saved, nil
+}
+
+func stampSearchContext(jobs []JobData, searchContext string) {
+	for i := range jobs {
+		jobs[i].SearchContext = searchContext
+	}
+}
+
+func querySearchContext(query map[string]string) string {
+	return fmt.Sprintf(
+		`query keywords=%q location=%q f_WT=%q`,
+		query["keywords"],
+		query["location"],
+		query["f_WT"],
+	)
+}
+
+func hardcodedSearchContext(cfg map[string]any) string {
+	description, _ := cfg["description"].(string)
+	searchURL, _ := cfg["url"].(string)
+	remote, _ := cfg["is_remote"].(bool)
+	return fmt.Sprintf(
+		`hardcoded description=%q is_remote=%t url=%q`,
+		description,
+		remote,
+		searchURL,
+	)
 }
 
 // FetchJobDescription GETs LinkedIn job-detail HTML using the configured timeout.
