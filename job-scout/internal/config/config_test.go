@@ -11,7 +11,7 @@ func TestLoad_OperatorUIDefaultsAndEnvironment(t *testing.T) {
 	t.Setenv("PROJECT_NAME", "")
 
 	cfg := Load()
-	assertConfigStringField(t, cfg, "TemporalUIAddress", "http://localhost:8080")
+	assertConfigStringField(t, cfg, "TemporalUIAddress", "http://localhost:8082")
 	assertConfigStringField(t, cfg, "ReportingTimezone", "America/New_York")
 	assertConfigStringField(t, cfg, "ProjectName", "JobScout")
 

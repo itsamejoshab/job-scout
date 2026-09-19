@@ -131,7 +131,7 @@ func Load() Config {
 		PostgresPort:              getenv("POSTGRES_PORT", "5432"),
 		PostgresDB:                getenv("POSTGRES_DB", "jobdb"),
 		TemporalAddress:           getenv("TEMPORAL_ADDRESS", "temporal:7233"),
-		TemporalUIAddress:         getenv("TEMPORAL_UI_ADDRESS", "http://localhost:8080"),
+		TemporalUIAddress:         getenv("TEMPORAL_UI_ADDRESS", "http://localhost:8082"),
 		ReportingTimezone:         getenv("REPORTING_TIMEZONE", "America/New_York"),
 		APIPort:                   getenv("API_PORT", "8000"),
 		ProjectName:               getenv("PROJECT_NAME", "JobScout"),
