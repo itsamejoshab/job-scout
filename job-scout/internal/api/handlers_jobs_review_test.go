@@ -70,6 +70,60 @@ func TestReviewJob_ReadyOnlyAndPreservesNotifiedAt(t *testing.T) {
 	}
 }
 
+func TestReviewJob_ReturnsReviewedAndRejectedJobsToReview(t *testing.T) {
+	pool := pgtest.Open(t)
+	if err := db.Migrate(pool); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	insert := func(url, state string, reason any) int64 {
+		t.Helper()
+		var id int64
+		if err := pool.QueryRow(`
+			INSERT INTO jobs (job_source, title, company, location, job_url, state, reject_reason)
+			VALUES ('LINKEDIN', 'Engineer', 'Acme', 'Remote', $1, $2, $3)
+			RETURNING id
+		`, url, state, reason).Scan(&id); err != nil {
+			t.Fatalf("insert %s: %v", state, err)
+		}
+		return id
+	}
+	handler := NewServer("", &Handler{DB: pool}).Handler
+	backToReview := func(id int64) *httptest.ResponseRecorder {
+		t.Helper()
+		body, _ := json.Marshal(map[string]string{"action": db.JobStateReady})
+		req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v0/jobs/%d/review", id), bytes.NewReader(body))
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		return rec
+	}
+
+	for _, from := range []string{db.JobStateApplied, db.JobStateDismissed, db.JobStateRejected} {
+		id := insert("https://example.test/"+from, from, "description")
+		if rec := backToReview(id); rec.Code != http.StatusOK {
+			t.Fatalf("%s back to review status=%d body=%s", from, rec.Code, rec.Body.String())
+		}
+		var state string
+		var reason *string
+		if err := pool.QueryRow(`SELECT state, reject_reason FROM jobs WHERE id = $1`, id).Scan(&state, &reason); err != nil {
+			t.Fatalf("load %s row: %v", from, err)
+		}
+		if state != db.JobStateReady {
+			t.Errorf("%s state=%q, want ready", from, state)
+		}
+		if reason != nil {
+			t.Errorf("%s reject_reason=%q, want cleared", from, *reason)
+		}
+	}
+
+	pendingID := insert("https://example.test/pending-undo", db.JobStatePending, nil)
+	if rec := backToReview(pendingID); rec.Code != http.StatusConflict {
+		t.Errorf("pending back to review status=%d, want 409", rec.Code)
+	}
+	if rec := backToReview(999999); rec.Code != http.StatusNotFound {
+		t.Errorf("missing back to review status=%d, want 404", rec.Code)
+	}
+}
+
 func TestClaimReadyJobs_UsesDedupeMarkerAndTimeout(t *testing.T) {
 	pool := pgtest.Open(t)
 	if err := db.Migrate(pool); err != nil {

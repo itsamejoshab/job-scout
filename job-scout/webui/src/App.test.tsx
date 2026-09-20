@@ -152,7 +152,14 @@ type RenderOptions = {
   searchSettings?: typeof filterSeed;
   reEvaluatedCount?: number;
   workflowStatuses?: string[];
+  jobs?: typeof jobsPage;
 };
+
+function jobsPageWithState(state: string) {
+  const page = structuredClone(jobsPage);
+  page.items[0].state = state;
+  return page;
+}
 
 function statsWithRejected(linkedIn: number, indeed: number) {
   const stats = structuredClone(dashboardStats);
@@ -221,7 +228,7 @@ function renderPath(path: string, options: RenderOptions = {}) {
       });
     }
     if (url.startsWith("/api/v0/jobs?")) {
-      return new Response(JSON.stringify(jobsPage), {
+      return new Response(JSON.stringify(options.jobs ?? jobsPage), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       });
@@ -595,6 +602,26 @@ describe("operator shell", () => {
       expect(calls.some((url) =>
         url.includes("date_from=2026-09-01") && !url.includes("last_hours="),
       )).toBe(true);
+    });
+  });
+
+  it.each([
+    ["applied", "Undo"],
+    ["rejected", "Review"],
+    ["dismissed", "Undo"],
+  ])("sends a %s job back to review with the %s action", async (state, label) => {
+    const user = userEvent.setup();
+    renderPath("/jobs", { jobs: jobsPageWithState(state) });
+
+    await user.click(await screen.findByRole("button", { name: label }));
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/v0/jobs/42/review",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({ action: "ready" }),
+        }),
+      );
     });
   });
 

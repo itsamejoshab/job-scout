@@ -210,7 +210,9 @@ export function getJob(id: number) {
   return requestJSON<JobDetail>(`/api/v0/jobs/${id}`);
 }
 
-export function reviewJob(id: number, action: "applied" | "dismissed") {
+export type ReviewAction = "applied" | "dismissed" | "ready";
+
+export function reviewJob(id: number, action: ReviewAction) {
   return requestJSON<JobDetail>(`/api/v0/jobs/${id}/review`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
