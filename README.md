@@ -100,6 +100,49 @@ make notify       # POST /api/v0/notify
 
 Open [http://localhost:5173](http://localhost:5173) after `make up`. That is the live operator UI. [http://localhost:8001](http://localhost:8001) is the API and the embedded production bundle. The UI's main purpose is to manage the Settings for the scraping, as well as hold your the todo list of which jobs to review & apply to IRL.
 
+## Optional capabilities
+
+Job Scout starts without Apify or Pipedream credentials. A provider or notification service that needs an external account stays disabled until you add its values to `job-scout/.env` and restart the stack.
+
+### Dice jobs through Apify
+
+The Dice provider uses the paid [Apify](https://apify.com/) actor service. LinkedIn does not need Apify.
+
+1. Create an Apify account.
+2. Copy your API token from the Apify Console.
+3. Add these values to `job-scout/.env`:
+
+```dotenv
+APIFY_API_TOKEN=your-apify-token
+APIFY_MONTHLY_BUDGET_USD=1.00
+```
+
+4. Restart the API and worker with `make restart`.
+
+If `APIFY_API_TOKEN` is empty, Job Scout does not start Dice actor runs. The dashboard and provider settings show that Apify setup is required. The token is sent only in the Apify authorization header.
+
+`APIFY_MONTHLY_BUDGET_USD` is a Job Scout spend limit. The default is `$1.00`. Job Scout counts all actor runs in the Apify account from the 21st of one month to the next 21st. It blocks new Dice runs when the budget is used. It also blocks a new run while another account run has an unknown final cost.
+
+### Notifications through Pipedream
+
+Notifications are optional. Job Scout can send one JSON webhook request to a [Pipedream](https://pipedream.com/) workflow. You can use that workflow to send email or connect another notification service.
+
+1. Create a Pipedream workflow with an HTTP trigger.
+2. Configure the workflow to read `notify` and `message` from the JSON request.
+3. Add the workflow values to `job-scout/.env`:
+
+```dotenv
+WEBHOOK_BASE=https://your-pipedream-endpoint.example
+WEBHOOK_ID=your-notification-id
+PIPEDREAM_API_TOKEN=
+```
+
+4. Set `PIPEDREAM_API_TOKEN` only when your endpoint requires a static Bearer token.
+5. Restart the API and worker with `make restart`.
+6. Keep **Enable notifications** selected in Settings.
+
+If `WEBHOOK_BASE` or `WEBHOOK_ID` is empty, notification delivery stays disabled and Job Scout continues to process jobs. You can also clear **Enable notifications** in Settings without removing the environment values.
+
 ## API endpoints
 
 This section will eventually be removed, and instead the app should host OpenAPI docs somewhere, and point README to swagger or ReDoc. 

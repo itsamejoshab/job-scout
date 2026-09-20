@@ -119,6 +119,13 @@ func (s *Service) newProvider(source db.JobSource, settings db.ScraperSettings) 
 
 // RunTick scrapes enabled providers that are due (or forced).
 func (s *Service) RunTick(ctx context.Context, in TickInput) (Result, error) {
+	if in.JobSource == string(db.SourceDice) && strings.TrimSpace(s.ApifyToken) == "" {
+		return Result{
+			Status:    "skipped",
+			JobSource: in.JobSource,
+			Error:     ApifySetupMessage,
+		}, nil
+	}
 	all, err := db.AllScraperSettings(ctx, s.db)
 	if err != nil {
 		return errResult(db.SourceLinkedIn, err), nil
@@ -126,9 +133,13 @@ func (s *Service) RunTick(ctx context.Context, in TickInput) (Result, error) {
 	now := time.Now()
 	cadences := make([]domain.ProviderCadence, 0, len(all))
 	for _, st := range all {
+		enabled := st.Enabled
+		if st.JobSource == db.SourceDice && strings.TrimSpace(s.ApifyToken) == "" {
+			enabled = false
+		}
 		cadences = append(cadences, domain.ProviderCadence{
 			Source:                string(st.JobSource),
-			Enabled:               st.Enabled,
+			Enabled:               enabled,
 			ScrapeIntervalSeconds: st.ScrapeIntervalSeconds,
 			LastScrapedAt:         st.LastScrapedAt,
 			NextEligibleAt:        st.NextEligibleAt,
@@ -167,6 +178,13 @@ func (s *Service) RunFullScrape(ctx context.Context, source db.JobSource) (Resul
 			Status:    "skipped",
 			JobSource: string(source),
 			Error:     "indeed scraper is not implemented",
+		}, nil
+	}
+	if source == db.SourceDice && strings.TrimSpace(s.ApifyToken) == "" {
+		return Result{
+			Status:    "skipped",
+			JobSource: string(source),
+			Error:     ApifySetupMessage,
 		}, nil
 	}
 	settings, err := db.GetScraperSettings(ctx, s.db, source)

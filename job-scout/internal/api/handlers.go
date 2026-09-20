@@ -106,6 +106,14 @@ func (h *Handler) Run(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if source != db.SourceIndeed {
+			if isApifyProvider(source) && strings.TrimSpace(h.Cfg.ApifyAPIToken) == "" {
+				writeJSON(w, http.StatusOK, map[string]any{
+					"status":     "provider_disabled",
+					"reason":     scraper.ApifySetupMessage,
+					"configured": false,
+				})
+				return
+			}
 			in.JobSource = string(source)
 		}
 	}
@@ -939,6 +947,8 @@ type scraperSettingsView struct {
 type dashboardProviderView struct {
 	JobSource             string                   `json:"job_source"`
 	Implemented           bool                     `json:"implemented"`
+	Configured            bool                     `json:"configured"`
+	ConfigurationMessage  string                   `json:"configuration_message,omitempty"`
 	Enabled               bool                     `json:"enabled"`
 	ScrapeIntervalSeconds int                      `json:"scrape_interval_seconds"`
 	LastScrapedAt         *time.Time               `json:"last_scraped_at"`
@@ -978,8 +988,12 @@ func (h *Handler) DashboardStats(w http.ResponseWriter, r *http.Request) {
 	}
 	providers := make([]dashboardProviderView, 0, len(stats.Providers))
 	for _, provider := range stats.Providers {
+		configured := !isApifyProvider(provider.JobSource) || strings.TrimSpace(h.Cfg.ApifyAPIToken) != ""
+		effectiveEnabled := provider.Enabled && configured
 		status := "disabled"
-		if provider.Enabled {
+		if !configured {
+			status = "setup_required"
+		} else if provider.Enabled {
 			cadence := domain.ProviderCadence{
 				Source:                string(provider.JobSource),
 				Enabled:               provider.Enabled,
@@ -997,7 +1011,8 @@ func (h *Handler) DashboardStats(w http.ResponseWriter, r *http.Request) {
 		item := dashboardProviderView{
 			JobSource:             string(provider.JobSource),
 			Implemented:           isProviderImplemented(provider.JobSource),
-			Enabled:               provider.Enabled,
+			Configured:            configured,
+			Enabled:               effectiveEnabled,
 			ScrapeIntervalSeconds: provider.ScrapeIntervalSeconds,
 			LastScrapedAt:         provider.LastScrapedAt,
 			NextEligibleAt:        provider.NextEligibleAt,
@@ -1008,6 +1023,9 @@ func (h *Handler) DashboardStats(w http.ResponseWriter, r *http.Request) {
 		}
 		if isApifyProvider(provider.JobSource) {
 			item.ApifyBudget = apifyBudget
+			if !configured {
+				item.ConfigurationMessage = scraper.ApifySetupMessage
+			}
 		}
 		providers = append(providers, item)
 	}

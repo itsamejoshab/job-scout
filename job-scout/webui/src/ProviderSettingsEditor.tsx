@@ -579,9 +579,13 @@ function GlobalSearchesEditor({
 function ProviderSection({
   settings,
   implemented,
+  configured,
+  configurationMessage,
 }: {
   settings: ProviderSettings;
   implemented: boolean;
+  configured: boolean;
+  configurationMessage?: string;
 }) {
   const queryClient = useQueryClient();
   const initial = toInput(settings);
@@ -634,6 +638,7 @@ function ProviderSection({
       <header className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-border/60 bg-muted/40 px-4 py-3">
         <h3 className="text-sm font-semibold tracking-tight">{source} provider</h3>
         {!implemented && <Badge variant="secondary">Not implemented</Badge>}
+        {implemented && !configured && <Badge variant="secondary">Setup required</Badge>}
         <div className="ml-auto flex items-center gap-2">
           {dirty && (
             <span className="text-xs font-medium text-accent-foreground">Unsaved changes</span>
@@ -663,13 +668,19 @@ function ProviderSection({
         </div>
       </header>
 
+      {configurationMessage && (
+        <p className="border-b border-border/60 bg-muted/20 px-4 py-3 text-sm text-muted-foreground">
+          {configurationMessage}
+        </p>
+      )}
+
       <SettingsGroup title="Schedule">
         <SettingRow label="Enabled" hint="Include this provider in scheduled scrape runs.">
           <input
             type="checkbox"
             aria-label={`Enable ${source}`}
-            checked={implemented && draft.enabled}
-            disabled={!implemented}
+            checked={implemented && configured && draft.enabled}
+            disabled={!implemented || !configured}
             onChange={(event) => patch({ enabled: event.target.checked })}
           />
         </SettingRow>
@@ -847,6 +858,15 @@ export function ProviderSettingsEditor() {
   const implemented = new Map(
     dashboard.data?.providers.map((provider) => [provider.job_source, provider.implemented]) ?? [],
   );
+  const configured = new Map(
+    dashboard.data?.providers.map((provider) => [provider.job_source, provider.configured ?? true]) ?? [],
+  );
+  const configurationMessages = new Map(
+    dashboard.data?.providers.map((provider) => [
+      provider.job_source,
+      provider.configuration_message,
+    ]) ?? [],
+  );
 
   if (providers.isPending) {
     return <p className="mt-2 text-sm text-muted-foreground">Loading provider settings.</p>;
@@ -864,6 +884,8 @@ export function ProviderSettingsEditor() {
             key={settings.job_source}
             settings={settings}
             implemented={implemented.get(settings.job_source) ?? false}
+            configured={configured.get(settings.job_source) ?? true}
+            configurationMessage={configurationMessages.get(settings.job_source)}
           />
         ))}
     </>

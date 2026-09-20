@@ -310,6 +310,9 @@ const skippedDonutColors: Record<string, string> = {
 };
 
 function providerStatusLabel(status: string) {
+  if (status === "setup_required") {
+    return "setup required";
+  }
   if (status === "due") {
     return "ready";
   }
@@ -564,6 +567,11 @@ function DashboardPage() {
                     </p>
                   ) : null}
                 </div>
+                {provider.configuration_message ? (
+                  <p className="mt-3 rounded-md border border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+                    {provider.configuration_message}
+                  </p>
+                ) : null}
 
                 <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
                   {stateOrder.map((state) => (

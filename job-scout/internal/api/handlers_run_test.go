@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jobscout/jobscout/internal/config"
 	"go.temporal.io/api/workflowservice/v1"
 	"go.temporal.io/sdk/client"
 )
@@ -77,7 +78,7 @@ func TestRun_ForceDoesNotTargetIndeed(t *testing.T) {
 
 func TestRun_JobSourceDiceTargetsDiceProvider(t *testing.T) {
 	fake := &runTemporalFake{}
-	h := &Handler{Temporal: fake}
+	h := &Handler{Temporal: fake, Cfg: config.Config{ApifyAPIToken: "configured"}}
 	srv := NewServer("", h)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v0/run?job_source=DICE&force=1", nil)
@@ -94,6 +95,34 @@ func TestRun_JobSourceDiceTargetsDiceProvider(t *testing.T) {
 	}
 	if forceArg(fake.starts[0].args[0]) != true {
 		t.Error("force=1 must echo onto the Dice tick")
+	}
+}
+
+func TestRun_JobSourceDiceWithoutApifyTokenDoesNotStartWorkflow(t *testing.T) {
+	fake := &runTemporalFake{}
+	h := &Handler{Temporal: fake}
+	srv := NewServer("", h)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v0/run?job_source=DICE&force=1", nil)
+	rec := httptest.NewRecorder()
+	srv.Handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST /api/v0/run?job_source=DICE status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if len(fake.starts) != 0 {
+		t.Fatalf("starts=%d, want 0 when APIFY_API_TOKEN is empty", len(fake.starts))
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("response must be JSON: %v", err)
+	}
+	if body["status"] != "provider_disabled" || body["configured"] != false {
+		t.Fatalf("body=%v, want provider_disabled and configured=false", body)
+	}
+	reason, _ := body["reason"].(string)
+	if !strings.Contains(reason, "Apify account") || !strings.Contains(reason, "APIFY_API_TOKEN") {
+		t.Fatalf("reason=%q, want Apify setup instructions", reason)
 	}
 }
 

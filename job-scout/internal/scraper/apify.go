@@ -31,6 +31,7 @@ const (
 	DiceMinRemainingStart   = 13 * time.Minute
 	ApifyBudgetViewCacheTTL = 60 * time.Second
 	ApifyBudgetViewTimeout  = 2 * time.Second
+	ApifySetupMessage       = "Create an Apify account and set APIFY_API_TOKEN in job-scout/.env to enable this provider."
 )
 
 const (

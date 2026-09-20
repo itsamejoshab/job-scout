@@ -69,11 +69,14 @@ const dashboardStats = {
     {
       job_source: "DICE",
       implemented: true,
-      enabled: true,
+      configured: false,
+      configuration_message:
+        "Create an Apify account and set APIFY_API_TOKEN in job-scout/.env to enable this provider.",
+      enabled: false,
       scrape_interval_seconds: 10800,
       last_scraped_at: null,
       next_eligible_at: null,
-      status: "due",
+      status: "setup_required",
       total_jobs: 0,
       by_state: {
         pending: 0,
@@ -493,7 +496,7 @@ describe("operator shell", () => {
     expect(screen.getByText("DICE")).toBeInTheDocument();
     expect(screen.getByText("Status: on cooldown")).toBeInTheDocument();
     expect(screen.getByText("Status: disabled")).toBeInTheDocument();
-    expect(screen.getByText("Status: ready")).toBeInTheDocument();
+    expect(screen.getByText("Status: setup required")).toBeInTheDocument();
     const linkedInCard = screen.getByText("LINKEDIN").closest("article");
     expect(linkedInCard).not.toBeNull();
     expect(linkedInCard).toHaveTextContent("Pending");
@@ -504,6 +507,7 @@ describe("operator shell", () => {
     expect(diceCard).not.toBeNull();
     expect(diceCard).toHaveTextContent("Apify token is missing");
     expect(diceCard).toHaveTextContent("(blocked)");
+    expect(diceCard).toHaveTextContent("Create an Apify account");
     expect(screen.getAllByText("Processing").length).toBeGreaterThanOrEqual(2);
     expect(screen.getByText("Jobs over time (America/New_York)")).toBeInTheDocument();
     expect(screen.queryByText(/Jobs emailed/i)).not.toBeInTheDocument();
@@ -889,7 +893,9 @@ describe("operator shell", () => {
     expect(screen.getByRole("heading", { name: "DICE provider" })).toBeInTheDocument();
     expect(screen.getAllByText("Not implemented")).toHaveLength(1);
     expect(screen.getByRole("checkbox", { name: "Enable INDEED" })).toBeDisabled();
-    expect(screen.getByRole("checkbox", { name: "Enable DICE" })).toBeEnabled();
+    expect(screen.getByText(/setup required/i)).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "Enable DICE" })).toBeDisabled();
+    expect(screen.getByText(/set APIFY_API_TOKEN/)).toBeInTheDocument();
     expect(screen.getByText(/^Last scraped: (?!never)/)).toBeInTheDocument();
     expect(screen.getAllByText("Next eligible: never")).toHaveLength(3);
     expect(screen.getByRole("button", { name: "Save LINKEDIN settings" })).toBeDisabled();
@@ -964,7 +970,7 @@ describe("operator shell", () => {
 
     const save = await screen.findByRole("button", { name: "Save DICE settings" });
     expect(save).toBeDisabled();
-    expect(screen.getByRole("checkbox", { name: "Enable DICE" })).toBeEnabled();
+    expect(screen.getByRole("checkbox", { name: "Enable DICE" })).toBeDisabled();
     expect(screen.getByLabelText("Dice query 1")).toHaveValue(
       "Desktop or Endpoint or Application Support",
     );

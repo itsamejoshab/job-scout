@@ -46,11 +46,13 @@ export interface ApifyBudget {
 export interface DashboardProviderStats {
   job_source: string;
   implemented: boolean;
+  configured?: boolean;
+  configuration_message?: string;
   enabled: boolean;
   scrape_interval_seconds: number;
   last_scraped_at: string | null;
   next_eligible_at: string | null;
-  status: "disabled" | "due" | "waiting";
+  status: "disabled" | "setup_required" | "due" | "waiting";
   total_jobs: number;
   by_state: Record<string, number>;
   by_reject_reason: Record<string, number>;

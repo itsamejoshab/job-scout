@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -30,6 +31,8 @@ type dashboardStatsBody struct {
 type dashboardProviderStats struct {
 	JobSource             string           `json:"job_source"`
 	Implemented           bool             `json:"implemented"`
+	Configured            bool             `json:"configured"`
+	ConfigurationMessage  string           `json:"configuration_message"`
 	Enabled               bool             `json:"enabled"`
 	ScrapeIntervalSeconds int              `json:"scrape_interval_seconds"`
 	LastScrapedAt         *string          `json:"last_scraped_at"`
@@ -434,6 +437,20 @@ func TestDashboardStats_ApifyBudgetTokenMissingNoHTTP(t *testing.T) {
 		end:     "2026-10-21T00:00:00Z",
 		limit:   "1.00",
 	})
+	dice := providers["DICE"]
+	if configured, _ := dice["configured"].(bool); configured {
+		t.Fatal("DICE configured = true with empty APIFY_API_TOKEN, want false")
+	}
+	if enabled, _ := dice["enabled"].(bool); enabled {
+		t.Fatal("DICE enabled = true with empty APIFY_API_TOKEN, want effective false")
+	}
+	if dice["status"] != "setup_required" {
+		t.Fatalf("DICE status = %v, want setup_required", dice["status"])
+	}
+	message, _ := dice["configuration_message"].(string)
+	if !strings.Contains(message, "Apify account") || !strings.Contains(message, "APIFY_API_TOKEN") {
+		t.Fatalf("DICE configuration_message = %q, want Apify setup instructions", message)
+	}
 }
 
 func TestDashboardStats_ApifyBudgetSuccessAndProcessCache(t *testing.T) {
