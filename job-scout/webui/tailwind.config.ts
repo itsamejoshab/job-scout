@@ -42,8 +42,8 @@ export default {
         sm: "calc(var(--radius) - 0.4rem)",
       },
       boxShadow: {
-        soft: "0 1px 2px hsl(222 47% 11% / 0.04), 0 8px 24px -12px hsl(222 47% 11% / 0.12)",
-        lifted: "0 1px 2px hsl(222 47% 11% / 0.05), 0 16px 40px -18px hsl(222 47% 11% / 0.25)",
+        soft: "0 1px 2px hsl(202 61% 22% / 0.04), 0 8px 24px -12px hsl(202 61% 22% / 0.12)",
+        lifted: "0 1px 2px hsl(202 61% 22% / 0.05), 0 16px 40px -18px hsl(202 61% 22% / 0.25)",
       },
     },
   },

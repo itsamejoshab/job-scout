@@ -11,10 +11,13 @@ import {
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { BrowserRouter, NavLink, Navigate, Route, Routes } from "react-router-dom";
 import {
+  Bar,
+  BarChart,
   CartesianGrid,
+  Cell,
   Legend,
-  Line,
-  LineChart,
+  Pie,
+  PieChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -180,7 +183,7 @@ function Header() {
             disabled={temporalDown || start.isPending}
             onClick={() => start.mutate("notify")}
           >
-            Send Notification
+            Send Email
           </Button>
           <Button
             size="sm"
@@ -257,19 +260,90 @@ function Header() {
 
 const stateOrder = ["pending", "rejected", "needs_detail", "ready", "applied", "dismissed"];
 const rejectReasonOrder = ["duplicate", "title_company", "description", "detail_failed", "unsupported_source"];
-const chartColors = {
-  total: "#2563eb",
-  notified: "#16a34a",
+
+const palette = {
+  yale: "#16425b",
+  baltic: "#2f6690",
+  cerulean: "#3a7ca5",
+  mid: "#5ba3c1",
+  sky: "#81c3d7",
+  alabaster: "#d9dcd6",
+};
+
+const statusGroupColors = {
+  Applied: "#0d9488",
+  Pending: palette.cerulean,
+  Skipped: palette.alabaster,
+};
+
+const statusDonutColors: Record<string, string> = {
+  applied: "#0d9488",
+  ready: palette.baltic,
+  needs_detail: palette.cerulean,
+  pending: palette.mid,
+  rejected: palette.sky,
+  dismissed: palette.alabaster,
+};
+
+const skippedDonutColors: Record<string, string> = {
+  duplicate: palette.yale,
+  title_company: palette.baltic,
+  description: palette.cerulean,
+  detail_failed: palette.mid,
+  unsupported_source: palette.sky,
+  dismissed: palette.alabaster,
+  none: "#b8bcb4",
 };
 
 function jobStateLabel(state: string) {
   if (state === "ready") {
-    return "Ready for review";
+    return "In Review";
   }
   if (state === "needs_detail") {
-    return "Requires further processing";
+    return "Processing";
+  }
+  if (state === "pending") {
+    return "Pending";
+  }
+  if (state === "rejected") {
+    return "Rejected";
+  }
+  if (state === "applied") {
+    return "Applied";
+  }
+  if (state === "dismissed") {
+    return "Dismissed";
   }
   return state;
+}
+
+function rejectReasonLabel(reason: string) {
+  switch (reason) {
+    case "duplicate":
+      return "Duplicate";
+    case "title_company":
+      return "Title or company";
+    case "description":
+      return "Description";
+    case "detail_failed":
+      return "Detail fetch failed";
+    case "unsupported_source":
+      return "Unsupported source";
+    case "dismissed":
+      return "Dismissed by you";
+    case "none":
+      return "No reason recorded";
+    default:
+      return reason;
+  }
+}
+
+function formatChartDay(day: string) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day);
+  if (!match) {
+    return day;
+  }
+  return `${Number(match[2])}/${Number(match[3])}`;
 }
 
 function usePageVisible() {
@@ -333,10 +407,74 @@ function DashboardPage() {
     return [...dashboard.data.daily]
       .map((point) => ({
         day: point.day,
-        "Total jobs": point.total,
-        Notified: point.notified,
+        Applied: point.applied,
+        Pending: point.pending,
+        Skipped: point.skipped,
       }))
       .sort((left, right) => left.day.localeCompare(right.day));
+  }, [dashboard.data]);
+
+  const statusDonutData = useMemo(() => {
+    if (!dashboard.data) {
+      return [];
+    }
+    const totals: Record<string, number> = {};
+    for (const state of stateOrder) {
+      totals[state] = 0;
+    }
+    for (const provider of dashboard.data.providers) {
+      for (const state of stateOrder) {
+        totals[state] += provider.by_state[state] ?? 0;
+      }
+    }
+    return stateOrder.map((state) => ({
+      key: state,
+      name: jobStateLabel(state),
+      value: totals[state],
+      color: statusDonutColors[state],
+    }));
+  }, [dashboard.data]);
+
+  const skippedDonutData = useMemo(() => {
+    if (!dashboard.data) {
+      return [];
+    }
+    const reasons: Record<string, number> = {};
+    for (const reason of rejectReasonOrder) {
+      reasons[reason] = 0;
+    }
+    let dismissed = 0;
+    let rejected = 0;
+    for (const provider of dashboard.data.providers) {
+      dismissed += provider.by_state.dismissed ?? 0;
+      rejected += provider.by_state.rejected ?? 0;
+      for (const reason of rejectReasonOrder) {
+        reasons[reason] += provider.by_reject_reason[reason] ?? 0;
+      }
+    }
+    const reasonTotal = rejectReasonOrder.reduce((sum, reason) => sum + reasons[reason], 0);
+    const unrecorded = Math.max(0, rejected - reasonTotal);
+    const slices = rejectReasonOrder.map((reason) => ({
+      key: reason,
+      name: rejectReasonLabel(reason),
+      value: reasons[reason],
+      color: skippedDonutColors[reason],
+    }));
+    slices.push({
+      key: "dismissed",
+      name: rejectReasonLabel("dismissed"),
+      value: dismissed,
+      color: skippedDonutColors.dismissed,
+    });
+    if (unrecorded > 0) {
+      slices.push({
+        key: "none",
+        name: rejectReasonLabel("none"),
+        value: unrecorded,
+        color: skippedDonutColors.none,
+      });
+    }
+    return slices;
   }, [dashboard.data]);
 
   return (
@@ -352,9 +490,6 @@ function DashboardPage() {
         <>
           <p className="mt-1.5 text-muted-foreground">
             Generated at {formatTimestamp(dashboard.data.generated_at)}
-          </p>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Jobs emailed: {dashboard.data.notified}
           </p>
 
           <section className="mt-8 grid gap-4 md:grid-cols-2" aria-label="Provider cards">
@@ -378,21 +513,37 @@ function DashboardPage() {
 
                 <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
                   {stateOrder.map((state) => (
-                    <p
+                    <div
                       key={state}
-                      className="rounded-lg bg-muted px-2.5 py-2 text-xs font-medium text-muted-foreground"
+                      className="flex min-h-[4.5rem] flex-col items-center rounded-lg border border-border/80 px-2 py-2"
+                      style={{
+                        backgroundColor: `${statusDonutColors[state]}22`,
+                        color: palette.yale,
+                      }}
                     >
-                      {jobStateLabel(state)}: {provider.by_state[state] ?? 0}
-                    </p>
+                      <p className="w-full text-center text-xs font-medium leading-tight">
+                        {jobStateLabel(state)}
+                      </p>
+                      <p className="mt-auto mb-auto text-xl font-semibold tabular-nums leading-none">
+                        {provider.by_state[state] ?? 0}
+                      </p>
+                    </div>
                   ))}
                 </div>
 
                 <details className="mt-4 text-sm" open>
                   <summary className="cursor-pointer font-medium">Rejection reasons</summary>
-                  <div className="mt-2 grid gap-1 text-muted-foreground sm:grid-cols-2">
+                  <div className="mt-2 grid gap-1 sm:grid-cols-2">
                     {rejectReasonOrder.map((reason) => (
-                      <p key={reason}>
-                        {reason}: {provider.by_reject_reason[reason] ?? 0}
+                      <p
+                        key={reason}
+                        className="flex items-center justify-between gap-3 rounded-md px-2 py-1 text-muted-foreground"
+                        style={{ backgroundColor: `${skippedDonutColors[reason]}33` }}
+                      >
+                        <span className="text-left">{rejectReasonLabel(reason)}</span>
+                        <span className="tabular-nums font-medium text-foreground">
+                          {provider.by_reject_reason[reason] ?? 0}
+                        </span>
                       </p>
                     ))}
                   </div>
@@ -407,33 +558,136 @@ function DashboardPage() {
             </h2>
             <div className="mt-4 h-80">
               <ResponsiveContainer width="100%" height="100%" minWidth={320} minHeight={240}>
-                <LineChart data={chartData}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="day" />
-                  <YAxis allowDecimals={false} />
-                  <Tooltip />
+                <BarChart data={chartData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke={palette.alabaster} />
+                  <XAxis
+                    dataKey="day"
+                    tick={{ fill: palette.yale, fontSize: 12 }}
+                    tickFormatter={formatChartDay}
+                  />
+                  <YAxis allowDecimals={false} tick={{ fill: palette.yale, fontSize: 12 }} />
+                  <Tooltip
+                    labelFormatter={formatChartDay}
+                    contentStyle={{
+                      backgroundColor: "#fff",
+                      borderColor: palette.alabaster,
+                      borderRadius: 8,
+                    }}
+                  />
                   <Legend />
-                  <Line
-                    type="monotone"
-                    dataKey="Total jobs"
-                    stroke={chartColors.total}
-                    strokeWidth={2}
-                    dot={false}
+                  <Bar
+                    dataKey="Applied"
+                    stackId="status"
+                    fill={statusGroupColors.Applied}
                   />
-                  <Line
-                    type="monotone"
-                    dataKey="Notified"
-                    stroke={chartColors.notified}
-                    strokeWidth={2}
-                    dot={false}
+                  <Bar
+                    dataKey="Pending"
+                    stackId="status"
+                    fill={statusGroupColors.Pending}
                   />
-                </LineChart>
+                  <Bar
+                    dataKey="Skipped"
+                    stackId="status"
+                    fill={statusGroupColors.Skipped}
+                    radius={[4, 4, 0, 0]}
+                  />
+                </BarChart>
               </ResponsiveContainer>
             </div>
+          </section>
+
+          <section className="mt-6 grid gap-4 md:grid-cols-2" aria-label="Status breakdown charts">
+            <DonutCard
+              title="Jobs by status"
+              emptyLabel="No jobs yet."
+              slices={statusDonutData}
+            />
+            <DonutCard
+              title="Skipped jobs by reason"
+              emptyLabel="No skipped jobs yet."
+              slices={skippedDonutData}
+            />
           </section>
         </>
       )}
     </main>
+  );
+}
+
+type DonutSlice = {
+  key: string;
+  name: string;
+  value: number;
+  color: string;
+};
+
+function DonutCard({
+  title,
+  emptyLabel,
+  slices,
+}: {
+  title: string;
+  emptyLabel: string;
+  slices: DonutSlice[];
+}) {
+  const total = slices.reduce((sum, slice) => sum + slice.value, 0);
+  const chartSlices = slices.filter((slice) => slice.value > 0);
+
+  return (
+    <article className="surface p-5">
+      <h2 className="text-lg font-semibold tracking-tight">{title}</h2>
+      {total === 0 ? (
+        <p className="mt-4 text-sm text-muted-foreground">{emptyLabel}</p>
+      ) : (
+        <>
+          <div className="mt-4 h-56">
+            <ResponsiveContainer width="100%" height="100%" minWidth={200} minHeight={200}>
+              <PieChart>
+                <Pie
+                  data={chartSlices}
+                  dataKey="value"
+                  nameKey="name"
+                  innerRadius="62%"
+                  outerRadius="88%"
+                  paddingAngle={2}
+                  stroke="#fff"
+                  strokeWidth={2}
+                >
+                  {chartSlices.map((slice) => (
+                    <Cell key={slice.key} fill={slice.color} />
+                  ))}
+                </Pie>
+                <Tooltip
+                  contentStyle={{
+                    backgroundColor: "#fff",
+                    borderColor: palette.alabaster,
+                    borderRadius: 8,
+                  }}
+                />
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+          <ul className="mt-3 space-y-1.5" aria-label={`${title} legend`}>
+            {slices.map((slice) => (
+              <li
+                key={slice.key}
+                className="flex items-center justify-between gap-3 text-sm text-muted-foreground"
+              >
+                <span className="inline-flex items-center gap-2">
+                  <span
+                    className="h-2.5 w-2.5 shrink-0 rounded-full"
+                    style={{ backgroundColor: slice.color }}
+                    aria-hidden="true"
+                  />
+                  {slice.name}
+                </span>
+                <span className="tabular-nums font-medium text-foreground">{slice.value}</span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </article>
   );
 }
 
@@ -981,7 +1235,7 @@ function SettingsPage() {
   };
 
   return (
-    <main className="w-full max-w-3xl px-6 py-8 lg:px-10">
+    <main className="w-full px-6 py-8 lg:px-10">
       <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
       <p className="mt-1 text-sm text-muted-foreground">
         Edit universal filters and provider scrape settings.

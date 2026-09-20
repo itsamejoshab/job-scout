@@ -37,7 +37,7 @@ const dashboardStats = {
         duplicate: 0,
         title_company: 1,
         description: 0,
-                detail_failed: 0,
+        detail_failed: 0,
         unsupported_source: 0,
       },
     },
@@ -62,14 +62,14 @@ const dashboardStats = {
         duplicate: 0,
         title_company: 0,
         description: 0,
-                detail_failed: 0,
+        detail_failed: 0,
         unsupported_source: 0,
       },
     },
   ],
   daily: [
-    { day: "2026-09-17", total: 2, notified: 1 },
-    { day: "2026-09-18", total: 0, notified: 0 },
+    { day: "2026-09-17", total: 2, notified: 1, applied: 0, pending: 1, skipped: 1 },
+    { day: "2026-09-18", total: 0, notified: 0, applied: 0, pending: 0, skipped: 0 },
   ],
 };
 
@@ -388,10 +388,26 @@ describe("operator shell", () => {
     expect(screen.getByText("INDEED")).toBeInTheDocument();
     expect(screen.getByText("Status: waiting")).toBeInTheDocument();
     expect(screen.getByText("Status: disabled")).toBeInTheDocument();
-    expect(screen.getByText("pending: 1")).toBeInTheDocument();
-    expect(screen.getAllByText("Requires further processing: 0")).toHaveLength(2);
-    expect(screen.getByText("title_company: 1")).toBeInTheDocument();
+    const linkedInCard = screen.getByText("LINKEDIN").closest("article");
+    expect(linkedInCard).not.toBeNull();
+    expect(linkedInCard).toHaveTextContent("Pending");
+    expect(linkedInCard).toHaveTextContent("Processing");
+    expect(linkedInCard).toHaveTextContent("Title or company");
+    expect(screen.getAllByText("Processing").length).toBeGreaterThanOrEqual(2);
     expect(screen.getByText("Jobs over time (America/New_York)")).toBeInTheDocument();
+    expect(screen.queryByText(/Jobs emailed/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Jobs by status" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Skipped jobs by reason" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Jobs by status legend")).toBeInTheDocument();
+    expect(screen.getByLabelText("Skipped jobs by reason legend")).toBeInTheDocument();
+    expect(screen.getByLabelText("Jobs by status legend")).toHaveTextContent("Pending");
+    expect(screen.getByLabelText("Jobs by status legend")).toHaveTextContent("1");
+    expect(screen.getByLabelText("Skipped jobs by reason legend")).toHaveTextContent(
+      "Title or company",
+    );
+    expect(screen.getByLabelText("Skipped jobs by reason legend")).toHaveTextContent(
+      "Dismissed by you",
+    );
   });
 
   it("polls dashboard every two seconds and pauses while hidden", async () => {
@@ -483,7 +499,7 @@ describe("operator shell", () => {
     const user = userEvent.setup();
     renderPath("/dashboard");
 
-    await user.click(await screen.findByRole("button", { name: "Send Notification" }));
+    await user.click(await screen.findByRole("button", { name: "Send Email" }));
 
     expect(fetch).toHaveBeenCalledWith(
       "/api/v0/notify",
@@ -505,7 +521,7 @@ describe("operator shell", () => {
     });
 
     const scrape = await screen.findByRole("button", { name: "Scrape Jobs" });
-    const notify = screen.getByRole("button", { name: "Send Notification" });
+    const notify = screen.getByRole("button", { name: "Send Email" });
     await waitFor(() => {
       expect(scrape).toBeDisabled();
       expect(notify).toBeDisabled();
@@ -517,7 +533,7 @@ describe("operator shell", () => {
     renderPath("/jobs");
 
     expect(await screen.findByText("Platform Engineer")).toBeInTheDocument();
-    expect(screen.getByText("Ready for review", { selector: "div" })).toBeInTheDocument();
+    expect(screen.getByText("In Review", { selector: "div" })).toBeInTheDocument();
     expect(screen.getByText("51 jobs")).toBeInTheDocument();
     expect(screen.getByText("A short job description preview.")).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Job detail" })).not.toBeInTheDocument();
