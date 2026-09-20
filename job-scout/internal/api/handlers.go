@@ -676,11 +676,16 @@ func (h *Handler) ReviewJob(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid review body")
 		return
 	}
-	if in.Action != db.JobStateApplied && in.Action != db.JobStateDismissed {
-		writeErr(w, http.StatusBadRequest, "action must be applied or dismissed")
+	var updated bool
+	switch in.Action {
+	case db.JobStateApplied, db.JobStateDismissed:
+		updated, err = db.ReviewReadyJob(r.Context(), h.DB, id, in.Action)
+	case db.JobStateReady:
+		updated, err = db.ReturnJobToReview(r.Context(), h.DB, id)
+	default:
+		writeErr(w, http.StatusBadRequest, "action must be applied, dismissed, or ready")
 		return
 	}
-	updated, err := db.ReviewReadyJob(r.Context(), h.DB, id, in.Action)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -691,6 +696,10 @@ func (h *Handler) ReviewJob(w http.ResponseWriter, r *http.Request) {
 			return
 		} else if err != nil {
 			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if in.Action == db.JobStateReady {
+			writeErr(w, http.StatusConflict, "job cannot go back to review from this state")
 			return
 		}
 		writeErr(w, http.StatusConflict, "job is not ready for review")

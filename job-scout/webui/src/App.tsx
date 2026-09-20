@@ -37,6 +37,7 @@ import {
   resetSearchSettings,
   startNotify,
   startScrape,
+  type ReviewAction,
   type SearchSettingsInput,
   type WorkflowStart,
 } from "./api";
@@ -730,6 +731,36 @@ function lastHoursForWindow(window: CreatedWindow): number | null {
   }
 }
 
+interface JobAction {
+  label: string;
+  action: ReviewAction;
+  hint: string;
+}
+
+const backToReview = (label: string): JobAction => ({
+  label,
+  action: "ready",
+  hint: "Send this job back to the In Review queue.",
+});
+
+function jobActions(state: string): JobAction[] {
+  switch (state) {
+    case "ready":
+      return [
+        { label: "Applied", action: "applied", hint: "Mark this job as applied." },
+        { label: "Reject", action: "dismissed", hint: "Dismiss this job." },
+      ];
+    case "applied":
+      return [backToReview("Undo")];
+    case "rejected":
+      return [backToReview("Review")];
+    case "dismissed":
+      return [backToReview("Undo")];
+    default:
+      return [];
+  }
+}
+
 function formatAge(value: string) {
   const milliseconds = Date.now() - new Date(value).getTime();
   if (milliseconds < 60 * 60 * 1_000) {
@@ -776,7 +807,7 @@ function JobsPage() {
   });
   const queryClient = useQueryClient();
   const review = useMutation({
-    mutationFn: ({ id, action }: { id: number; action: "applied" | "dismissed" }) =>
+    mutationFn: ({ id, action }: { id: number; action: ReviewAction }) =>
       reviewJob(id, action),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["jobs"] });
@@ -947,24 +978,19 @@ function JobsPage() {
                   {formatAge(job.created_at)}
                 </td>
                 <td className="px-5 py-4">
-                  {job.state === "ready" && (
-                    <div className="flex gap-2">
+                  <div className="flex gap-2">
+                    {jobActions(job.state).map((action) => (
                       <Button
+                        key={action.label}
                         size="sm"
                         disabled={review.isPending}
-                        onClick={() => review.mutate({ id: job.id, action: "applied" })}
+                        title={action.hint}
+                        onClick={() => review.mutate({ id: job.id, action: action.action })}
                       >
-                        Applied
+                        {action.label}
                       </Button>
-                      <Button
-                        size="sm"
-                        disabled={review.isPending}
-                        onClick={() => review.mutate({ id: job.id, action: "dismissed" })}
-                      >
-                        Reject
-                      </Button>
-                    </div>
-                  )}
+                    ))}
+                  </div>
                 </td>
               </tr>
             ))}

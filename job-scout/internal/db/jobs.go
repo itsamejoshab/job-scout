@@ -452,3 +452,21 @@ func ReviewReadyJob(ctx context.Context, database *sql.DB, id int64, action stri
 	n, err := res.RowsAffected()
 	return n == 1, err
 }
+
+// ReturnJobToReview sends a reviewed or rejected row back to the ready queue so
+// the operator can decide again. The reject reason is cleared with the move.
+func ReturnJobToReview(ctx context.Context, database *sql.DB, id int64) (bool, error) {
+	res, err := database.ExecContext(ctx, `
+		UPDATE jobs SET
+			state = $1,
+			reject_reason = NULL,
+			state_changed_at = now(),
+			updated_at = now()
+		WHERE id = $2 AND state IN ($3, $4, $5)
+	`, JobStateReady, id, JobStateApplied, JobStateDismissed, JobStateRejected)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n == 1, err
+}
