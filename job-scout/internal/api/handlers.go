@@ -125,6 +125,22 @@ func (h *Handler) Run(w http.ResponseWriter, r *http.Request) {
 
 // POST /api/v0/notify -> start NotifyWorkflow asynchronously.
 func (h *Handler) Notify(w http.ResponseWriter, r *http.Request) {
+	status, err := h.notificationStatus(r.Context())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if !status.Active {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"status":     "notifications_disabled",
+			"reason":     status.Reason,
+			"enabled":    status.Enabled,
+			"configured": status.Configured,
+			"active":     false,
+		})
+		return
+	}
+
 	opts := client.StartWorkflowOptions{
 		ID:        pipeline.ManualNotifyWorkflowID(time.Now()),
 		TaskQueue: config.TaskQueue,
@@ -297,6 +313,73 @@ func (h *Handler) ResetSearchSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, stored)
+}
+
+type notificationSettingsView struct {
+	Enabled    bool   `json:"enabled"`
+	Configured bool   `json:"configured"`
+	Active     bool   `json:"active"`
+	Reason     string `json:"reason,omitempty"`
+}
+
+func (h *Handler) notificationStatus(ctx context.Context) (pipeline.NotificationStatus, error) {
+	enabled := true
+	if h.DB != nil {
+		var err error
+		enabled, err = db.GetNotificationsEnabled(ctx, h.DB)
+		if err != nil {
+			return pipeline.NotificationStatus{}, err
+		}
+	}
+	return pipeline.ResolveNotificationStatus(enabled, h.Cfg.NotificationsConfigured()), nil
+}
+
+func (h *Handler) writeNotificationSettings(w http.ResponseWriter, status pipeline.NotificationStatus) {
+	writeJSON(w, http.StatusOK, notificationSettingsView{
+		Enabled:    status.Enabled,
+		Configured: status.Configured,
+		Active:     status.Active,
+		Reason:     status.Reason,
+	})
+}
+
+// GET /api/v0/notification-settings
+func (h *Handler) NotificationSettings(w http.ResponseWriter, r *http.Request) {
+	status, err := h.notificationStatus(r.Context())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	h.writeNotificationSettings(w, status)
+}
+
+type replaceNotificationSettingsRequest struct {
+	Enabled *bool `json:"enabled"`
+}
+
+// PUT /api/v0/notification-settings
+func (h *Handler) ReplaceNotificationSettings(w http.ResponseWriter, r *http.Request) {
+	var in replaceNotificationSettingsRequest
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&in); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid notification-settings body: "+err.Error())
+		return
+	}
+	if in.Enabled == nil {
+		writeErr(w, http.StatusBadRequest, "missing required field: enabled")
+		return
+	}
+	if _, err := db.SetNotificationsEnabled(r.Context(), h.DB, *in.Enabled); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	status, err := h.notificationStatus(r.Context())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	h.writeNotificationSettings(w, status)
 }
 
 // GET /api/v0/scraper-settings

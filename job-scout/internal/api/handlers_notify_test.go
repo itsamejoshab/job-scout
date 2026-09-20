@@ -7,11 +7,19 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jobscout/jobscout/internal/config"
 )
 
 func TestNotify_StartsNotifyTickAsyncWithManualWorkflowID(t *testing.T) {
 	fake := &runTemporalFake{}
-	h := &Handler{Temporal: fake}
+	h := &Handler{
+		Temporal: fake,
+		Cfg: config.Config{
+			WebhookBase: "https://hooks.example/api/webhook",
+			WebhookID:   "hook-id",
+		},
+	}
 	srv := NewServer("", h)
 
 	before := time.Now().UTC().Add(-2 * time.Second)
@@ -30,6 +38,35 @@ func TestNotify_StartsNotifyTickAsyncWithManualWorkflowID(t *testing.T) {
 	}
 	if fake.waited {
 		t.Fatal("POST /api/v0/notify must not wait for the workflow result")
+	}
+}
+
+func TestNotify_ReturnsDisabledWhenWebhookEnvMissing(t *testing.T) {
+	fake := &runTemporalFake{}
+	h := &Handler{Temporal: fake, Cfg: config.Config{}}
+	srv := NewServer("", h)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v0/notify", nil)
+	rec := httptest.NewRecorder()
+	srv.Handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST /api/v0/notify status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("response must be JSON: %v", err)
+	}
+	if body["status"] != "notifications_disabled" {
+		t.Fatalf("status = %v, want notifications_disabled", body["status"])
+	}
+	if body["active"] != false {
+		t.Fatalf("active = %v, want false", body["active"])
+	}
+	if _, ok := body["workflow_id"]; ok {
+		t.Fatalf("disabled notify must not start a workflow, got %v", body)
+	}
+	if len(fake.starts) != 0 {
+		t.Fatalf("disabled notify must not call Temporal, starts=%d", len(fake.starts))
 	}
 }
 

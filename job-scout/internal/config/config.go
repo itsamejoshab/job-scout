@@ -53,6 +53,12 @@ func (c Config) WebhookNotify() string {
 	return strings.TrimLeft(c.WebhookID, "/")
 }
 
+// NotificationsConfigured is true when WEBHOOK_BASE and WEBHOOK_ID are set.
+// PIPEDREAM_API_TOKEN stays optional.
+func (c Config) NotificationsConfigured() bool {
+	return c.WebhookTarget() != "" && c.WebhookNotify() != ""
+}
+
 const TaskQueue = "main-task-queue"
 
 func trimEnvQuotes(v string) string {

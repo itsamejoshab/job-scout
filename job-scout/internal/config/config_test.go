@@ -71,6 +71,9 @@ func TestLoad_NotifyAndWebhookKnobDefaults(t *testing.T) {
 	if cfg.PipedreamAPIToken != "" {
 		t.Errorf("PIPEDREAM_API_TOKEN default = %q, want empty", cfg.PipedreamAPIToken)
 	}
+	if cfg.NotificationsConfigured() {
+		t.Error("empty webhook env must report notifications unconfigured")
+	}
 	if cfg.NotifyMaxJobs != 25 {
 		t.Errorf("NOTIFY_MAX_JOBS default = %d, want 25", cfg.NotifyMaxJobs)
 	}
@@ -110,8 +113,23 @@ func TestLoad_NotifyAndWebhookKnobsFromEnv(t *testing.T) {
 	if cfg.HTTPTimeoutSeconds != 45 {
 		t.Errorf("HTTP_TIMEOUT_SECONDS = %d, want 45", cfg.HTTPTimeoutSeconds)
 	}
+	if !cfg.NotificationsConfigured() {
+		t.Error("WEBHOOK_BASE and WEBHOOK_ID must report notifications configured")
+	}
 	if target := cfg.WebhookTarget(); target == cfg.WebhookURL {
 		t.Errorf("WebhookTarget must not use WEBHOOK_URL as the send target, got %q", target)
+	}
+}
+
+func TestNotificationsConfigured_RequiresBaseAndID(t *testing.T) {
+	if (Config{WebhookBase: "https://hooks.example"}).NotificationsConfigured() {
+		t.Error("missing WEBHOOK_ID must be unconfigured")
+	}
+	if (Config{WebhookID: "hook"}).NotificationsConfigured() {
+		t.Error("missing WEBHOOK_BASE must be unconfigured")
+	}
+	if !(Config{WebhookBase: "https://hooks.example/", WebhookID: "/hook"}).NotificationsConfigured() {
+		t.Error("trimmed WEBHOOK_BASE and WEBHOOK_ID must be configured")
 	}
 }
 
