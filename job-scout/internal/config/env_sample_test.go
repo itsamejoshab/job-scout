@@ -34,6 +34,8 @@ func TestEnvSample_DocumentsEveryRuntimeKnob(t *testing.T) {
 		"NOTIFY_MAX_JOBS":              "25",
 		"NOTIFY_CLAIM_TIMEOUT_SECONDS": "900",
 		"HTTP_TIMEOUT_SECONDS":         "30",
+		"APIFY_API_TOKEN":              "",
+		"APIFY_MONTHLY_BUDGET_USD":     "1.00",
 	}
 	for key, val := range want {
 		if knobs[key] != val {
@@ -54,6 +56,15 @@ func TestEnvSample_DocumentsEveryRuntimeKnob(t *testing.T) {
 	}
 	if _, ok := knobs["OAUTH_TOKEN_URL"]; ok {
 		t.Error(".env.sample must not set OAUTH_TOKEN_URL")
+	}
+	if knobs["APIFY_API_TOKEN"] != "" {
+		t.Error(".env.sample APIFY_API_TOKEN must be an empty placeholder")
+	}
+	if knobs["APIFY_MONTHLY_BUDGET_USD"] != "1.00" {
+		t.Errorf(".env.sample APIFY_MONTHLY_BUDGET_USD = %q, want 1.00", knobs["APIFY_MONTHLY_BUDGET_USD"])
+	}
+	if _, ok := knobs["APIFY_USER_ID"]; ok {
+		t.Error(".env.sample must not set APIFY_USER_ID")
 	}
 }
 

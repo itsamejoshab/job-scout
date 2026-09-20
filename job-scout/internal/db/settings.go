@@ -216,7 +216,7 @@ func GetScraperSettings(ctx context.Context, db *sql.DB, source JobSource) (*Scr
 	if s.GlobalSearches == nil {
 		s.GlobalSearches = []string{}
 	}
-	s.SearchQueries = normalizeSearchQueries(s.SearchQueries)
+	s.SearchQueries = normalizeSearchQueries(s.JobSource, s.SearchQueries)
 	return &s, nil
 }
 
@@ -253,7 +253,7 @@ func ReplaceScraperSettings(
 		    scrape_interval_seconds = $7,
 		    updated_at = now()
 		WHERE job_source = $8
-	`, mustJSON(normalizeSearchQueries(in.SearchQueries)), mustJSON(normalizeGlobalSearches(in.GlobalSearches)), in.TimespanCode,
+	`, mustJSON(normalizeSearchQueries(source, in.SearchQueries)), mustJSON(normalizeGlobalSearches(in.GlobalSearches)), in.TimespanCode,
 		in.PagesToScrape, in.Rounds, in.Enabled, in.ScrapeIntervalSeconds, source); err != nil {
 		return nil, err
 	}
@@ -334,7 +334,7 @@ func seedScraperSettings(ctx context.Context, db *sql.DB) error {
 			                              timespan_code, pages_to_scrape, rounds,
 			                              enabled, scrape_interval_seconds)
 			VALUES ($1, $2::json, $3::json, $4, $5, $6, $7, $8)
-		`, s.JobSource, mustJSON(normalizeSearchQueries(s.SearchQueries)), mustJSON(normalizeGlobalSearches(s.GlobalSearches)),
+		`, s.JobSource, mustJSON(normalizeSearchQueries(s.JobSource, s.SearchQueries)), mustJSON(normalizeGlobalSearches(s.GlobalSearches)),
 			s.TimespanCode, s.PagesToScrape, s.Rounds, s.Enabled, intervalOrDefault(s))
 		if err != nil {
 			return err
@@ -376,14 +376,22 @@ func intervalOrDefault(s ScraperSettings) int {
 	return 900
 }
 
-func normalizeSearchQueries(in []map[string]string) []map[string]string {
+func normalizeSearchQueries(source JobSource, in []map[string]string) []map[string]string {
 	out := make([]map[string]string, 0, len(in))
 	for _, query := range in {
-		out = append(out, map[string]string{
+		item := map[string]string{
 			"keywords": query["keywords"],
 			"location": query["location"],
-			"f_WT":     query["f_WT"],
-		})
+		}
+		if source != SourceDice {
+			if _, ok := query["f_WT"]; ok {
+				item["f_WT"] = query["f_WT"]
+			}
+		}
+		if _, ok := query["include_remote"]; ok {
+			item["include_remote"] = query["include_remote"]
+		}
+		out = append(out, item)
 	}
 	return out
 }
@@ -405,20 +413,30 @@ func normalizeGlobalSearches(in []string) []string {
 
 // TryLockJobSource takes a session advisory lock for source without waiting.
 func TryLockJobSource(ctx context.Context, conn *sql.Conn, source JobSource) (bool, error) {
-	var ok bool
-	err := conn.QueryRowContext(ctx, `SELECT pg_try_advisory_lock(hashtext($1))`, string(source)).Scan(&ok)
-	return ok, err
+	return TryLockKey(ctx, conn, string(source))
 }
 
 // UnlockJobSource releases the session advisory lock for source.
 func UnlockJobSource(ctx context.Context, conn *sql.Conn, source JobSource) error {
+	return UnlockKey(ctx, conn, string(source))
+}
+
+// TryLockKey takes a session advisory lock for key without waiting.
+func TryLockKey(ctx context.Context, conn *sql.Conn, key string) (bool, error) {
+	var ok bool
+	err := conn.QueryRowContext(ctx, `SELECT pg_try_advisory_lock(hashtext($1))`, key).Scan(&ok)
+	return ok, err
+}
+
+// UnlockKey releases the session advisory lock for key.
+func UnlockKey(ctx context.Context, conn *sql.Conn, key string) error {
 	var unlocked bool
 	if err := conn.QueryRowContext(ctx,
-		`SELECT pg_advisory_unlock(hashtext($1))`, string(source)).Scan(&unlocked); err != nil {
+		`SELECT pg_advisory_unlock(hashtext($1))`, key).Scan(&unlocked); err != nil {
 		return err
 	}
 	if !unlocked {
-		return fmt.Errorf("advisory lock was not held for job source: %s", source)
+		return fmt.Errorf("advisory lock was not held for key: %s", key)
 	}
 	return nil
 }

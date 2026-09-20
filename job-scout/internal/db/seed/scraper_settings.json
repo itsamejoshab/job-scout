@@ -38,5 +38,21 @@
     "rounds": 1,
     "enabled": false,
     "scrape_interval_seconds": 900
+  },
+  {
+    "job_source": "DICE",
+    "search_queries": [
+      {
+        "keywords": "Desktop or Endpoint or Application Support",
+        "location": "Port Orange, FL",
+        "include_remote": "true"
+      }
+    ],
+    "global_searches": [],
+    "timespan_code": "24h",
+    "pages_to_scrape": 1,
+    "rounds": 1,
+    "enabled": true,
+    "scrape_interval_seconds": 10800
   }
 ]

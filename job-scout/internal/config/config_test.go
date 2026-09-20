@@ -251,3 +251,47 @@ func TestLoad_ScheduleSecondsInvalidProductUsesDefault(t *testing.T) {
 		t.Errorf("invalid SCRAPE_SCHEDULE_SECONDS = %d, want default 600", cfg.ScrapeScheduleSeconds)
 	}
 }
+
+func TestLoad_ApifyTokenAndBudget(t *testing.T) {
+	t.Setenv("APIFY_API_TOKEN", "")
+	t.Setenv("APIFY_MONTHLY_BUDGET_USD", "")
+	cfg := Load()
+	if cfg.ApifyAPIToken != "" {
+		t.Errorf("empty APIFY_API_TOKEN = %q, want empty (boot must succeed)", cfg.ApifyAPIToken)
+	}
+	if cfg.ApifyMonthlyBudgetCents != DefaultApifyBudgetCents {
+		t.Errorf("empty budget cents = %d, want default %d", cfg.ApifyMonthlyBudgetCents, DefaultApifyBudgetCents)
+	}
+
+	t.Setenv("APIFY_API_TOKEN", `"quoted-apify"`)
+	t.Setenv("APIFY_MONTHLY_BUDGET_USD", "abc")
+	cfg = Load()
+	if cfg.ApifyAPIToken != "quoted-apify" {
+		t.Errorf("quoted APIFY_API_TOKEN = %q, want quoted-apify", cfg.ApifyAPIToken)
+	}
+	if cfg.ApifyMonthlyBudgetCents != DefaultApifyBudgetCents {
+		t.Errorf("unparsable budget cents = %d, want default %d", cfg.ApifyMonthlyBudgetCents, DefaultApifyBudgetCents)
+	}
+
+	t.Setenv("APIFY_MONTHLY_BUDGET_USD", "0")
+	cfg = Load()
+	if cfg.ApifyMonthlyBudgetCents != 0 {
+		t.Errorf("parsed 0 budget cents = %d, want 0 (block all starts)", cfg.ApifyMonthlyBudgetCents)
+	}
+
+	t.Setenv("APIFY_MONTHLY_BUDGET_USD", "1.005")
+	cfg = Load()
+	if cfg.ApifyMonthlyBudgetCents != 101 {
+		t.Errorf("1.005 half-up cents = %d, want 101", cfg.ApifyMonthlyBudgetCents)
+	}
+
+	t.Setenv("APIFY_USER_ID", "must-be-ignored")
+	cfg = Load()
+	if _, ok := any(cfg).(interface{ ApifyUserID() string }); ok {
+		t.Error("Config must not load APIFY_USER_ID")
+	}
+	v := reflect.ValueOf(cfg)
+	if v.FieldByName("ApifyUserID").IsValid() {
+		t.Error("Config must not have ApifyUserID")
+	}
+}

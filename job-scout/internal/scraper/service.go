@@ -4,9 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/jobscout/jobscout/internal/config"
@@ -25,6 +27,7 @@ type Result struct {
 	ScrapedCount   int    `json:"scraped_count"`
 	SavedCount     int    `json:"saved_count"`
 	DuplicateCount int    `json:"duplicate_count"`
+	SkippedCount   int    `json:"skipped_count,omitempty"`
 	Error          string `json:"error,omitempty"`
 }
 
@@ -37,10 +40,15 @@ type TickInput struct {
 // Service orchestrates providers and persistence, mirroring the Python
 // ScraperService.
 type Service struct {
-	db           *sql.DB
-	HTTPClient   *http.Client
-	HTTPTimeout  time.Duration
-	ErrorBackoff time.Duration
+	db               *sql.DB
+	HTTPClient       *http.Client
+	HTTPTimeout      time.Duration
+	ErrorBackoff     time.Duration
+	ApifyToken       string
+	ApifyBudgetCents int
+	ApifyBaseURL     string
+	Now              func() time.Time
+	Sleep            func(context.Context, time.Duration) error
 }
 
 func NewService(database *sql.DB) *Service {
@@ -51,6 +59,8 @@ func NewServiceWithConfig(database *sql.DB, cfg config.Config) *Service {
 	s := NewService(database)
 	s.HTTPTimeout = time.Duration(cfg.HTTPTimeoutSeconds) * time.Second
 	s.ErrorBackoff = time.Duration(cfg.ScrapeErrorBackoffSeconds) * time.Second
+	s.ApifyToken = cfg.ApifyAPIToken
+	s.ApifyBudgetCents = cfg.ApifyMonthlyBudgetCents
 	return s
 }
 
@@ -68,6 +78,28 @@ func (s *Service) backoff() time.Duration {
 	return 300 * time.Second
 }
 
+func (s *Service) now() time.Time {
+	if s.Now != nil {
+		return s.Now()
+	}
+	return time.Now()
+}
+
+func (s *Service) apifyClient() *ApifyClient {
+	client := &ApifyClient{
+		BaseURL: s.ApifyBaseURL,
+		Token:   s.ApifyToken,
+		Now:     s.Now,
+		Sleep:   s.Sleep,
+	}
+	if s.HTTPClient != nil {
+		client.HTTP = s.HTTPClient
+	} else {
+		client.HTTP = &http.Client{Timeout: s.timeout()}
+	}
+	return client
+}
+
 func (s *Service) newProvider(source db.JobSource, settings db.ScraperSettings) (Provider, error) {
 	switch source {
 	case db.SourceLinkedIn:
@@ -78,6 +110,8 @@ func (s *Service) newProvider(source db.JobSource, settings db.ScraperSettings) 
 		return li, nil
 	case db.SourceIndeed:
 		return NewIndeed(settings), nil
+	case db.SourceDice:
+		return NewDice(settings, s.apifyClient(), s.ApifyBudgetCents), nil
 	default:
 		return nil, fmt.Errorf("no scraper available for job source: %s", source)
 	}
@@ -114,14 +148,15 @@ func (s *Service) RunTick(ctx context.Context, in TickInput) (Result, error) {
 		return Result{Status: "skipped", JobSource: in.JobSource}, nil
 	}
 
-	var last Result
+	var results []Result
 	for _, p := range due {
-		last, err = s.scrapeSource(ctx, db.JobSource(p.Source))
+		res, err := s.scrapeSource(ctx, db.JobSource(p.Source))
 		if err != nil {
-			return last, err
+			return res, err
 		}
+		results = append(results, res)
 	}
-	return last, nil
+	return combineTickResults(results), nil
 }
 
 // RunFullScrape is the debug sync path: same enabled/lock/insert rules as a
@@ -201,10 +236,33 @@ func (s *Service) scrapeSource(ctx context.Context, source db.JobSource) (Result
 	if err != nil {
 		return errResult(source, err), nil
 	}
+	if source == db.SourceDice && strings.TrimSpace(s.ApifyToken) == "" {
+		return Result{Status: "skipped", JobSource: string(source), Error: ErrApifyTokenMissing.Error()}, nil
+	}
+	if dice, ok := provider.(*DiceScraper); ok {
+		dice.AroundStart = func(ctx context.Context, fn func() error) error {
+			locked, err := db.TryLockKey(ctx, conn, ApifyLockKey)
+			if err != nil {
+				return err
+			}
+			if !locked {
+				return ErrApifyLockBusy
+			}
+			defer func() {
+				unlockCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				if err := db.UnlockKey(unlockCtx, conn, ApifyLockKey); err != nil {
+					slog.Error("apify unlock failed", "err", err)
+				}
+			}()
+			return fn()
+		}
+	}
 
 	var (
 		all       []JobData
 		scrapeErr error
+		skipped   int
 	)
 
 	rounds := scraperSettings.Rounds
@@ -214,61 +272,97 @@ func (s *Service) scrapeSource(ctx context.Context, source db.JobSource) (Result
 	if rounds > 3 {
 		rounds = 3
 	}
+	queries := scraperSettings.SearchQueries
+	if source == db.SourceLinkedIn {
+		queries = combineLinkedInSearchQueries(queries)
+	}
+
+queryLoop:
 	for round := 0; round < rounds; round++ {
-		for _, keywords := range scraperSettings.GlobalSearches {
-			query := map[string]string{"keywords": keywords}
-			jobs, err := provider.ScrapeJobs(ctx, query)
-			searchContext := globalSearchContext(keywords)
-			stampSearchContext(jobs, searchContext)
-			slog.Debug("search completed", "source", source, "round", round+1, "search_context", searchContext, "matches", len(jobs))
-			all = append(all, jobs...)
-			if err != nil {
-				slog.Error("scraping global search failed", "round", round+1, "keywords", keywords, "err", err)
-				scrapeErr = err
-			}
-			if err := sleep(ctx, sleepBetween); err != nil {
-				return s.finishScrape(ctx, source, all, err)
+		if source != db.SourceDice {
+			for _, keywords := range scraperSettings.GlobalSearches {
+				query := map[string]string{"keywords": keywords}
+				jobs, err := provider.ScrapeJobs(ctx, query)
+				searchContext := globalSearchContext(keywords)
+				stampSearchContext(jobs, searchContext)
+				slog.Debug("search completed", "source", source, "round", round+1, "search_context", searchContext, "matches", len(jobs))
+				all = append(all, jobs...)
+				if err != nil {
+					slog.Error("scraping global search failed", "round", round+1, "keywords", keywords, "err", err)
+					scrapeErr = err
+				}
+				if err := sleep(ctx, sleepBetween); err != nil {
+					return s.finishScrape(ctx, source, all, err, skipped)
+				}
 			}
 		}
 
-		queries := scraperSettings.SearchQueries
-		if source == db.SourceLinkedIn {
-			queries = combineLinkedInSearchQueries(queries)
-		}
-		for _, query := range queries {
+		for i, query := range queries {
+			if source == db.SourceDice {
+				if rem, ok := activityRemaining(ctx); ok && rem < DiceMinRemainingStart {
+					leftRounds := rounds - round
+					leftThisRound := len(queries) - i
+					skipped += leftThisRound + (leftRounds-1)*len(queries)
+					slog.Info("dice scrape skipped remaining pairs; activity time low", "skipped", skipped)
+					break queryLoop
+				}
+			}
 			jobs, err := provider.ScrapeJobs(ctx, query)
-			searchContext := querySearchContext(query)
+			searchContext := querySearchContext(source, query)
 			stampSearchContext(jobs, searchContext)
 			slog.Debug("search completed", "source", source, "round", round+1, "search_context", searchContext, "matches", len(jobs))
 			all = append(all, jobs...)
 			if err != nil {
 				slog.Error("scraping query failed", "round", round+1, "query", query, "err", err)
 				scrapeErr = err
+				if source == db.SourceDice {
+					break queryLoop
+				}
 			}
 			if err := sleep(ctx, sleepBetween); err != nil {
-				return s.finishScrape(ctx, source, all, err)
+				return s.finishScrape(ctx, source, all, err, skipped)
 			}
 		}
 	}
 
-	return s.finishScrape(ctx, source, all, scrapeErr)
+	return s.finishScrape(ctx, source, all, scrapeErr, skipped)
 }
 
-func (s *Service) finishScrape(ctx context.Context, source db.JobSource, all []JobData, scrapeErr error) (Result, error) {
+func activityRemaining(ctx context.Context) (time.Duration, bool) {
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return 0, false
+	}
+	return time.Until(deadline), true
+}
+
+func (s *Service) finishScrape(ctx context.Context, source db.JobSource, all []JobData, scrapeErr error, skipped int) (Result, error) {
 	saved, err := s.saveJobs(ctx, all)
 	if err != nil {
 		return errResult(source, err), nil
 	}
 
-	now := time.Now()
+	now := s.now()
 	if scrapeErr != nil {
-		if markErr := db.MarkScrapeFailure(ctx, s.db, source, now.Add(s.backoff())); markErr != nil {
-			slog.Error("mark scrape failure failed", "err", markErr)
+		if !IsApifyTokenMissing(scrapeErr) {
+			next := now.Add(s.backoff())
+			if IsApifyBudgetBlocked(scrapeErr) {
+				var blocked budgetBlockedError
+				if errors.As(scrapeErr, &blocked) && !blocked.periodEnd.IsZero() {
+					next = blocked.periodEnd
+				} else {
+					_, next = ApifyBudgetPeriod(now)
+				}
+			}
+			if markErr := db.MarkScrapeFailure(ctx, s.db, source, next); markErr != nil {
+				slog.Error("mark scrape failure failed", "err", markErr)
+			}
 		}
 		res := errResult(source, scrapeErr)
 		res.ScrapedCount = len(all)
 		res.SavedCount = saved
 		res.DuplicateCount = len(all) - saved
+		res.SkippedCount = skipped
 		return res, nil
 	}
 
@@ -276,13 +370,14 @@ func (s *Service) finishScrape(ctx context.Context, source db.JobSource, all []J
 		return errResult(source, err), nil
 	}
 
-	slog.Info("full scrape complete", "source", source, "scraped", len(all), "saved", saved)
+	slog.Info("full scrape complete", "source", source, "scraped", len(all), "saved", saved, "skipped", skipped)
 	return Result{
 		Status:         "success",
 		JobSource:      string(source),
 		ScrapedCount:   len(all),
 		SavedCount:     saved,
 		DuplicateCount: len(all) - saved,
+		SkippedCount:   skipped,
 	}, nil
 }
 
@@ -316,13 +411,56 @@ func (s *Service) saveJobs(ctx context.Context, jobs []JobData) (int, error) {
 	return saved, nil
 }
 
+func combineTickResults(results []Result) Result {
+	if len(results) == 0 {
+		return Result{Status: "skipped"}
+	}
+	var out Result
+	var errs []string
+	var lastStatus string
+	anyErr := false
+	for _, r := range results {
+		out.ScrapedCount += r.ScrapedCount
+		out.SavedCount += r.SavedCount
+		out.DuplicateCount += r.DuplicateCount
+		out.SkippedCount += r.SkippedCount
+		if r.Error != "" {
+			errs = append(errs, r.Error)
+		}
+		if r.Status == "error" {
+			anyErr = true
+		}
+		if r.Status != "" {
+			lastStatus = r.Status
+		}
+	}
+	if anyErr {
+		out.Status = "error"
+	} else {
+		out.Status = lastStatus
+	}
+	if len(results) == 1 {
+		out.JobSource = results[0].JobSource
+	}
+	out.Error = strings.Join(errs, "; ")
+	return out
+}
+
 func stampSearchContext(jobs []JobData, searchContext string) {
 	for i := range jobs {
 		jobs[i].SearchContext = searchContext
 	}
 }
 
-func querySearchContext(query map[string]string) string {
+func querySearchContext(source db.JobSource, query map[string]string) string {
+	if source == db.SourceDice {
+		return fmt.Sprintf(
+			`query keywords=%q location=%q include_remote=%q`,
+			query["keywords"],
+			query["location"],
+			query["include_remote"],
+		)
+	}
 	return fmt.Sprintf(
 		`query keywords=%q location=%q f_WT=%q`,
 		query["keywords"],

@@ -365,6 +365,119 @@ func TestRunTick_ForceDoesNotFetchIndeed(t *testing.T) {
 	}
 }
 
+func TestRunTick_CombinesDueProviderResults(t *testing.T) {
+	t.Run("two_due_runs_second_after_error", func(t *testing.T) {
+		pool := cadencePool(t)
+		ctx := t.Context()
+		queries, err := json.Marshal([]map[string]string{
+			{"keywords": "IT Help Desk", "location": "101076143"},
+			{"keywords": "Application Support", "location": "101076143"},
+		})
+		if err != nil {
+			t.Fatalf("marshal queries: %v", err)
+		}
+		if _, err := pool.Exec(`
+			UPDATE scraper_settings
+			SET enabled = true, search_queries = $1::json, global_searches = '[]',
+			    last_scraped_at = NULL, next_eligible_at = NULL
+			WHERE job_source = 'LINKEDIN'
+		`, queries); err != nil {
+			t.Fatalf("configure LinkedIn: %v", err)
+		}
+		if _, err := pool.Exec(`
+			UPDATE scraper_settings
+			SET enabled = true, last_scraped_at = NULL, next_eligible_at = NULL
+			WHERE job_source = 'INDEED'
+		`); err != nil {
+			t.Fatalf("enable Indeed so two providers are due: %v", err)
+		}
+		if _, err := pool.Exec(`
+			INSERT INTO jobs (job_source, title, company, location, job_url)
+			VALUES ('LINKEDIN', 'IT Help Desk', 'Acme Corp', 'New York, United States',
+			        'https://www.linkedin.com/jobs/view/4123456789/')
+		`); err != nil {
+			t.Fatalf("seed duplicate job: %v", err)
+		}
+
+		okHandler := linkedInFixtureHandler(t, http.StatusOK)
+		calls := 0
+		client, hits, restore := interceptLinkedIn(t, func(w http.ResponseWriter, r *http.Request) {
+			calls++
+			if calls == 1 {
+				okHandler(w, r)
+				return
+			}
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = io.WriteString(w, "nope")
+		})
+		defer restore()
+
+		s := NewService(pool)
+		s.HTTPClient = client
+		s.ErrorBackoff = 5 * time.Minute
+		result, err := s.RunTick(ctx, TickInput{})
+		if err != nil {
+			t.Fatalf("RunTick: %v", err)
+		}
+		if *hits < 2 {
+			t.Errorf("LinkedIn must continue after an earlier query failure, hits=%d", *hits)
+		}
+		if result.Status != "error" {
+			t.Errorf("combined status = %q, want error when any provider failed", result.Status)
+		}
+		if result.JobSource != "" {
+			t.Errorf("combined job_source = %q, want empty when more than one provider ran", result.JobSource)
+		}
+		wantErr := "linkedin returned status 500; indeed scraper is not implemented"
+		if result.Error != wantErr {
+			t.Errorf("combined error = %q, want %q", result.Error, wantErr)
+		}
+		if result.ScrapedCount != 2 {
+			t.Errorf("combined scraped_count = %d, want 2 (LinkedIn fixture jobs + Indeed 0)", result.ScrapedCount)
+		}
+		if result.SavedCount != 1 {
+			t.Errorf("combined saved_count = %d, want 1 (new LinkedIn job + Indeed 0)", result.SavedCount)
+		}
+		if result.DuplicateCount != 1 {
+			t.Errorf("combined duplicate_count = %d, want 1 (seeded LinkedIn URL + Indeed 0)", result.DuplicateCount)
+		}
+	})
+
+	t.Run("single_due_keeps_job_source", func(t *testing.T) {
+		pool := cadencePool(t)
+		ctx := t.Context()
+		if _, err := pool.Exec(`
+			UPDATE scraper_settings
+			SET enabled = true, last_scraped_at = NULL, next_eligible_at = NULL
+			WHERE job_source = 'LINKEDIN'
+		`); err != nil {
+			t.Fatalf("configure LinkedIn: %v", err)
+		}
+		if _, err := pool.Exec(`
+			UPDATE scraper_settings SET enabled = false WHERE job_source = 'INDEED'
+		`); err != nil {
+			t.Fatalf("disable Indeed: %v", err)
+		}
+
+		okHandler := linkedInFixtureHandler(t, http.StatusOK)
+		client, _, restore := interceptLinkedIn(t, okHandler)
+		defer restore()
+
+		s := NewService(pool)
+		s.HTTPClient = client
+		result, err := s.RunTick(ctx, TickInput{})
+		if err != nil {
+			t.Fatalf("RunTick: %v", err)
+		}
+		if result.Status != "success" {
+			t.Errorf("single LinkedIn tick status = %q (%s), want success", result.Status, result.Error)
+		}
+		if result.JobSource != "LINKEDIN" {
+			t.Errorf("single due provider job_source = %q, want LINKEDIN", result.JobSource)
+		}
+	})
+}
+
 func TestRunFullScrape_IndeedStubDoesNotUpdateLastScrapedAt(t *testing.T) {
 	pool := cadencePool(t)
 	ctx := t.Context()
@@ -619,6 +732,11 @@ func cadencePool(t *testing.T) *sql.DB {
 		WHERE job_source = 'LINKEDIN'
 	`, queries); err != nil {
 		t.Fatalf("shrink LinkedIn queries for tests: %v", err)
+	}
+	if _, err := pool.Exec(`
+		UPDATE scraper_settings SET enabled = false WHERE job_source = 'DICE'
+	`); err != nil {
+		t.Fatalf("disable Dice so LinkedIn cadence tests stay isolated: %v", err)
 	}
 	return pool
 }

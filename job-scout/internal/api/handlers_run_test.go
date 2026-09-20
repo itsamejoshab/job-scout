@@ -75,6 +75,28 @@ func TestRun_ForceDoesNotTargetIndeed(t *testing.T) {
 	}
 }
 
+func TestRun_JobSourceDiceTargetsDiceProvider(t *testing.T) {
+	fake := &runTemporalFake{}
+	h := &Handler{Temporal: fake}
+	srv := NewServer("", h)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v0/run?job_source=DICE&force=1", nil)
+	rec := httptest.NewRecorder()
+	srv.Handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST /api/v0/run?job_source=DICE status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if len(fake.starts) != 1 {
+		t.Fatalf("starts=%d, want 1", len(fake.starts))
+	}
+	if jobSourceArg(fake.starts[0].args) != "DICE" {
+		t.Errorf("TickInput.JobSource = %q, want DICE", jobSourceArg(fake.starts[0].args))
+	}
+	if forceArg(fake.starts[0].args[0]) != true {
+		t.Error("force=1 must echo onto the Dice tick")
+	}
+}
+
 func bodyForce(t *testing.T, rec *httptest.ResponseRecorder) any {
 	t.Helper()
 	var body map[string]any

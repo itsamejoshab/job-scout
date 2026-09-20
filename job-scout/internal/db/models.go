@@ -13,11 +13,12 @@ type JobSource string
 const (
 	SourceLinkedIn JobSource = "LINKEDIN"
 	SourceIndeed   JobSource = "INDEED"
+	SourceDice     JobSource = "DICE"
 )
 
 // AllJobSources lists every valid source, used for validation messages.
 func AllJobSources() []JobSource {
-	return []JobSource{SourceLinkedIn, SourceIndeed}
+	return []JobSource{SourceLinkedIn, SourceIndeed, SourceDice}
 }
 
 // ParseJobSource normalizes case and validates. The old Python app was
@@ -29,6 +30,8 @@ func ParseJobSource(s string) (JobSource, error) {
 		return SourceLinkedIn, nil
 	case SourceIndeed:
 		return SourceIndeed, nil
+	case SourceDice:
+		return SourceDice, nil
 	default:
 		return "", fmt.Errorf("invalid job source: %s (valid: %v)", s, AllJobSources())
 	}

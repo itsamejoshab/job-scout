@@ -26,6 +26,23 @@ export interface NotificationSettingsInput {
   enabled: boolean;
 }
 
+export type ApifyBudgetReason =
+  | "ok"
+  | "token_missing"
+  | "budget_exhausted"
+  | "usage_unknown"
+  | "apify_unavailable";
+
+export interface ApifyBudget {
+  period_start: string;
+  period_end: string;
+  limit_usd: number;
+  used_usd: number | null;
+  remaining_usd: number | null;
+  blocked: boolean;
+  reason: ApifyBudgetReason;
+}
+
 export interface DashboardProviderStats {
   job_source: string;
   implemented: boolean;
@@ -37,6 +54,7 @@ export interface DashboardProviderStats {
   total_jobs: number;
   by_state: Record<string, number>;
   by_reject_reason: Record<string, number>;
+  apify_budget?: ApifyBudget;
 }
 
 export interface DashboardDailyPoint {
@@ -134,6 +152,8 @@ export interface ProviderSearchQuery {
   location: string;
   /** Work-type codes for LinkedIn settings UI (1 on-site, 2 remote, 3 hybrid). Not sent as a LinkedIn URL filter. */
   f_WT?: string;
+  /** Dice remote-inclusion flag. PUT sends a boolean; GET stores canonical "true"/"false" strings. */
+  include_remote?: boolean | string;
 }
 
 export interface ProviderSettings {
@@ -150,6 +170,7 @@ export interface ProviderSettings {
   next_eligible_at: string | null;
   created_at: string;
   updated_at: string;
+  apify_budget?: ApifyBudget;
 }
 
 export type ProviderSettingsInput = Pick<

@@ -31,8 +31,19 @@ interface LinkedInMatrix {
   locations: LinkedInLocation[];
 }
 
+interface DiceLocation {
+  location: string;
+  includeRemote: boolean;
+}
+
+interface DiceMatrix {
+  queries: string[];
+  locations: DiceLocation[];
+}
+
 interface ProviderDraft extends ProviderSettingsInput {
   linkedInMatrix?: LinkedInMatrix;
+  diceMatrix?: DiceMatrix;
 }
 
 function toLinkedInMatrix(searchQueries: ProviderSettings["search_queries"]): LinkedInMatrix {
@@ -85,22 +96,81 @@ function fromLinkedInMatrix(matrix: LinkedInMatrix): ProviderSettings["search_qu
   );
 }
 
+function remoteFlag(value: ProviderSettings["search_queries"][number]["include_remote"]) {
+  return value === true || value === "true";
+}
+
+function toDiceMatrix(searchQueries: ProviderSettings["search_queries"]): DiceMatrix {
+  const queries: string[] = [];
+  const locations: DiceLocation[] = [];
+  const seen = new Map<string, number>();
+
+  for (const query of searchQueries) {
+    if (!queries.includes(query.keywords)) {
+      queries.push(query.keywords);
+    }
+    const key = query.location;
+    const includeRemote = remoteFlag(query.include_remote);
+    const existing = seen.get(key);
+    if (existing === undefined) {
+      seen.set(key, locations.length);
+      locations.push({ location: query.location, includeRemote });
+      continue;
+    }
+    locations[existing] = { location: query.location, includeRemote };
+  }
+
+  return { queries, locations };
+}
+
+function fromDiceMatrix(matrix: DiceMatrix): ProviderSettingsInput["search_queries"] {
+  const locations: DiceLocation[] = [];
+  const seen = new Map<string, number>();
+  for (const location of matrix.locations) {
+    const key = location.location.trim();
+    if (key === "") {
+      locations.push(location);
+      continue;
+    }
+    const existing = seen.get(key);
+    if (existing === undefined) {
+      seen.set(key, locations.length);
+      locations.push({ location: location.location, includeRemote: location.includeRemote });
+      continue;
+    }
+    locations[existing] = { location: location.location, includeRemote: location.includeRemote };
+  }
+  return matrix.queries.flatMap((keywords) =>
+    locations.map((location) => ({
+      keywords,
+      location: location.location,
+      include_remote: location.includeRemote,
+    })),
+  );
+}
+
 function toInput(settings: ProviderSettings): ProviderDraft {
+  const diceMatrix = settings.job_source === "DICE"
+    ? toDiceMatrix(settings.search_queries)
+    : undefined;
   return {
     enabled: settings.enabled,
     scrape_interval_seconds: settings.scrape_interval_seconds,
     timespan_code: settings.timespan_code,
     pages_to_scrape: settings.pages_to_scrape,
     rounds: settings.rounds,
-    search_queries: settings.search_queries.map((query) => ({
-      keywords: query.keywords,
-      location: query.location,
-      f_WT: query.f_WT ?? "",
-    })),
-    global_searches: [...settings.global_searches],
+    search_queries: settings.job_source === "DICE" && diceMatrix
+      ? fromDiceMatrix(diceMatrix)
+      : settings.search_queries.map((query) => ({
+          keywords: query.keywords,
+          location: query.location,
+          f_WT: query.f_WT ?? "",
+        })),
+    global_searches: settings.job_source === "DICE" ? [] : [...settings.global_searches],
     linkedInMatrix: settings.job_source === "LINKEDIN"
       ? toLinkedInMatrix(settings.search_queries)
       : undefined,
+    diceMatrix,
   };
 }
 
@@ -321,6 +391,138 @@ function LinkedInSearchEditor({
   );
 }
 
+function DiceSearchEditor({
+  matrix,
+  onChange,
+}: {
+  matrix: DiceMatrix;
+  onChange: (matrix: DiceMatrix) => void;
+}) {
+  return (
+    <>
+      <SettingsGroup
+        title="Queries"
+        hint="Combined with every location below."
+        count={`${matrix.queries.length} queries`}
+      >
+        <div className="mt-2 max-w-md space-y-1.5">
+          {matrix.queries.map((query, index) => (
+            <div className="flex gap-2" key={index}>
+              <input
+                aria-label={`Dice query ${index + 1}`}
+                className="field-sm min-w-0 flex-1"
+                value={query}
+                onChange={(event) => {
+                  const queries = matrix.queries.map((item, itemIndex) =>
+                    itemIndex === index ? event.target.value : item
+                  );
+                  onChange({ ...matrix, queries });
+                }}
+              />
+              <RemoveButton
+                label={`Remove Dice query ${index + 1}`}
+                onClick={() => onChange({
+                  ...matrix,
+                  queries: matrix.queries.filter((_, itemIndex) => itemIndex !== index),
+                })}
+              />
+            </div>
+          ))}
+        </div>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="mt-2"
+          onClick={() => onChange({ ...matrix, queries: [...matrix.queries, ""] })}
+        >
+          <Plus className="h-4 w-4" aria-hidden="true" />
+          Add Dice query
+        </Button>
+      </SettingsGroup>
+
+      <SettingsGroup
+        title="Locations"
+        hint="Free-text city and state. Include remote is stored per location."
+        count={`${matrix.locations.length} locations`}
+      >
+        {matrix.locations.length === 0 ? (
+          <p className="mt-2 text-sm text-muted-foreground">
+            No locations yet. Add a city and state to start.
+          </p>
+        ) : (
+          <table className="mt-2 max-w-md text-left text-sm">
+            <thead>
+              <tr className="text-xs font-medium text-muted-foreground">
+                <th className="py-1 pr-3 font-medium">Location</th>
+                <th className="px-2 py-1 text-center font-medium">Include remote</th>
+                <th className="sr-only">Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {matrix.locations.map((location, index) => (
+                <tr key={index}>
+                  <td className="py-1 pr-3">
+                    <input
+                      aria-label={`Dice location ${index + 1}`}
+                      className="field-sm min-w-0 w-56"
+                      value={location.location}
+                      onChange={(event) => {
+                        const locations = matrix.locations.map((item, itemIndex) =>
+                          itemIndex === index ? { ...item, location: event.target.value } : item
+                        );
+                        onChange({ ...matrix, locations });
+                      }}
+                    />
+                  </td>
+                  <td className="px-2 py-1 text-center">
+                    <input
+                      type="checkbox"
+                      aria-label={`Dice location ${index + 1} include remote`}
+                      checked={location.includeRemote}
+                      onChange={(event) => {
+                        const locations = matrix.locations.map((item, itemIndex) =>
+                          itemIndex === index
+                            ? { ...item, includeRemote: event.target.checked }
+                            : item
+                        );
+                        onChange({ ...matrix, locations });
+                      }}
+                    />
+                  </td>
+                  <td className="py-1 pl-2">
+                    <RemoveButton
+                      label={`Remove Dice location ${index + 1}`}
+                      onClick={() => onChange({
+                        ...matrix,
+                        locations: matrix.locations.filter((_, itemIndex) => itemIndex !== index),
+                      })}
+                    />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        <Button
+          size="sm"
+          variant="ghost"
+          className="mt-2"
+          onClick={() => onChange({
+            ...matrix,
+            locations: [
+              ...matrix.locations,
+              { location: "", includeRemote: true },
+            ],
+          })}
+        >
+          <Plus className="h-4 w-4" aria-hidden="true" />
+          Add Dice location
+        </Button>
+      </SettingsGroup>
+    </>
+  );
+}
+
 function GlobalSearchesEditor({
   source,
   searches,
@@ -418,6 +620,14 @@ function ProviderSection({
       search_queries: fromLinkedInMatrix(matrix),
     }));
   };
+  const patchDice = (matrix: DiceMatrix) => {
+    setDraft((current) => ({
+      ...current,
+      diceMatrix: matrix,
+      search_queries: fromDiceMatrix(matrix),
+      global_searches: [],
+    }));
+  };
 
   return (
     <article className="surface mt-3 overflow-hidden">
@@ -474,12 +684,25 @@ function ProviderSection({
           />
         </SettingRow>
         <SettingRow label="Timespan code" hint="Provider code for posting age, such as r86400 for one day.">
-          <input
-            aria-label={`${source} timespan code`}
-            className="field-sm w-28 shrink-0"
-            value={draft.timespan_code}
-            onChange={(event) => patch({ timespan_code: event.target.value })}
-          />
+          {source === "DICE" ? (
+            <select
+              aria-label="DICE posted date"
+              className="field-sm w-28 shrink-0"
+              value={draft.timespan_code}
+              onChange={(event) => patch({ timespan_code: event.target.value })}
+            >
+              {["all", "24h", "3d", "7d", "30d"].map((code) => (
+                <option key={code} value={code}>{code}</option>
+              ))}
+            </select>
+          ) : (
+            <input
+              aria-label={`${source} timespan code`}
+              className="field-sm w-28 shrink-0"
+              value={draft.timespan_code}
+              onChange={(event) => patch({ timespan_code: event.target.value })}
+            />
+          )}
         </SettingRow>
         <SettingRow label="Pages to scrape" hint="Result pages to read for each search.">
           <input
@@ -506,6 +729,8 @@ function ProviderSection({
 
       {source === "LINKEDIN" && draft.linkedInMatrix ? (
         <LinkedInSearchEditor matrix={draft.linkedInMatrix} onChange={patchLinkedIn} />
+      ) : source === "DICE" && draft.diceMatrix ? (
+        <DiceSearchEditor matrix={draft.diceMatrix} onChange={patchDice} />
       ) : (
         <SettingsGroup title="Search queries" count={`${draft.search_queries.length} queries`}>
           <table className="mt-2 max-w-xl text-left text-sm">
@@ -576,11 +801,13 @@ function ProviderSection({
         </SettingsGroup>
       )}
 
-      <GlobalSearchesEditor
-        source={source}
-        searches={draft.global_searches}
-        onChange={(global_searches) => patch({ global_searches })}
-      />
+      {source !== "DICE" && (
+        <GlobalSearchesEditor
+          source={source}
+          searches={draft.global_searches}
+          onChange={(global_searches) => patch({ global_searches })}
+        />
+      )}
 
       <SettingsGroup title="State">
         <div className="mt-1 space-y-0.5 text-xs text-muted-foreground">

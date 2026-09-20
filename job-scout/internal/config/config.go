@@ -41,6 +41,87 @@ type Config struct {
 	NotifyClaimTimeoutSeconds int
 	ScrapeScheduleSeconds     int
 	NotifyCron                string
+
+	ApifyAPIToken           string
+	ApifyMonthlyBudgetCents int
+}
+
+const DefaultApifyBudgetCents = 100
+
+// ParseUSDToCents reads a decimal USD amount into integer cents using half-up rounding.
+// Invalid text returns ok=false.
+func ParseUSDToCents(raw string) (int, bool) {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return 0, false
+	}
+	neg := false
+	if strings.HasPrefix(s, "-") {
+		neg = true
+		s = s[1:]
+	} else if strings.HasPrefix(s, "+") {
+		s = s[1:]
+	}
+	if s == "" {
+		return 0, false
+	}
+	dollars, frac, hasDot := strings.Cut(s, ".")
+	if strings.Contains(frac, ".") {
+		return 0, false
+	}
+	if dollars == "" {
+		if !hasDot {
+			return 0, false
+		}
+		dollars = "0"
+	}
+	if !allDigits(dollars) {
+		return 0, false
+	}
+	d, err := strconv.Atoi(dollars)
+	if err != nil {
+		return 0, false
+	}
+	fracDigits := frac
+	if hasDot && !allDigits(fracDigits) {
+		return 0, false
+	}
+	for len(fracDigits) < 3 {
+		fracDigits += "0"
+	}
+	centsPart, err := strconv.Atoi(fracDigits[:2])
+	if err != nil {
+		return 0, false
+	}
+	cents := d*100 + centsPart
+	if fracDigits[2] >= '5' {
+		cents++
+	}
+	if neg {
+		cents = -cents
+	}
+	return cents, true
+}
+
+func allDigits(s string) bool {
+	if s == "" {
+		return true
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func parseApifyBudgetCents() int {
+	v := strings.TrimSpace(os.Getenv("APIFY_MONTHLY_BUDGET_USD"))
+	cents, ok := ParseUSDToCents(trimEnvQuotes(v))
+	if !ok {
+		return DefaultApifyBudgetCents
+	}
+	return cents
 }
 
 // WebhookTarget is WEBHOOK_BASE with trailing slashes removed. It is the send URL.
@@ -159,6 +240,8 @@ func Load() Config {
 		NotifyClaimTimeoutSeconds: getenvIntAllowZero("NOTIFY_CLAIM_TIMEOUT_SECONDS", 900),
 		ScrapeScheduleSeconds:     getenvInt("SCRAPE_SCHEDULE_SECONDS", 600),
 		NotifyCron:                getenv("NOTIFY_CRON", "39 7,17,20 * * *"),
+		ApifyAPIToken:             trimEnvQuotes(getenv("APIFY_API_TOKEN", "")),
+		ApifyMonthlyBudgetCents:   parseApifyBudgetCents(),
 	}
 	return cfg
 }

@@ -1,0 +1,1 @@
+ALTER TYPE jobsource ADD VALUE 'DICE';
