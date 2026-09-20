@@ -31,6 +31,9 @@ type DashboardDailyPoint struct {
 	Day      string `json:"day"`
 	Total    int    `json:"total"`
 	Notified int    `json:"notified"`
+	Applied  int    `json:"applied"`
+	Pending  int    `json:"pending"`
+	Skipped  int    `json:"skipped"`
 }
 
 // DashboardStats is the database-backed dashboard aggregate response payload.
@@ -167,20 +170,35 @@ func loadDashboardDaily(ctx context.Context, database *sql.DB, timezone string) 
 				(now() AT TIME ZONE $1)::date,
 				interval '1 day'
 			)::date AS day
+		),
+		created AS (
+			SELECT
+				((created_at AT TIME ZONE 'UTC') AT TIME ZONE $1)::date AS day,
+				COUNT(*) AS total,
+				COUNT(*) FILTER (WHERE state = 'applied') AS applied,
+				COUNT(*) FILTER (WHERE state IN ('pending', 'needs_detail', 'ready')) AS pending,
+				COUNT(*) FILTER (WHERE state IN ('rejected', 'dismissed')) AS skipped
+			FROM jobs
+			GROUP BY 1
+		),
+		notified AS (
+			SELECT
+				(notified_at AT TIME ZONE $1)::date AS day,
+				COUNT(*) AS notified
+			FROM jobs
+			WHERE notified_at IS NOT NULL
+			GROUP BY 1
 		)
 		SELECT
 			to_char(days.day, 'YYYY-MM-DD') AS day,
-			(
-				SELECT COUNT(*)
-				FROM jobs AS j
-				WHERE ((j.created_at AT TIME ZONE 'UTC') AT TIME ZONE $1)::date = days.day
-			) AS total,
-			(
-				SELECT COUNT(*)
-				FROM jobs AS j
-				WHERE (j.notified_at AT TIME ZONE $1)::date = days.day
-			) AS notified
+			COALESCE(created.total, 0) AS total,
+			COALESCE(notified.notified, 0) AS notified,
+			COALESCE(created.applied, 0) AS applied,
+			COALESCE(created.pending, 0) AS pending,
+			COALESCE(created.skipped, 0) AS skipped
 		FROM days
+		LEFT JOIN created ON created.day = days.day
+		LEFT JOIN notified ON notified.day = days.day
 		ORDER BY days.day
 	`, timezone)
 	if err != nil {
@@ -191,7 +209,14 @@ func loadDashboardDaily(ctx context.Context, database *sql.DB, timezone string) 
 	out := []DashboardDailyPoint{}
 	for rows.Next() {
 		var point DashboardDailyPoint
-		if err := rows.Scan(&point.Day, &point.Total, &point.Notified); err != nil {
+		if err := rows.Scan(
+			&point.Day,
+			&point.Total,
+			&point.Notified,
+			&point.Applied,
+			&point.Pending,
+			&point.Skipped,
+		); err != nil {
 			return nil, err
 		}
 		out = append(out, point)

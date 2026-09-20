@@ -39,6 +39,9 @@ type dashboardDailyPoint struct {
 	Day      string `json:"day"`
 	Total    int    `json:"total"`
 	Notified int    `json:"notified"`
+	Applied  int    `json:"applied"`
+	Pending  int    `json:"pending"`
+	Skipped  int    `json:"skipped"`
 }
 
 func TestDashboardStats_AggregatesProvidersAndDailySeries(t *testing.T) {
@@ -185,6 +188,15 @@ func TestDashboardStats_AggregatesProvidersAndDailySeries(t *testing.T) {
 	if got := dailyTotals[shiftedDay].Notified; got != 1 {
 		t.Errorf("daily notified for %s = %d, want 1", shiftedDay, got)
 	}
+	if got := dailyTotals[shiftedDay].Applied; got != 0 {
+		t.Errorf("daily applied for %s = %d, want 0", shiftedDay, got)
+	}
+	if got := dailyTotals[shiftedDay].Pending; got != 2 {
+		t.Errorf("daily pending for %s = %d, want 2 (pending + ready)", shiftedDay, got)
+	}
+	if got := dailyTotals[shiftedDay].Skipped; got != 1 {
+		t.Errorf("daily skipped for %s = %d, want 1 (rejected)", shiftedDay, got)
+	}
 	for _, day := range expectedDays {
 		if day == shiftedDay {
 			continue
@@ -194,6 +206,15 @@ func TestDashboardStats_AggregatesProvidersAndDailySeries(t *testing.T) {
 		}
 		if got := dailyTotals[day].Notified; got != 0 {
 			t.Errorf("daily notified for %s = %d, want 0", day, got)
+		}
+		if got := dailyTotals[day].Applied; got != 0 {
+			t.Errorf("daily applied for %s = %d, want 0", day, got)
+		}
+		if got := dailyTotals[day].Pending; got != 0 {
+			t.Errorf("daily pending for %s = %d, want 0", day, got)
+		}
+		if got := dailyTotals[day].Skipped; got != 0 {
+			t.Errorf("daily skipped for %s = %d, want 0", day, got)
 		}
 	}
 }

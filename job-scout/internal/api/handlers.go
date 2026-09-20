@@ -750,6 +750,9 @@ type dashboardDailyView struct {
 	Day      string `json:"day"`
 	Total    int    `json:"total"`
 	Notified int    `json:"notified"`
+	Applied  int    `json:"applied"`
+	Pending  int    `json:"pending"`
+	Skipped  int    `json:"skipped"`
 }
 
 // GET /api/v0/dashboard/stats
@@ -799,6 +802,9 @@ func (h *Handler) DashboardStats(w http.ResponseWriter, r *http.Request) {
 			Day:      point.Day,
 			Total:    point.Total,
 			Notified: point.Notified,
+			Applied:  point.Applied,
+			Pending:  point.Pending,
+			Skipped:  point.Skipped,
 		})
 	}
 

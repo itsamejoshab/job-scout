@@ -32,6 +32,9 @@ export interface DashboardDailyPoint {
   day: string;
   total: number;
   notified: number;
+  applied: number;
+  pending: number;
+  skipped: number;
 }
 
 export interface DashboardStats {
