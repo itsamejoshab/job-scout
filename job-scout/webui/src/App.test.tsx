@@ -393,7 +393,7 @@ describe("operator shell", () => {
 
     expect(await screen.findByText("LINKEDIN")).toBeInTheDocument();
     expect(screen.getByText("INDEED")).toBeInTheDocument();
-    expect(screen.getByText("Status: waiting")).toBeInTheDocument();
+    expect(screen.getByText("Status: on cooldown")).toBeInTheDocument();
     expect(screen.getByText("Status: disabled")).toBeInTheDocument();
     const linkedInCard = screen.getByText("LINKEDIN").closest("article");
     expect(linkedInCard).not.toBeNull();
@@ -404,15 +404,15 @@ describe("operator shell", () => {
     expect(screen.getByText("Jobs over time (America/New_York)")).toBeInTheDocument();
     expect(screen.queryByText(/Jobs emailed/i)).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Jobs by status" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Skipped jobs by reason" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Rejected jobs by reason" })).toBeInTheDocument();
     expect(screen.getByLabelText("Jobs by status legend")).toBeInTheDocument();
-    expect(screen.getByLabelText("Skipped jobs by reason legend")).toBeInTheDocument();
+    expect(screen.getByLabelText("Rejected jobs by reason legend")).toBeInTheDocument();
     expect(screen.getByLabelText("Jobs by status legend")).toHaveTextContent("Pending");
     expect(screen.getByLabelText("Jobs by status legend")).toHaveTextContent("1");
-    expect(screen.getByLabelText("Skipped jobs by reason legend")).toHaveTextContent(
+    expect(screen.getByLabelText("Rejected jobs by reason legend")).toHaveTextContent(
       "Title or company",
     );
-    expect(screen.getByLabelText("Skipped jobs by reason legend")).toHaveTextContent(
+    expect(screen.getByLabelText("Rejected jobs by reason legend")).toHaveTextContent(
       "Dismissed by you",
     );
   });
