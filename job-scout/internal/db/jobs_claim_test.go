@@ -2,13 +2,12 @@ package db
 
 import (
 	"context"
-	"sort"
 	"sync"
 	"testing"
 	"time"
 )
 
-func TestClaimEligibleJobs_TakesOldestUpToLimitAndLeavesLeftovers(t *testing.T) {
+func TestClaimReadyJobs_TakesOldestUpToLimitAndLeavesLeftovers(t *testing.T) {
 	pool := migratedPool(t)
 	ctx := context.Background()
 	urls := []string{
@@ -21,8 +20,8 @@ func TestClaimEligibleJobs_TakesOldestUpToLimitAndLeavesLeftovers(t *testing.T) 
 			t.Fatalf("insert %s: %v", u, err)
 		}
 	}
-	if _, err := pool.Exec(`UPDATE jobs SET state = 'eligible'`); err != nil {
-		t.Fatalf("mark eligible: %v", err)
+	if _, err := pool.Exec(`UPDATE jobs SET state = 'ready'`); err != nil {
+		t.Fatalf("mark ready: %v", err)
 	}
 	if _, err := pool.Exec(`UPDATE jobs SET created_at = now() - interval '3 minutes' WHERE job_url LIKE '%claim-old/'`); err != nil {
 		t.Fatalf("age old: %v", err)
@@ -31,9 +30,9 @@ func TestClaimEligibleJobs_TakesOldestUpToLimitAndLeavesLeftovers(t *testing.T) 
 		t.Fatalf("age mid: %v", err)
 	}
 
-	claimed, err := ClaimEligibleJobs(ctx, pool, 2)
+	claimed, err := ClaimReadyJobs(ctx, pool, 2, 0)
 	if err != nil {
-		t.Fatalf("ClaimEligibleJobs: %v", err)
+		t.Fatalf("ClaimReadyJobs: %v", err)
 	}
 	if len(claimed) != 2 {
 		t.Fatalf("claimed = %d, want 2 (NOTIFY_MAX_JOBS batch)", len(claimed))
@@ -42,8 +41,8 @@ func TestClaimEligibleJobs_TakesOldestUpToLimitAndLeavesLeftovers(t *testing.T) 
 		t.Errorf("claimed URLs = %s, %s, want oldest then next (%s, %s)", claimed[0].JobURL, claimed[1].JobURL, urls[0], urls[1])
 	}
 	for _, j := range claimed {
-		if j.State != JobStateNotifying {
-			t.Errorf("claimed %s state = %q, want notifying", j.JobURL, j.State)
+		if j.State != JobStateReady || j.NotifiedAt == nil || j.NotifyClaimedAt == nil {
+			t.Errorf("claimed %s = %+v, want ready with claim markers", j.JobURL, j)
 		}
 	}
 
@@ -51,19 +50,19 @@ func TestClaimEligibleJobs_TakesOldestUpToLimitAndLeavesLeftovers(t *testing.T) 
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
-	byURL := map[string]string{}
+	byURL := map[string]Job{}
 	for _, j := range jobs {
-		byURL[j.JobURL] = j.State
+		byURL[j.JobURL] = j
 	}
-	if byURL[urls[0]] != JobStateNotifying || byURL[urls[1]] != JobStateNotifying {
-		t.Errorf("claimed states = %v, want notifying for the batch", byURL)
+	if byURL[urls[0]].NotifiedAt == nil || byURL[urls[1]].NotifiedAt == nil {
+		t.Errorf("claimed rows = %v, want notified_at for the batch", byURL)
 	}
-	if byURL[urls[2]] != JobStateEligible {
-		t.Errorf("leftover %s state = %q, want eligible for the next notify", urls[2], byURL[urls[2]])
+	if byURL[urls[2]].State != JobStateReady || byURL[urls[2]].NotifiedAt != nil {
+		t.Errorf("leftover %s = %+v, want unemailed ready for next notify", urls[2], byURL[urls[2]])
 	}
 }
 
-func TestClaimEligibleJobs_SkipLockedDoesNotWaitOnLockedEligible(t *testing.T) {
+func TestClaimReadyJobs_SkipLockedDoesNotWaitOnLockedReady(t *testing.T) {
 	pool := migratedPool(t)
 	ctx := context.Background()
 	if _, err := InsertJobIfNew(ctx, pool, sampleJob("https://www.linkedin.com/jobs/view/lock-a/")); err != nil {
@@ -72,8 +71,8 @@ func TestClaimEligibleJobs_SkipLockedDoesNotWaitOnLockedEligible(t *testing.T) {
 	if _, err := InsertJobIfNew(ctx, pool, sampleJob("https://www.linkedin.com/jobs/view/lock-b/")); err != nil {
 		t.Fatalf("insert b: %v", err)
 	}
-	if _, err := pool.Exec(`UPDATE jobs SET state = 'eligible'`); err != nil {
-		t.Fatalf("mark eligible: %v", err)
+	if _, err := pool.Exec(`UPDATE jobs SET state = 'ready'`); err != nil {
+		t.Fatalf("mark ready: %v", err)
 	}
 	if _, err := pool.Exec(`UPDATE jobs SET created_at = now() - interval '2 minutes' WHERE job_url LIKE '%lock-a/'`); err != nil {
 		t.Fatalf("age a: %v", err)
@@ -94,7 +93,7 @@ func TestClaimEligibleJobs_SkipLockedDoesNotWaitOnLockedEligible(t *testing.T) {
 	done := make(chan []Job, 1)
 	errCh := make(chan error, 1)
 	go func() {
-		claimed, err := ClaimEligibleJobs(ctx, pool, 2)
+		claimed, err := ClaimReadyJobs(ctx, pool, 2, 0)
 		if err != nil {
 			errCh <- err
 			return
@@ -104,7 +103,7 @@ func TestClaimEligibleJobs_SkipLockedDoesNotWaitOnLockedEligible(t *testing.T) {
 
 	select {
 	case err := <-errCh:
-		t.Fatalf("ClaimEligibleJobs: %v", err)
+		t.Fatalf("ClaimReadyJobs: %v", err)
 	case claimed := <-done:
 		if len(claimed) != 1 {
 			t.Fatalf("SKIP LOCKED claimed = %d, want 1 (locked oldest row skipped)", len(claimed))
@@ -113,11 +112,11 @@ func TestClaimEligibleJobs_SkipLockedDoesNotWaitOnLockedEligible(t *testing.T) {
 			t.Errorf("claimed URL = %q, want lock-b (not the locked row)", claimed[0].JobURL)
 		}
 	case <-time.After(2 * time.Second):
-		t.Fatal("ClaimEligibleJobs blocked on a locked eligible row; want FOR UPDATE SKIP LOCKED")
+		t.Fatal("ClaimReadyJobs blocked on a locked ready row; want FOR UPDATE SKIP LOCKED")
 	}
 }
 
-func TestClaimEligibleJobs_ConcurrentClaimsDoNotShareJobs(t *testing.T) {
+func TestClaimReadyJobs_ConcurrentClaimsDoNotShareJobs(t *testing.T) {
 	pool := migratedPool(t)
 	ctx := context.Background()
 	if _, err := InsertJobIfNew(ctx, pool, sampleJob("https://www.linkedin.com/jobs/view/race-a/")); err != nil {
@@ -126,8 +125,8 @@ func TestClaimEligibleJobs_ConcurrentClaimsDoNotShareJobs(t *testing.T) {
 	if _, err := InsertJobIfNew(ctx, pool, sampleJob("https://www.linkedin.com/jobs/view/race-b/")); err != nil {
 		t.Fatalf("insert b: %v", err)
 	}
-	if _, err := pool.Exec(`UPDATE jobs SET state = 'eligible'`); err != nil {
-		t.Fatalf("mark eligible: %v", err)
+	if _, err := pool.Exec(`UPDATE jobs SET state = 'ready'`); err != nil {
+		t.Fatalf("mark ready: %v", err)
 	}
 
 	var wg sync.WaitGroup
@@ -137,7 +136,7 @@ func TestClaimEligibleJobs_ConcurrentClaimsDoNotShareJobs(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			claimed, err := ClaimEligibleJobs(ctx, pool, 1)
+			claimed, err := ClaimReadyJobs(ctx, pool, 1, 0)
 			if err != nil {
 				errs <- err
 				return
@@ -157,12 +156,12 @@ func TestClaimEligibleJobs_ConcurrentClaimsDoNotShareJobs(t *testing.T) {
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):
-		t.Fatal("concurrent ClaimEligibleJobs hung")
+		t.Fatal("concurrent ClaimReadyJobs hung")
 	}
 	close(got)
 	close(errs)
 	for err := range errs {
-		t.Fatalf("ClaimEligibleJobs: %v", err)
+		t.Fatalf("ClaimReadyJobs: %v", err)
 	}
 
 	var all []int64
@@ -177,7 +176,7 @@ func TestClaimEligibleJobs_ConcurrentClaimsDoNotShareJobs(t *testing.T) {
 	}
 }
 
-func TestClaimEligibleJobs_TieBreaksEqualCreatedAtByLowerID(t *testing.T) {
+func TestClaimReadyJobs_TieBreaksEqualCreatedAtByLowerID(t *testing.T) {
 	pool := migratedPool(t)
 	ctx := context.Background()
 	if _, err := InsertJobIfNew(ctx, pool, sampleJob("https://www.linkedin.com/jobs/view/tie-a/")); err != nil {
@@ -187,7 +186,7 @@ func TestClaimEligibleJobs_TieBreaksEqualCreatedAtByLowerID(t *testing.T) {
 		t.Fatalf("insert b: %v", err)
 	}
 	fixed := time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC)
-	if _, err := pool.Exec(`UPDATE jobs SET state = 'eligible', created_at = $1`, fixed); err != nil {
+	if _, err := pool.Exec(`UPDATE jobs SET state = 'ready', created_at = $1`, fixed); err != nil {
 		t.Fatalf("same created_at: %v", err)
 	}
 
@@ -195,9 +194,9 @@ func TestClaimEligibleJobs_TieBreaksEqualCreatedAtByLowerID(t *testing.T) {
 	if err := pool.QueryRow(`SELECT MIN(id), MAX(id) FROM jobs`).Scan(&lowID, &highID); err != nil {
 		t.Fatalf("ids: %v", err)
 	}
-	claimed, err := ClaimEligibleJobs(ctx, pool, 1)
+	claimed, err := ClaimReadyJobs(ctx, pool, 1, 0)
 	if err != nil {
-		t.Fatalf("ClaimEligibleJobs: %v", err)
+		t.Fatalf("ClaimReadyJobs: %v", err)
 	}
 	if len(claimed) != 1 {
 		t.Fatalf("claimed = %d, want 1", len(claimed))
@@ -207,155 +206,63 @@ func TestClaimEligibleJobs_TieBreaksEqualCreatedAtByLowerID(t *testing.T) {
 	}
 }
 
-func TestClaimEligibleJobs_ZeroRowsWhenNoneEligible(t *testing.T) {
+func TestClaimReadyJobs_ZeroRowsWhenNoneReady(t *testing.T) {
 	pool := migratedPool(t)
 	ctx := context.Background()
 	if _, err := InsertJobIfNew(ctx, pool, sampleJob("https://www.linkedin.com/jobs/view/pending-only/")); err != nil {
 		t.Fatalf("insert: %v", err)
 	}
-	claimed, err := ClaimEligibleJobs(ctx, pool, 25)
+	claimed, err := ClaimReadyJobs(ctx, pool, 25, 0)
 	if err != nil {
-		t.Fatalf("ClaimEligibleJobs: %v", err)
+		t.Fatalf("ClaimReadyJobs: %v", err)
 	}
 	if len(claimed) != 0 {
-		t.Errorf("claimed = %d, want 0 when no eligible rows", len(claimed))
+		t.Errorf("claimed = %d, want 0 when no ready rows", len(claimed))
 	}
 }
 
-func TestClaimEligibleJobs_DoesNotUnstickNotifyingWhenTimeoutIsZero(t *testing.T) {
+func TestClaimReadyJobs_TimeoutZeroDoesNotReclaimClaimedRow(t *testing.T) {
 	pool := migratedPool(t)
 	ctx := context.Background()
-	if _, err := InsertJobIfNew(ctx, pool, sampleJob("https://www.linkedin.com/jobs/view/stuck-notifying/")); err != nil {
-		t.Fatalf("insert notifying: %v", err)
+	if _, err := InsertJobIfNew(ctx, pool, sampleJob("https://www.linkedin.com/jobs/view/stuck-claim/")); err != nil {
+		t.Fatalf("insert claimed: %v", err)
 	}
-	if _, err := InsertJobIfNew(ctx, pool, sampleJob("https://www.linkedin.com/jobs/view/still-eligible/")); err != nil {
-		t.Fatalf("insert eligible: %v", err)
+	if _, err := InsertJobIfNew(ctx, pool, sampleJob("https://www.linkedin.com/jobs/view/still-ready/")); err != nil {
+		t.Fatalf("insert ready: %v", err)
 	}
-	if _, err := pool.Exec(`UPDATE jobs SET state = 'notifying', state_changed_at = now() - interval '1 day' WHERE job_url LIKE '%stuck-notifying/'`); err != nil {
-		t.Fatalf("stick notifying: %v", err)
+	if _, err := pool.Exec(`UPDATE jobs SET state = 'ready', notify_claimed_at = now() - interval '1 day' WHERE job_url LIKE '%stuck-claim/'`); err != nil {
+		t.Fatalf("set old claim: %v", err)
 	}
-	if _, err := pool.Exec(`UPDATE jobs SET state = 'eligible' WHERE job_url LIKE '%still-eligible/'`); err != nil {
-		t.Fatalf("mark eligible: %v", err)
+	if _, err := pool.Exec(`UPDATE jobs SET state = 'ready' WHERE job_url LIKE '%still-ready/'`); err != nil {
+		t.Fatalf("mark ready: %v", err)
 	}
 
-	claimed, err := ClaimEligibleJobs(ctx, pool, 25)
+	claimed, err := ClaimReadyJobs(ctx, pool, 25, 0)
 	if err != nil {
-		t.Fatalf("ClaimEligibleJobs: %v", err)
+		t.Fatalf("ClaimReadyJobs: %v", err)
 	}
-	if len(claimed) != 1 || claimed[0].JobURL != "https://www.linkedin.com/jobs/view/still-eligible/" {
-		t.Errorf("claimed = %+v, want only the eligible row (timeout 0 does not auto-return notifying)", claimedURLs(claimed))
+	if len(claimed) != 1 || claimed[0].JobURL != "https://www.linkedin.com/jobs/view/still-ready/" {
+		t.Errorf("claimed = %+v, want only the unclaimed ready row", claimedURLs(claimed))
 	}
 
-	var stuck string
-	if err := pool.QueryRow(`SELECT state FROM jobs WHERE job_url LIKE '%stuck-notifying/'`).Scan(&stuck); err != nil {
-		t.Fatalf("stuck state: %v", err)
+	var notifiedAt *time.Time
+	if err := pool.QueryRow(`SELECT notified_at FROM jobs WHERE job_url LIKE '%stuck-claim/'`).Scan(&notifiedAt); err != nil {
+		t.Fatalf("stuck marker: %v", err)
 	}
-	if stuck != JobStateNotifying {
-		t.Errorf("stuck state = %q, want notifying (NOTIFY_CLAIM_TIMEOUT_SECONDS=0, no auto-unstick)", stuck)
+	if notifiedAt != nil {
+		t.Errorf("stuck claim notified_at = %v, want null because timeout 0 does not reclaim", notifiedAt)
 	}
 }
-
-func TestLoadNotifyInventory_AfterClaimIncludesNotifyingNow(t *testing.T) {
-	pool := migratedPool(t)
-	ctx := context.Background()
-	seed := []struct {
-		url    string
-		state  string
-		reason *string
-	}{
-		{"https://www.linkedin.com/jobs/view/inv-pending/", JobStatePending, nil},
-		{"https://www.linkedin.com/jobs/view/inv-title/", JobStateRejected, strPtr("title_company")},
-		{"https://www.linkedin.com/jobs/view/inv-desc/", JobStateRejected, strPtr("description")},
-		{"https://www.linkedin.com/jobs/view/inv-dup/", JobStateRejected, strPtr("duplicate")},
-		{"https://www.linkedin.com/jobs/view/inv-detail/", JobStateRejected, strPtr("detail_failed")},
-		{"https://www.linkedin.com/jobs/view/inv-eligible/", JobStateEligible, nil},
-		{"https://www.linkedin.com/jobs/view/inv-notifying/", JobStateNotifying, nil},
-		{"https://www.linkedin.com/jobs/view/inv-notified/", JobStateNotified, nil},
-	}
-	for _, row := range seed {
-		if _, err := InsertJobIfNew(ctx, pool, sampleJob(row.url)); err != nil {
-			t.Fatalf("insert %s: %v", row.url, err)
-		}
-		if _, err := pool.Exec(`UPDATE jobs SET state = $1, reject_reason = $2 WHERE job_url = $3`, row.state, row.reason, row.url); err != nil {
-			t.Fatalf("update %s: %v", row.url, err)
-		}
-	}
-
-	claimed, err := ClaimEligibleJobs(ctx, pool, 25)
-	if err != nil {
-		t.Fatalf("claim: %v", err)
-	}
-	if len(claimed) != 1 {
-		t.Fatalf("claimed = %d, want 1 eligible row", len(claimed))
-	}
-
-	inv, err := LoadNotifyInventory(ctx, pool)
-	if err != nil {
-		t.Fatalf("LoadNotifyInventory: %v", err)
-	}
-	if inv.Total != 8 {
-		t.Errorf("Total = %d, want 8", inv.Total)
-	}
-	if inv.TitleCompany != 1 || inv.Description != 1 || inv.Duplicate != 1 || inv.DetailFailed != 1 {
-		t.Errorf("reject counts = %+v, want 1 each reason", inv)
-	}
-	if inv.Pending != 1 || inv.Eligible != 0 || inv.Notifying != 2 || inv.Notified != 1 {
-		t.Errorf("state counts pending=%d eligible=%d notifying=%d notified=%d, want 1,0,2,1 (notifying now is whole-table including pre-existing plus claimed)",
-			inv.Pending, inv.Eligible, inv.Notifying, inv.Notified)
-	}
-}
-
-func TestSetJobsState_NotifiedAndEligibleTransitions(t *testing.T) {
-	pool := migratedPool(t)
-	ctx := context.Background()
-	if _, err := InsertJobIfNew(ctx, pool, sampleJob("https://www.linkedin.com/jobs/view/fin-a/")); err != nil {
-		t.Fatalf("insert a: %v", err)
-	}
-	if _, err := InsertJobIfNew(ctx, pool, sampleJob("https://www.linkedin.com/jobs/view/fin-b/")); err != nil {
-		t.Fatalf("insert b: %v", err)
-	}
-	if _, err := pool.Exec(`UPDATE jobs SET state = 'eligible'`); err != nil {
-		t.Fatalf("eligible: %v", err)
-	}
-	claimed, err := ClaimEligibleJobs(ctx, pool, 25)
-	if err != nil {
-		t.Fatalf("claim: %v", err)
-	}
-	if len(claimed) != 2 {
-		t.Fatalf("claimed = %d, want 2", len(claimed))
-	}
-	ids := []int64{claimed[0].ID, claimed[1].ID}
-
-	if err := SetJobsState(ctx, pool, ids[:1], JobStateNotified); err != nil {
-		t.Fatalf("notified: %v", err)
-	}
-	if err := SetJobsState(ctx, pool, ids[1:], JobStateEligible); err != nil {
-		t.Fatalf("eligible: %v", err)
-	}
-
-	jobs, err := ListJobsForNotify(ctx, pool)
-	if err != nil {
-		t.Fatalf("list: %v", err)
-	}
-	sort.Slice(jobs, func(i, j int) bool { return jobs[i].ID < jobs[j].ID })
-	if jobs[0].ID != ids[0] || jobs[0].State != JobStateNotified {
-		t.Errorf("job %d state = %q, want notified after HTTP 200", jobs[0].ID, jobs[0].State)
-	}
-	if jobs[1].ID != ids[1] || jobs[1].State != JobStateEligible {
-		t.Errorf("job %d state = %q, want eligible after non-200", jobs[1].ID, jobs[1].State)
-	}
-}
-
-func TestClaimWithoutFinishLeavesNotifying(t *testing.T) {
+func TestClaimWithoutPostLeavesReadyWithNotifiedMarker(t *testing.T) {
 	pool := migratedPool(t)
 	ctx := context.Background()
 	if _, err := InsertJobIfNew(ctx, pool, sampleJob("https://www.linkedin.com/jobs/view/crash-claim/")); err != nil {
 		t.Fatalf("insert: %v", err)
 	}
-	if _, err := pool.Exec(`UPDATE jobs SET state = 'eligible'`); err != nil {
-		t.Fatalf("eligible: %v", err)
+	if _, err := pool.Exec(`UPDATE jobs SET state = 'ready'`); err != nil {
+		t.Fatalf("ready: %v", err)
 	}
-	claimed, err := ClaimEligibleJobs(ctx, pool, 25)
+	claimed, err := ClaimReadyJobs(ctx, pool, 25, 0)
 	if err != nil {
 		t.Fatalf("claim: %v", err)
 	}
@@ -363,11 +270,12 @@ func TestClaimWithoutFinishLeavesNotifying(t *testing.T) {
 		t.Fatalf("claimed = %d, want 1", len(claimed))
 	}
 	var state string
-	if err := pool.QueryRow(`SELECT state FROM jobs WHERE id = $1`, claimed[0].ID).Scan(&state); err != nil {
-		t.Fatalf("state: %v", err)
+	var notifiedAt time.Time
+	if err := pool.QueryRow(`SELECT state, notified_at FROM jobs WHERE id = $1`, claimed[0].ID).Scan(&state, &notifiedAt); err != nil {
+		t.Fatalf("claim markers: %v", err)
 	}
-	if state != JobStateNotifying {
-		t.Errorf("state after claim-before-POST = %q, want notifying", state)
+	if state != JobStateReady || notifiedAt.IsZero() {
+		t.Errorf("claim-before-POST state=%q notified_at=%s, want ready with marker", state, notifiedAt)
 	}
 }
 
@@ -378,5 +286,3 @@ func claimedURLs(jobs []Job) []string {
 	}
 	return out
 }
-
-func strPtr(s string) *string { return &s }

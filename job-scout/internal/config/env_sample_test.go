@@ -32,7 +32,7 @@ func TestEnvSample_DocumentsEveryRuntimeKnob(t *testing.T) {
 		"NOTIFY_CRON":                  "39 7,17,20 * * *",
 		"SCRAPE_ERROR_BACKOFF_SECONDS": "300",
 		"NOTIFY_MAX_JOBS":              "25",
-		"NOTIFY_CLAIM_TIMEOUT_SECONDS": "0",
+		"NOTIFY_CLAIM_TIMEOUT_SECONDS": "900",
 		"HTTP_TIMEOUT_SECONDS":         "30",
 	}
 	for key, val := range want {

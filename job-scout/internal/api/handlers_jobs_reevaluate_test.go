@@ -100,16 +100,16 @@ func TestReEvaluateRejectedJobs_ReturnsUpdatedCountAndOnlyResetsRejected(t *test
 		UPDATE jobs SET state = 'rejected', reject_reason = 'title_company', detail_attempts = 1,
 		                state_changed_at = now() - interval '1 hour'
 		WHERE job_url = 'https://example.test/jobs/title-rejected';
-		UPDATE jobs SET state = 'eligible', reject_reason = NULL, detail_attempts = 2,
+		UPDATE jobs SET state = 'ready', reject_reason = NULL, detail_attempts = 2,
 		                state_changed_at = now() - interval '1 hour'
 		WHERE job_url = 'https://example.test/jobs/eligible';
-		UPDATE jobs SET state = 'notified', notified = TRUE, reject_reason = NULL, detail_attempts = 2,
+		UPDATE jobs SET state = 'applied', notified = TRUE, reject_reason = NULL, detail_attempts = 2,
 		                state_changed_at = now() - interval '1 hour'
 		WHERE job_url = 'https://example.test/jobs/notified';
 		UPDATE jobs SET state = 'pending', reject_reason = NULL, detail_attempts = 1,
 		                state_changed_at = now() - interval '1 hour'
 		WHERE job_url = 'https://example.test/jobs/pending';
-		UPDATE jobs SET state = 'notifying', reject_reason = NULL, detail_attempts = 2,
+		UPDATE jobs SET state = 'dismissed', reject_reason = NULL, detail_attempts = 2,
 		                state_changed_at = now() - interval '1 hour'
 		WHERE job_url = 'https://example.test/jobs/notifying';
 	`); err != nil {

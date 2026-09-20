@@ -29,6 +29,7 @@ func NewServer(addr string, h *Handler) *http.Server {
 	mux.HandleFunc("GET /api/v0/jobs", h.Jobs)
 	mux.HandleFunc("GET /api/v0/jobs/stats", h.JobStats)
 	mux.HandleFunc("POST /api/v0/jobs/re-evaluate", h.ReEvaluateJobs)
+	mux.HandleFunc("POST /api/v0/jobs/{id}/review", h.ReviewJob)
 	mux.HandleFunc("GET /api/v0/jobs/{id}", h.Job)
 	mux.HandleFunc("GET /api/v0/dashboard/stats", h.DashboardStats)
 	mux.HandleFunc("GET /api/v0/temporal-test", h.TemporalTest)

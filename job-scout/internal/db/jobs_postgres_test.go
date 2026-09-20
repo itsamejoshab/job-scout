@@ -104,7 +104,7 @@ func TestJobs_SchemaIdentityStateAndRemoteColumns(t *testing.T) {
 		t.Error("jobs.state_changed_at column is required")
 	}
 	if !stateCheckExists(t, pool) {
-		t.Error("jobs.state must be CHECK-constrained to pending, rejected, eligible, notifying, notified")
+		t.Error("jobs.state must be CHECK-constrained to pending, rejected, needs_detail, ready, applied, dismissed")
 	}
 }
 
@@ -234,7 +234,7 @@ func TestInsertJobIfNew_RemoteORLeavesStateUnchanged(t *testing.T) {
 		t.Fatalf("insert onsite: %v", err)
 	}
 
-	if _, err := pool.Exec(`UPDATE jobs SET state = 'notified' WHERE job_url = $1`, url); err != nil {
+	if _, err := pool.Exec(`UPDATE jobs SET state = 'applied', notified_at = now() WHERE job_url = $1`, url); err != nil {
 		t.Errorf("must persist state so a second sighting can leave it unchanged: %v", err)
 	}
 
@@ -281,8 +281,8 @@ func TestInsertJobIfNew_RemoteORLeavesStateUnchanged(t *testing.T) {
 	var state string
 	if err := pool.QueryRow(`SELECT state FROM jobs WHERE job_url = $1`, url).Scan(&state); err != nil {
 		t.Errorf("state must persist so a second sighting cannot reset it: %v", err)
-	} else if state != "notified" {
-		t.Errorf("second sighting changed state to %q, want notified", state)
+	} else if state != "applied" {
+		t.Errorf("second sighting changed state to %q, want applied", state)
 	}
 }
 
@@ -344,7 +344,7 @@ func TestInsertJobIfNew_StateCheckRejectsInvalid(t *testing.T) {
 	}
 	_, err := pool.Exec(`UPDATE jobs SET state = 'bogus'`)
 	if err == nil {
-		t.Error("state CHECK must reject values outside pending, rejected, eligible, notifying, notified")
+		t.Error("state CHECK must reject values outside pending, rejected, needs_detail, ready, applied, dismissed")
 	}
 }
 
@@ -390,12 +390,12 @@ func TestGetJobStats_NewJobsIsPendingCountByState(t *testing.T) {
 	if stats.ByState["rejected"] != 1 {
 		t.Errorf("by_state rejected = %d, want 1", stats.ByState["rejected"])
 	}
-	for _, st := range []string{"pending", "rejected", "eligible", "notifying", "notified"} {
+	for _, st := range []string{"pending", "rejected", "needs_detail", "ready", "applied", "dismissed"} {
 		if _, ok := stats.ByState[st]; !ok {
 			t.Errorf("by_state missing key %q", st)
 		}
 	}
-	for _, st := range []string{"eligible", "notifying", "notified"} {
+	for _, st := range []string{"needs_detail", "ready", "applied", "dismissed"} {
 		if stats.ByState[st] != 0 {
 			t.Errorf("by_state %s = %d, want 0", st, stats.ByState[st])
 		}
@@ -515,9 +515,9 @@ func stateCheckExists(t *testing.T, pool *sql.DB) bool {
 		WHERE conrelid = 'jobs'::regclass AND contype = 'c'
 		  AND pg_get_constraintdef(oid) ILIKE '%pending%'
 		  AND pg_get_constraintdef(oid) ILIKE '%rejected%'
-		  AND pg_get_constraintdef(oid) ILIKE '%eligible%'
-		  AND pg_get_constraintdef(oid) ILIKE '%notifying%'
-		  AND pg_get_constraintdef(oid) ILIKE '%notified%'
+		  AND pg_get_constraintdef(oid) ILIKE '%ready%'
+		  AND pg_get_constraintdef(oid) ILIKE '%applied%'
+		  AND pg_get_constraintdef(oid) ILIKE '%dismissed%'
 	`).Scan(&n)
 	if err != nil {
 		t.Fatalf("state check lookup: %v", err)

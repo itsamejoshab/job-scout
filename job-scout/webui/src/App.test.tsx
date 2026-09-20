@@ -14,6 +14,7 @@ const config = {
 const dashboardStats = {
   generated_at: "2026-09-18T20:00:00Z",
   timezone: "America/New_York",
+  notified: 1,
   providers: [
     {
       job_source: "LINKEDIN",
@@ -27,15 +28,17 @@ const dashboardStats = {
       by_state: {
         pending: 1,
         rejected: 1,
-        eligible: 0,
-        notifying: 0,
-        notified: 0,
+        needs_detail: 0,
+        ready: 0,
+        applied: 0,
+        dismissed: 0,
       },
       by_reject_reason: {
         duplicate: 0,
         title_company: 1,
         description: 0,
                 detail_failed: 0,
+        unsupported_source: 0,
       },
     },
     {
@@ -50,15 +53,17 @@ const dashboardStats = {
       by_state: {
         pending: 0,
         rejected: 0,
-        eligible: 0,
-        notifying: 0,
-        notified: 0,
+        needs_detail: 0,
+        ready: 0,
+        applied: 0,
+        dismissed: 0,
       },
       by_reject_reason: {
         duplicate: 0,
         title_company: 0,
         description: 0,
                 detail_failed: 0,
+        unsupported_source: 0,
       },
     },
   ],
@@ -79,7 +84,7 @@ const jobsPage = {
       job_url: "https://example.test/jobs/42",
       created_at: "2026-09-18T20:00:00Z",
       updated_at: "2026-09-18T20:00:00Z",
-      state: "notified",
+      state: "ready",
       reject_reason: null,
       has_description: true,
       description_preview: "A short job description preview.",
@@ -217,6 +222,13 @@ function renderPath(path: string, options: RenderOptions = {}) {
     }
     if (url.startsWith("/api/v0/jobs?")) {
       return new Response(JSON.stringify(jobsPage), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    if (url === "/api/v0/jobs/42/review" && method === "POST") {
+      const payload = JSON.parse(String(init?.body ?? "{}")) as { action: string };
+      return new Response(JSON.stringify({ ...jobsPage.items[0], state: payload.action }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       });
@@ -377,6 +389,7 @@ describe("operator shell", () => {
     expect(screen.getByText("Status: waiting")).toBeInTheDocument();
     expect(screen.getByText("Status: disabled")).toBeInTheDocument();
     expect(screen.getByText("pending: 1")).toBeInTheDocument();
+    expect(screen.getAllByText("Requires further processing: 0")).toHaveLength(2);
     expect(screen.getByText("title_company: 1")).toBeInTheDocument();
     expect(screen.getByText("Jobs over time (America/New_York)")).toBeInTheDocument();
   });
@@ -499,17 +512,17 @@ describe("operator shell", () => {
     });
   });
 
-  it("renders job filters with notified and last-24-hours defaults, preview text, and source links", async () => {
+  it("renders the ready review queue and submits final review actions", async () => {
     const user = userEvent.setup();
     renderPath("/jobs");
 
     expect(await screen.findByText("Platform Engineer")).toBeInTheDocument();
-    expect(screen.getByText("notified", { selector: "div" })).toBeInTheDocument();
+    expect(screen.getByText("Ready for review", { selector: "div" })).toBeInTheDocument();
     expect(screen.getByText("51 jobs")).toBeInTheDocument();
     expect(screen.getByText("A short job description preview.")).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Job detail" })).not.toBeInTheDocument();
     expect(screen.queryByText(/posting date/i)).not.toBeInTheDocument();
-    expect(screen.getByLabelText("State")).toHaveValue("notified");
+    expect(screen.getByLabelText("State")).toHaveValue("ready");
     expect(screen.getByLabelText("Created")).toHaveValue("24h");
     expect(screen.queryByLabelText("Created from")).not.toBeInTheDocument();
 
@@ -521,8 +534,19 @@ describe("operator shell", () => {
       const calls = (fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls
         .map(([input]) => String(input));
       expect(calls.some((url) =>
-        url.includes("state=notified") && url.includes("last_hours=24"),
+        url.includes("state=ready") && url.includes("last_hours=24"),
       )).toBe(true);
+    });
+
+    await user.click(screen.getByRole("button", { name: "Applied" }));
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/v0/jobs/42/review",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({ action: "applied" }),
+        }),
+      );
     });
 
     await user.click(screen.getByRole("button", { name: "Next page" }));

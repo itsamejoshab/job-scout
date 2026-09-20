@@ -48,8 +48,8 @@ func TestFilterPending_DuplicateDoesNotDropWinner(t *testing.T) {
 	all := []Job{winner, loser}
 
 	got := FilterPending(winner, all, lists)
-	if got.State != StateEligible {
-		t.Errorf("winner State = %q, want eligible (row kept, not rejected)", got.State)
+	if got.State != StateReady {
+		t.Errorf("winner State = %q, want ready (row kept, not rejected)", got.State)
 	}
 	if got.RejectReason != "" {
 		t.Errorf("winner RejectReason = %q, want empty", got.RejectReason)

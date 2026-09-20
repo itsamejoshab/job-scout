@@ -8,11 +8,12 @@ import (
 )
 
 const (
-	JobStatePending   = "pending"
-	JobStateRejected  = "rejected"
-	JobStateEligible  = "eligible"
-	JobStateNotifying = "notifying"
-	JobStateNotified  = "notified"
+	JobStatePending     = "pending"
+	JobStateRejected    = "rejected"
+	JobStateNeedsDetail = "needs_detail"
+	JobStateReady       = "ready"
+	JobStateApplied     = "applied"
+	JobStateDismissed   = "dismissed"
 )
 
 // InsertJobIfNew inserts a job unless one with the same trimmed job_url already
@@ -63,7 +64,8 @@ func ListJobs(ctx context.Context, db *sql.DB, limit, offset int) ([]Job, error)
 	rows, err := db.QueryContext(ctx, `
 		SELECT id, job_source, title, company, description, location, date, job_url,
 		       created_at, updated_at, new, duplicate, relevant, promising, notified,
-		       state, reject_reason, is_remote, search_context, detail_attempts, state_changed_at
+		       state, reject_reason, is_remote, search_context, detail_attempts, state_changed_at,
+		       notified_at, notify_claimed_at
 		FROM jobs ORDER BY id LIMIT $1 OFFSET $2
 	`, limit, offset)
 	if err != nil {
@@ -79,6 +81,7 @@ func ListJobs(ctx context.Context, db *sql.DB, limit, offset int) ([]Job, error)
 			&j.Date, &j.JobURL, &j.CreatedAt, &j.UpdatedAt, &j.New, &j.Duplicate,
 			&j.Relevant, &j.Promising, &j.Notified, &j.State, &j.RejectReason,
 			&j.IsRemote, &j.SearchContext, &j.DetailAttempts, &j.StateChangedAt,
+			&j.NotifiedAt, &j.NotifyClaimedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -161,6 +164,59 @@ func GetJob(ctx context.Context, database *sql.DB, id int64) (Job, error) {
 	return job, err
 }
 
+// NextPendingJobID returns the oldest pending row that is not excluded.
+func NextPendingJobID(ctx context.Context, database *sql.DB, skipIDs []int64) (int64, error) {
+	return nextJobIDByState(ctx, database, JobStatePending, skipIDs)
+}
+
+// NextNeedsDetailJobID returns the oldest needs_detail row that is not excluded.
+func NextNeedsDetailJobID(ctx context.Context, database *sql.DB, skipIDs []int64) (int64, error) {
+	return nextJobIDByState(ctx, database, JobStateNeedsDetail, skipIDs)
+}
+
+func nextJobIDByState(ctx context.Context, database *sql.DB, state string, skipIDs []int64) (int64, error) {
+	if skipIDs == nil {
+		skipIDs = []int64{}
+	}
+	var id int64
+	err := database.QueryRowContext(ctx, `
+		SELECT id
+		FROM jobs
+		WHERE state = $1
+		  AND id <> ALL($2)
+		ORDER BY created_at ASC, id ASC
+		LIMIT 1
+	`, state, skipIDs).Scan(&id)
+	if err == sql.ErrNoRows {
+		return 0, nil
+	}
+	return id, err
+}
+
+// ListDuplicateCandidates returns the whole table for domain-level Unicode
+// title+company comparison. State is intentionally not part of the query.
+func ListDuplicateCandidates(ctx context.Context, database *sql.DB) ([]Job, error) {
+	rows, err := database.QueryContext(ctx, `
+		SELECT`+jobSelectColumns+`
+		FROM jobs
+		ORDER BY created_at, id
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	jobs := []Job{}
+	for rows.Next() {
+		var job Job
+		if err := scanJob(rows, &job); err != nil {
+			return nil, err
+		}
+		jobs = append(jobs, job)
+	}
+	return jobs, rows.Err()
+}
+
 // JobStats holds aggregate counts for the /jobs/stats endpoint.
 type JobStats struct {
 	TotalJobs    int            `json:"total_jobs"`
@@ -171,13 +227,14 @@ type JobStats struct {
 
 func GetJobStats(ctx context.Context, db *sql.DB) (JobStats, error) {
 	s := JobStats{ByState: map[string]int{
-		JobStatePending:   0,
-		JobStateRejected:  0,
-		JobStateEligible:  0,
-		JobStateNotifying: 0,
-		JobStateNotified:  0,
+		JobStatePending:     0,
+		JobStateRejected:    0,
+		JobStateNeedsDetail: 0,
+		JobStateReady:       0,
+		JobStateApplied:     0,
+		JobStateDismissed:   0,
 	}}
-	var pending, rejected, eligible, notifying, notified int
+	var pending, rejected, needsDetail, ready, applied, dismissed int
 	err := db.QueryRowContext(ctx, `
 		SELECT
 			COUNT(*),
@@ -185,20 +242,22 @@ func GetJobStats(ctx context.Context, db *sql.DB) (JobStats, error) {
 			COUNT(*) FILTER (WHERE relevant),
 			COUNT(*) FILTER (WHERE state = 'pending'),
 			COUNT(*) FILTER (WHERE state = 'rejected'),
-			COUNT(*) FILTER (WHERE state = 'eligible'),
-			COUNT(*) FILTER (WHERE state = 'notifying'),
-			COUNT(*) FILTER (WHERE state = 'notified')
+			COUNT(*) FILTER (WHERE state = 'needs_detail'),
+			COUNT(*) FILTER (WHERE state = 'ready'),
+			COUNT(*) FILTER (WHERE state = 'applied'),
+			COUNT(*) FILTER (WHERE state = 'dismissed')
 		FROM jobs
 	`).Scan(&s.TotalJobs, &s.NewJobs, &s.RelevantJobs,
-		&pending, &rejected, &eligible, &notifying, &notified)
+		&pending, &rejected, &needsDetail, &ready, &applied, &dismissed)
 	if err != nil {
 		return s, err
 	}
 	s.ByState[JobStatePending] = pending
 	s.ByState[JobStateRejected] = rejected
-	s.ByState[JobStateEligible] = eligible
-	s.ByState[JobStateNotifying] = notifying
-	s.ByState[JobStateNotified] = notified
+	s.ByState[JobStateNeedsDetail] = needsDetail
+	s.ByState[JobStateReady] = ready
+	s.ByState[JobStateApplied] = applied
+	s.ByState[JobStateDismissed] = dismissed
 	return s, nil
 }
 
@@ -214,7 +273,8 @@ func ListJobsForNotify(ctx context.Context, db *sql.DB) ([]Job, error) {
 	rows, err := db.QueryContext(ctx, `
 		SELECT id, job_source, title, company, description, location, date, job_url,
 		       created_at, updated_at, new, duplicate, relevant, promising, notified,
-		       state, reject_reason, is_remote, search_context, detail_attempts, state_changed_at
+		       state, reject_reason, is_remote, search_context, detail_attempts, state_changed_at,
+		       notified_at, notify_claimed_at
 		FROM jobs ORDER BY created_at, id
 	`)
 	if err != nil {
@@ -230,6 +290,7 @@ func ListJobsForNotify(ctx context.Context, db *sql.DB) ([]Job, error) {
 			&j.Date, &j.JobURL, &j.CreatedAt, &j.UpdatedAt, &j.New, &j.Duplicate,
 			&j.Relevant, &j.Promising, &j.Notified, &j.State, &j.RejectReason,
 			&j.IsRemote, &j.SearchContext, &j.DetailAttempts, &j.StateChangedAt,
+			&j.NotifiedAt, &j.NotifyClaimedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -255,7 +316,7 @@ func UpdateJobNotifyState(ctx context.Context, db *sql.DB, id int64, state strin
 
 // ReEvaluateRejectedJobs sends rejected jobs back to pending so the next notify
 // pass applies the current filters. Attempts reset so an exhausted description
-// fetch is retried. Notified and eligible rows are never touched.
+// fetch is retried. Human-reviewed and ready rows are never touched.
 func ReEvaluateRejectedJobs(ctx context.Context, database *sql.DB) (int64, error) {
 	res, err := database.ExecContext(ctx, `
 		UPDATE jobs SET
@@ -275,7 +336,8 @@ func ReEvaluateRejectedJobs(ctx context.Context, database *sql.DB) (int64, error
 const jobSelectColumns = `
 		id, job_source, title, company, description, location, date, job_url,
 		created_at, updated_at, new, duplicate, relevant, promising, notified,
-		state, reject_reason, is_remote, search_context, detail_attempts, state_changed_at`
+		state, reject_reason, is_remote, search_context, detail_attempts, state_changed_at,
+		notified_at, notify_claimed_at`
 
 func scanJob(sc interface{ Scan(...any) error }, j *Job) error {
 	return sc.Scan(
@@ -283,25 +345,12 @@ func scanJob(sc interface{ Scan(...any) error }, j *Job) error {
 		&j.Date, &j.JobURL, &j.CreatedAt, &j.UpdatedAt, &j.New, &j.Duplicate,
 		&j.Relevant, &j.Promising, &j.Notified, &j.State, &j.RejectReason,
 		&j.IsRemote, &j.SearchContext, &j.DetailAttempts, &j.StateChangedAt,
+		&j.NotifiedAt, &j.NotifyClaimedAt,
 	)
 }
 
-// NotifyInventory is whole-table counts for message_to_send after claim.
-type NotifyInventory struct {
-	Total        int
-	TitleCompany int
-	Description  int
-	Duplicate    int
-	DetailFailed int
-	Pending      int
-	Eligible     int
-	Notifying    int
-	Notified     int
-}
-
-// ClaimEligibleJobs claims up to limit oldest eligible rows (created_at, id)
-// with FOR UPDATE SKIP LOCKED and sets state=notifying.
-func ClaimEligibleJobs(ctx context.Context, database *sql.DB, limit int) ([]Job, error) {
+// ClaimReadyJobs marks and returns up to limit oldest ready, unemailed rows.
+func ClaimReadyJobs(ctx context.Context, database *sql.DB, limit, timeoutSeconds int) ([]Job, error) {
 	if limit <= 0 {
 		return nil, nil
 	}
@@ -315,10 +364,18 @@ func ClaimEligibleJobs(ctx context.Context, database *sql.DB, limit int) ([]Job,
 		SELECT`+jobSelectColumns+`
 		FROM jobs
 		WHERE state = $1
+		  AND notified_at IS NULL
+		  AND (
+		    ($3::int = 0 AND notify_claimed_at IS NULL)
+		    OR ($3::int > 0 AND (
+		      notify_claimed_at IS NULL
+		      OR notify_claimed_at < now() - make_interval(secs => $3::int)
+		    ))
+		  )
 		ORDER BY created_at ASC, id ASC
 		LIMIT $2
 		FOR UPDATE SKIP LOCKED
-	`, JobStateEligible, limit)
+	`, JobStateReady, limit, timeoutSeconds)
 	if err != nil {
 		return nil, err
 	}
@@ -350,56 +407,48 @@ func ClaimEligibleJobs(ctx context.Context, database *sql.DB, limit int) ([]Job,
 	}
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE jobs SET
-			state = $1,
-			state_changed_at = CASE WHEN state IS DISTINCT FROM $1 THEN now() ELSE state_changed_at END,
+			notify_claimed_at = now(),
+			notified_at = now(),
 			updated_at = now()
-		WHERE id = ANY($2)
-	`, JobStateNotifying, ids); err != nil {
+		WHERE id = ANY($1)
+	`, ids); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
 	for i := range claimed {
-		claimed[i].State = JobStateNotifying
+		now := time.Now()
+		claimed[i].NotifiedAt = &now
+		claimed[i].NotifyClaimedAt = &now
 	}
 	return claimed, nil
 }
 
-// LoadNotifyInventory returns whole-table counts after claim and before POST.
-func LoadNotifyInventory(ctx context.Context, database *sql.DB) (NotifyInventory, error) {
-	var inv NotifyInventory
-	err := database.QueryRowContext(ctx, `
-		SELECT
-			COUNT(*),
-			COUNT(*) FILTER (WHERE reject_reason = 'title_company'),
-			COUNT(*) FILTER (WHERE reject_reason = 'description'),
-			COUNT(*) FILTER (WHERE reject_reason = 'duplicate'),
-			COUNT(*) FILTER (WHERE reject_reason = 'detail_failed'),
-			COUNT(*) FILTER (WHERE state = 'pending'),
-			COUNT(*) FILTER (WHERE state = 'eligible'),
-			COUNT(*) FILTER (WHERE state = 'notifying'),
-			COUNT(*) FILTER (WHERE state = 'notified')
-		FROM jobs
-	`).Scan(
-		&inv.Total,
-		&inv.TitleCompany, &inv.Description, &inv.Duplicate, &inv.DetailFailed,
-		&inv.Pending, &inv.Eligible, &inv.Notifying, &inv.Notified,
-	)
-	return inv, err
-}
-
-// SetJobsState sets state for a claimed batch (notified after HTTP 200, eligible otherwise).
-func SetJobsState(ctx context.Context, database *sql.DB, ids []int64, state string) error {
+// ClearNotifyClaims makes a failed webhook batch available for a later claim.
+func ClearNotifyClaims(ctx context.Context, database *sql.DB, ids []int64) error {
 	if len(ids) == 0 {
 		return nil
 	}
 	_, err := database.ExecContext(ctx, `
 		UPDATE jobs SET
-			state = $1,
-			state_changed_at = CASE WHEN state IS DISTINCT FROM $1 THEN now() ELSE state_changed_at END,
+			notified_at = NULL,
+			notify_claimed_at = NULL,
 			updated_at = now()
-		WHERE id = ANY($2)
-	`, state, ids)
+		WHERE id = ANY($1)
+	`, ids)
 	return err
+}
+
+// ReviewReadyJob applies a final human review action to a ready row.
+func ReviewReadyJob(ctx context.Context, database *sql.DB, id int64, action string) (bool, error) {
+	res, err := database.ExecContext(ctx, `
+		UPDATE jobs SET state = $1, state_changed_at = now(), updated_at = now()
+		WHERE id = $2 AND state = $3
+	`, action, id, JobStateReady)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n == 1, err
 }

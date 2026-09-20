@@ -166,6 +166,10 @@ func (f *statusTemporalFake) ExecuteWorkflow(context.Context, client.StartWorkfl
 	panic("ExecuteWorkflow unused in status tests")
 }
 
+func (f *statusTemporalFake) SignalWithStartWorkflow(context.Context, string, string, interface{}, client.StartWorkflowOptions, interface{}, ...interface{}) (client.WorkflowRun, error) {
+	panic("SignalWithStartWorkflow unused in status tests")
+}
+
 func (f *statusTemporalFake) DescribeWorkflowExecution(context.Context, string, string) (*workflowservice.DescribeWorkflowExecutionResponse, error) {
 	panic("DescribeWorkflowExecution unused in status tests")
 }
@@ -182,4 +186,8 @@ func (f *statusTemporalFake) CheckHealth(ctx context.Context, _ *client.CheckHea
 		return nil, f.err
 	}
 	return &client.CheckHealthResponse{}, nil
+}
+
+func (f *statusTemporalFake) TerminateWorkflow(context.Context, string, string, string, ...interface{}) error {
+	panic("TerminateWorkflow unused in status tests")
 }

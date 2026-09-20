@@ -11,6 +11,7 @@ var dashboardRejectReasons = []string{
 	"title_company",
 	"description",
 	"detail_failed",
+	"unsupported_source",
 }
 
 // DashboardProviderStats is one provider row in the aggregate dashboard view.
@@ -35,6 +36,7 @@ type DashboardDailyPoint struct {
 // DashboardStats is the database-backed dashboard aggregate response payload.
 type DashboardStats struct {
 	Timezone  string                   `json:"timezone"`
+	Notified  int                      `json:"notified"`
 	Providers []DashboardProviderStats `json:"providers"`
 	Daily     []DashboardDailyPoint    `json:"daily"`
 }
@@ -55,6 +57,9 @@ func GetDashboardStats(ctx context.Context, database *sql.DB, timezone string) (
 
 	stats.Providers = providers
 	stats.Daily = daily
+	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM jobs WHERE notified_at IS NOT NULL`).Scan(&stats.Notified); err != nil {
+		return stats, err
+	}
 	return stats, nil
 }
 
@@ -69,13 +74,15 @@ func loadDashboardProviders(ctx context.Context, database *sql.DB) ([]DashboardP
 			COUNT(j.id) AS total_jobs,
 			COUNT(*) FILTER (WHERE j.state = 'pending') AS pending,
 			COUNT(*) FILTER (WHERE j.state = 'rejected') AS rejected,
-			COUNT(*) FILTER (WHERE j.state = 'eligible') AS eligible,
-			COUNT(*) FILTER (WHERE j.state = 'notifying') AS notifying,
-			COUNT(*) FILTER (WHERE j.state = 'notified') AS notified,
+			COUNT(*) FILTER (WHERE j.state = 'needs_detail') AS needs_detail,
+			COUNT(*) FILTER (WHERE j.state = 'ready') AS ready,
+			COUNT(*) FILTER (WHERE j.state = 'applied') AS applied,
+			COUNT(*) FILTER (WHERE j.state = 'dismissed') AS dismissed,
 			COUNT(*) FILTER (WHERE j.reject_reason = 'duplicate') AS duplicate_count,
 			COUNT(*) FILTER (WHERE j.reject_reason = 'title_company') AS title_company_count,
 			COUNT(*) FILTER (WHERE j.reject_reason = 'description') AS description_count,
-			COUNT(*) FILTER (WHERE j.reject_reason = 'detail_failed') AS detail_failed_count
+			COUNT(*) FILTER (WHERE j.reject_reason = 'detail_failed') AS detail_failed_count,
+			COUNT(*) FILTER (WHERE j.reject_reason = 'unsupported_source') AS unsupported_source_count
 		FROM scraper_settings AS s
 		LEFT JOIN jobs AS j ON j.job_source = s.job_source
 		GROUP BY
@@ -94,12 +101,12 @@ func loadDashboardProviders(ctx context.Context, database *sql.DB) ([]DashboardP
 	out := []DashboardProviderStats{}
 	for rows.Next() {
 		var (
-			p                                 DashboardProviderStats
-			lastScraped, nextEligible         sql.NullTime
-			pending, rejected, eligible       int
-			notifying, notified               int
-			duplicateCount, titleCompanyCount int
-			descriptionCount, detailFailedCount int
+			p                                                           DashboardProviderStats
+			lastScraped, nextEligible                                   sql.NullTime
+			pending, rejected, needsDetail, ready                       int
+			applied, dismissed                                          int
+			duplicateCount, titleCompanyCount                           int
+			descriptionCount, detailFailedCount, unsupportedSourceCount int
 		)
 		if err := rows.Scan(
 			&p.JobSource,
@@ -110,13 +117,15 @@ func loadDashboardProviders(ctx context.Context, database *sql.DB) ([]DashboardP
 			&p.TotalJobs,
 			&pending,
 			&rejected,
-			&eligible,
-			&notifying,
-			&notified,
+			&needsDetail,
+			&ready,
+			&applied,
+			&dismissed,
 			&duplicateCount,
 			&titleCompanyCount,
 			&descriptionCount,
 			&detailFailedCount,
+			&unsupportedSourceCount,
 		); err != nil {
 			return nil, err
 		}
@@ -131,17 +140,19 @@ func loadDashboardProviders(ctx context.Context, database *sql.DB) ([]DashboardP
 		}
 
 		p.ByState = map[string]int{
-			JobStatePending:   pending,
-			JobStateRejected:  rejected,
-			JobStateEligible:  eligible,
-			JobStateNotifying: notifying,
-			JobStateNotified:  notified,
+			JobStatePending:     pending,
+			JobStateRejected:    rejected,
+			JobStateNeedsDetail: needsDetail,
+			JobStateReady:       ready,
+			JobStateApplied:     applied,
+			JobStateDismissed:   dismissed,
 		}
 		p.ByRejectReason = map[string]int{
 			dashboardRejectReasons[0]: duplicateCount,
 			dashboardRejectReasons[1]: titleCompanyCount,
 			dashboardRejectReasons[2]: descriptionCount,
 			dashboardRejectReasons[3]: detailFailedCount,
+			dashboardRejectReasons[4]: unsupportedSourceCount,
 		}
 		out = append(out, p)
 	}
@@ -167,8 +178,7 @@ func loadDashboardDaily(ctx context.Context, database *sql.DB, timezone string) 
 			(
 				SELECT COUNT(*)
 				FROM jobs AS j
-				WHERE j.state = 'notified'
-				  AND (j.state_changed_at AT TIME ZONE $1)::date = days.day
+				WHERE (j.notified_at AT TIME ZONE $1)::date = days.day
 			) AS notified
 		FROM days
 		ORDER BY days.day

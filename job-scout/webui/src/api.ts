@@ -37,6 +37,7 @@ export interface DashboardDailyPoint {
 export interface DashboardStats {
   generated_at: string;
   timezone: string;
+  notified: number;
   providers: DashboardProviderStats[];
   daily: DashboardDailyPoint[];
 }
@@ -65,6 +66,7 @@ export interface JobListItem {
   state: string;
   reject_reason: string | null;
   is_remote: boolean;
+  notified_at: string | null;
 }
 
 export interface JobDetail extends JobListItem {
@@ -203,6 +205,14 @@ export function getJobs(filters: JobFilters) {
 
 export function getJob(id: number) {
   return requestJSON<JobDetail>(`/api/v0/jobs/${id}`);
+}
+
+export function reviewJob(id: number, action: "applied" | "dismissed") {
+  return requestJSON<JobDetail>(`/api/v0/jobs/${id}/review`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action }),
+  });
 }
 
 export interface ReEvaluateResult {

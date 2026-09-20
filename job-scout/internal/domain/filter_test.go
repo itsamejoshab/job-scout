@@ -5,14 +5,24 @@ import (
 	"time"
 )
 
+func TestFilterAfterDescription_EmptyBodyIsFetchFailure(t *testing.T) {
+	job := Job{ID: 42, Description: "", DetailAttempts: 1}
+
+	got := FilterAfterDescription(job, Lists{})
+
+	if got.State != StateNeedsDetail || got.DetailAttempts != 2 {
+		t.Errorf("empty body decision = %+v, want needs_detail with detail_attempts=2", got)
+	}
+}
+
 func TestFilterPending_Table(t *testing.T) {
 	now := time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC)
 	lists := Lists{
-		TitleInclude:     []string{"Help Desk", "Support"},
-		TitleExclude:     []string{"manager", "intern"},
-		CompanyExclude:   []string{"ClickJobs.io", "Brooksource"},
-		DescInclude:      []string{"computer", "windows"},
-		DescExclude:      []string{"security clearance"},
+		TitleInclude:   []string{"Help Desk", "Support"},
+		TitleExclude:   []string{"manager", "intern"},
+		CompanyExclude: []string{"ClickJobs.io", "Brooksource"},
+		DescInclude:    []string{"computer", "windows"},
+		DescExclude:    []string{"security clearance"},
 	}
 
 	helpDesk := Job{
@@ -117,7 +127,7 @@ func TestFilterPending_Table(t *testing.T) {
 			},
 			all:  []Job{{ID: 30, Title: "senior help desk analyst", Company: "Acme", Description: "computer troubleshooting", CreatedAt: now}},
 			list: lists,
-			want: Decision{State: StateEligible, Description: "computer troubleshooting"},
+			want: Decision{State: StateReady, Description: "computer troubleshooting"},
 		},
 		{
 			name: "empty title include is no include constraint",
@@ -130,12 +140,12 @@ func TestFilterPending_Table(t *testing.T) {
 			},
 			all: []Job{{ID: 31, Title: "Warehouse Clerk", Company: "Acme", Description: "computer work on windows", CreatedAt: now}},
 			list: Lists{
-				TitleExclude:     lists.TitleExclude,
-				CompanyExclude:   lists.CompanyExclude,
-				DescInclude:      lists.DescInclude,
-				DescExclude:      lists.DescExclude,
+				TitleExclude:   lists.TitleExclude,
+				CompanyExclude: lists.CompanyExclude,
+				DescInclude:    lists.DescInclude,
+				DescExclude:    lists.DescExclude,
 			},
-			want: Decision{State: StateEligible, Description: "computer work on windows"},
+			want: Decision{State: StateReady, Description: "computer work on windows"},
 		},
 		{
 			name: "title exclude rejects",
@@ -175,7 +185,7 @@ func TestFilterPending_Table(t *testing.T) {
 				TitleInclude: lists.TitleInclude,
 				DescInclude:  lists.DescInclude,
 			},
-			want: Decision{State: StateEligible, Description: "computer windows"},
+			want: Decision{State: StateReady, Description: "computer windows"},
 		},
 		{
 			name: "title include miss is title_company",
@@ -194,7 +204,7 @@ func TestFilterPending_Table(t *testing.T) {
 			job:  helpDesk,
 			all:  []Job{helpDesk},
 			list: lists,
-			want: Decision{State: StatePending, NeedFetch: true, DetailAttempts: 0},
+			want: Decision{State: StateNeedsDetail, NeedFetch: true, DetailAttempts: 0},
 		},
 		{
 			name: "whitespace description needs fetch",
@@ -207,7 +217,7 @@ func TestFilterPending_Table(t *testing.T) {
 			},
 			all:  []Job{{ID: 36, Title: "IT Help Desk", Company: "Acme", Description: "   \n", CreatedAt: now}},
 			list: lists,
-			want: Decision{State: StatePending, NeedFetch: true},
+			want: Decision{State: StateNeedsDetail, NeedFetch: true},
 		},
 		{
 			name: "empty parsed description still filtered",
@@ -220,7 +230,7 @@ func TestFilterPending_Table(t *testing.T) {
 			},
 			all:  []Job{{ID: 37, Title: "IT Help Desk", Company: "Acme", CreatedAt: now}},
 			list: lists,
-			want: Decision{State: StatePending, NeedFetch: true},
+			want: Decision{State: StateNeedsDetail, NeedFetch: true},
 		},
 		{
 			name: "description exclude rejects",
@@ -259,12 +269,12 @@ func TestFilterPending_Table(t *testing.T) {
 			},
 			all: []Job{{ID: 40, Title: "IT Help Desk", Company: "Acme", Description: "serve food", CreatedAt: now}},
 			list: Lists{
-				TitleInclude:     lists.TitleInclude,
-				TitleExclude:     lists.TitleExclude,
-				CompanyExclude:   lists.CompanyExclude,
-				DescExclude:      lists.DescExclude,
+				TitleInclude:   lists.TitleInclude,
+				TitleExclude:   lists.TitleExclude,
+				CompanyExclude: lists.CompanyExclude,
+				DescExclude:    lists.DescExclude,
 			},
-			want: Decision{State: StateEligible, Description: "serve food"},
+			want: Decision{State: StateReady, Description: "serve food"},
 		},
 		{
 			name: "description include any one substring is enough",
@@ -277,7 +287,7 @@ func TestFilterPending_Table(t *testing.T) {
 			},
 			all:  []Job{{ID: 44, Title: "IT Help Desk", Company: "Acme", Description: "we use computer hardware daily", CreatedAt: now}},
 			list: lists,
-			want: Decision{State: StateEligible, Description: "we use computer hardware daily"},
+			want: Decision{State: StateReady, Description: "we use computer hardware daily"},
 		},
 		{
 			name: "same title different company is not duplicate",
@@ -293,7 +303,7 @@ func TestFilterPending_Table(t *testing.T) {
 				{ID: 45, Title: "IT Help Desk", Company: "Globex", Description: "computer troubleshooting", CreatedAt: now.Add(time.Minute)},
 			},
 			list: lists,
-			want: Decision{State: StateEligible, Description: "computer troubleshooting"},
+			want: Decision{State: StateReady, Description: "computer troubleshooting"},
 		},
 		{
 			name: "same company different title is not duplicate",
@@ -309,10 +319,10 @@ func TestFilterPending_Table(t *testing.T) {
 				{ID: 46, Title: "Application Support", Company: "Acme", Description: "computer troubleshooting", CreatedAt: now.Add(time.Minute)},
 			},
 			list: lists,
-			want: Decision{State: StateEligible, Description: "computer troubleshooting"},
+			want: Decision{State: StateReady, Description: "computer troubleshooting"},
 		},
 		{
-			name: "passers are eligible not notified",
+			name: "passers are ready for review",
 			job: Job{
 				ID:          43,
 				Title:       "Application Support",
@@ -322,7 +332,7 @@ func TestFilterPending_Table(t *testing.T) {
 			},
 			all:  []Job{{ID: 43, Title: "Application Support", Company: "Globex", Description: "computer desktop support", CreatedAt: now}},
 			list: lists,
-			want: Decision{State: StateEligible, Description: "computer desktop support"},
+			want: Decision{State: StateReady, Description: "computer desktop support"},
 		},
 		{
 			name: "first failure stops at duplicate not title_company",
@@ -353,7 +363,7 @@ func TestFilterPending_Table(t *testing.T) {
 			want: Decision{State: StateRejected, RejectReason: ReasonTitleCompany},
 		},
 		{
-			name: "description failure rejects before eligible",
+			name: "description failure rejects before ready",
 			job: Job{
 				ID:          53,
 				Title:       "IT Help Desk",
@@ -375,24 +385,24 @@ func TestFilterPending_Table(t *testing.T) {
 	}
 }
 
-func TestFilterAfterDescription_EmptyParsedTextStillFiltered(t *testing.T) {
+func TestFilterAfterDescription_EmptyParsedTextIsThirdFetchFailure(t *testing.T) {
 	lists := Lists{
 		TitleInclude: []string{"Help Desk"},
 		DescInclude:  []string{"computer"},
 	}
-	job := Job{ID: 1, Title: "IT Help Desk", Company: "Acme", Description: ""}
+	job := Job{ID: 1, Title: "IT Help Desk", Company: "Acme", Description: "", DetailAttempts: 2}
 	got := FilterAfterDescription(job, lists)
-	assertDecision(t, got, Decision{State: StateRejected, RejectReason: ReasonDescription})
+	assertDecision(t, got, Decision{State: StateRejected, RejectReason: ReasonDetailFailed, DetailAttempts: 3})
 }
 
 func TestOnDetailFetchFailure_ThreeFailuresReject(t *testing.T) {
 	job := Job{ID: 7, Title: "IT Help Desk", Company: "Acme", DetailAttempts: 0}
 	first := OnDetailFetchFailure(job)
-	assertDecision(t, first, Decision{State: StatePending, DetailAttempts: 1})
+	assertDecision(t, first, Decision{State: StateNeedsDetail, DetailAttempts: 1})
 
 	job.DetailAttempts = 1
 	second := OnDetailFetchFailure(job)
-	assertDecision(t, second, Decision{State: StatePending, DetailAttempts: 2})
+	assertDecision(t, second, Decision{State: StateNeedsDetail, DetailAttempts: 2})
 
 	job.DetailAttempts = 2
 	third := OnDetailFetchFailure(job)

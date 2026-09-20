@@ -78,7 +78,7 @@ func TestJobs_ListFiltersOrdersPagesAndOmitsDescription(t *testing.T) {
 			'https://example.test/jobs/wrong-source',
 			'https://example.test/jobs/wrong-search'
 		);
-		UPDATE jobs SET state = 'eligible'
+		UPDATE jobs SET state = 'ready'
 	`); err != nil {
 		t.Fatalf("prepare jobs: %v", err)
 	}
@@ -86,7 +86,7 @@ func TestJobs_ListFiltersOrdersPagesAndOmitsDescription(t *testing.T) {
 	h := &Handler{DB: pool, Cfg: config.Config{ReportingTimezone: "America/New_York"}}
 	req := httptest.NewRequest(
 		http.MethodGet,
-		"/api/v0/jobs?state=eligible&job_source=linkedin&q=acme&date_from=2026-09-18&date_to=2026-09-18&limit=1",
+		"/api/v0/jobs?state=ready&job_source=linkedin&q=acme&date_from=2026-09-18&date_to=2026-09-18&limit=1",
 		nil,
 	)
 	rec := httptest.NewRecorder()
@@ -105,8 +105,8 @@ func TestJobs_ListFiltersOrdersPagesAndOmitsDescription(t *testing.T) {
 	if len(page.Items) != 1 || page.Total != 2 || page.AsOf == "" {
 		t.Fatalf("page = %#v, want one of two items and an anchor", page)
 	}
-	if page.Items[0]["state"] != "eligible" {
-		t.Errorf("state=%v, want eligible", page.Items[0]["state"])
+	if page.Items[0]["state"] != "ready" {
+		t.Errorf("state=%v, want ready", page.Items[0]["state"])
 	}
 	if page.Items[0]["job_url"] != "https://example.test/jobs/two" {
 		t.Errorf("first tied item URL=%v, want higher id", page.Items[0]["job_url"])
@@ -128,7 +128,7 @@ func TestJobs_ListFiltersOrdersPagesAndOmitsDescription(t *testing.T) {
 	`); err != nil {
 		t.Fatalf("insert after anchor: %v", err)
 	}
-	secondPath := "/api/v0/jobs?state=eligible&job_source=linkedin&q=acme" +
+	secondPath := "/api/v0/jobs?state=ready&job_source=linkedin&q=acme" +
 		"&date_from=2026-09-18&date_to=2026-09-18&limit=1&offset=1&as_of=" +
 		page.AsOf
 	req = httptest.NewRequest(http.MethodGet, secondPath, nil)
@@ -183,9 +183,9 @@ func TestJobs_LastHoursFilterIsRelativeToAsOf(t *testing.T) {
 		}
 	}
 	if _, err := pool.Exec(`
-		UPDATE jobs SET created_at = '2026-09-18 20:00:00+00', state = 'notified'
+		UPDATE jobs SET created_at = '2026-09-18 20:00:00+00', state = 'ready'
 		WHERE job_url = 'https://example.test/jobs/recent';
-		UPDATE jobs SET created_at = '2026-09-17 18:00:00+00', state = 'notified'
+		UPDATE jobs SET created_at = '2026-09-17 18:00:00+00', state = 'ready'
 		WHERE job_url = 'https://example.test/jobs/older';
 	`); err != nil {
 		t.Fatalf("prepare jobs: %v", err)
@@ -195,7 +195,7 @@ func TestJobs_LastHoursFilterIsRelativeToAsOf(t *testing.T) {
 	asOf := "2026-09-18T21:00:00Z"
 	req := httptest.NewRequest(
 		http.MethodGet,
-		"/api/v0/jobs?state=notified&last_hours=24&as_of="+asOf,
+		"/api/v0/jobs?state=ready&last_hours=24&as_of="+asOf,
 		nil,
 	)
 	rec := httptest.NewRecorder()
@@ -436,7 +436,7 @@ func TestJobStats_NewJobsIsPendingAndCountsByState(t *testing.T) {
 	if byState["rejected"] != float64(1) {
 		t.Errorf("by_state rejected = %v, want 1", byState["rejected"])
 	}
-	for _, st := range []string{"pending", "rejected", "eligible", "notifying", "notified"} {
+	for _, st := range []string{"pending", "rejected", "needs_detail", "ready", "applied", "dismissed"} {
 		if _, ok := byState[st]; !ok {
 			t.Errorf("by_state missing key %q", st)
 		}

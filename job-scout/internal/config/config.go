@@ -150,7 +150,7 @@ func Load() Config {
 		HTTPTimeoutSeconds:        getenvInt("HTTP_TIMEOUT_SECONDS", 30),
 		ScrapeErrorBackoffSeconds: getenvInt("SCRAPE_ERROR_BACKOFF_SECONDS", 300),
 		NotifyMaxJobs:             getenvInt("NOTIFY_MAX_JOBS", 25),
-		NotifyClaimTimeoutSeconds: getenvIntAllowZero("NOTIFY_CLAIM_TIMEOUT_SECONDS", 0),
+		NotifyClaimTimeoutSeconds: getenvIntAllowZero("NOTIFY_CLAIM_TIMEOUT_SECONDS", 900),
 		ScrapeScheduleSeconds:     getenvInt("SCRAPE_SCHEDULE_SECONDS", 600),
 		NotifyCron:                getenv("NOTIFY_CRON", "39 7,17,20 * * *"),
 	}

@@ -184,10 +184,10 @@ func assertManualScrapeStart(t *testing.T, start workflowStart, responseID strin
 	if responseID != start.opts.ID {
 		t.Errorf("workflow_id %q must match started workflow ID %q", responseID, start.opts.ID)
 	}
-	if responseID == "jobscout-scrape-scheduled" {
+	if responseID == "scrape-scheduled" {
 		t.Errorf("manual scrape workflow ID must differ from reserved scheduled ID %q", responseID)
 	}
-	const prefix = "jobscout-scrape-manual-"
+	const prefix = "scrape-manual-"
 	if !strings.HasPrefix(responseID, prefix) {
 		t.Errorf("manual scrape workflow ID must start with %q, got %q", prefix, responseID)
 		return
@@ -227,12 +227,20 @@ func (f *runTemporalFake) ExecuteWorkflow(_ context.Context, options client.Star
 	return &runWorkflowFake{id: options.ID, parent: f}, nil
 }
 
+func (f *runTemporalFake) SignalWithStartWorkflow(context.Context, string, string, interface{}, client.StartWorkflowOptions, interface{}, ...interface{}) (client.WorkflowRun, error) {
+	panic("SignalWithStartWorkflow unused in POST /api/v0/run")
+}
+
 func (f *runTemporalFake) DescribeWorkflowExecution(context.Context, string, string) (*workflowservice.DescribeWorkflowExecutionResponse, error) {
 	panic("DescribeWorkflowExecution unused in POST /api/v0/run")
 }
 
 func (f *runTemporalFake) CheckHealth(context.Context, *client.CheckHealthRequest) (*client.CheckHealthResponse, error) {
 	panic("CheckHealth unused in POST /api/v0/run")
+}
+
+func (f *runTemporalFake) TerminateWorkflow(context.Context, string, string, string, ...interface{}) error {
+	panic("TerminateWorkflow unused in POST /api/v0/run")
 }
 
 type runWorkflowFake struct {

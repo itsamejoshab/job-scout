@@ -44,7 +44,7 @@ Automated tests POST only to `httptest` servers. They must not use live webhook 
 
 ### Pipeline (Temporal workflows)
 
-Two workflows run on `main-task-queue`:
+Five workflows run on `main-task-queue`:
 
 #### ScrapeWorkflow
 
@@ -52,19 +52,23 @@ Two workflows run on `main-task-queue`:
 
 1. **Scraper** (`scrape_jobs`): Scrapes each enabled provider that is due. A forced run ignores provider cadence. The scraper collects high-level fields such as company, title, location, URL, remote status, and any description that the provider supplies.
 2. **URL Duplicate Remover** (part of `scrape_jobs`): Stores each job URL once. Repeated search results and repeated scrape rounds do not create another row.
+3. **Filter Wake** (`wake_filter_pending`): Signals or starts the singleton fast-filter dispatcher after every scrape result.
+
+#### FilterPendingWorkflow
+
+`FilterPendingWorkflow` is a singleton fast-filter dispatcher (`filter-pending`). It takes `pending` jobs in FIFO order and applies duplicate, title/company, and existing-description checks without provider HTTP. Outcomes are `rejected`, `ready`, or `needs_detail`. When it writes `needs_detail`, it wakes the detail dispatcher.
+
+#### ProcessPendingWorkflow
+
+`ProcessPendingWorkflow` is a singleton detail dispatcher (`process-pending`). It takes only `needs_detail` jobs in FIFO order and runs one `ProcessJobWorkflow` child at a time. It waits between source HTTP attempts, responds to `JobsAvailable`, and uses continue-as-new to keep Temporal history small.
+
+#### ProcessJobWorkflow
+
+`ProcessJobWorkflow` fetches a description for one `needs_detail` job while holding the provider advisory lock, then applies description filters. Child workflow IDs use `scrape-more-details-{jobID}`. A passing job becomes `ready`; automated drops become `rejected`. Fetch failures stay `needs_detail` until the third failure.
 
 #### NotifyWorkflow
 
-`NotifyWorkflow` evaluates stored `pending` jobs and sends one batched notification.
-
-1. **Filter Data Loader** (`load_jobs_for_filtering`): Loads pending jobs, all jobs needed for duplicate checks, and the current search settings.
-2. **Duplicate Remover**: Rejects repeated title-and-company combinations. The earliest job is kept.
-3. **Basic Filter**: Rejects jobs that fail title or company include/exclude rules.
-4. **Job Detailer** (`get_job_description`): Fetches the full job description when a job passes the basic filter but has no description.
-5. **Advanced Filter**: Applies description include/exclude rules and checks remote jobs for phrases that indicate an on-site requirement.
-6. **Smart Filter**: Reserved for a future AI-based relevance check. It is not implemented.
-7. **Filter Result Writer** (`save_job_filter_result`): Saves each decision, rejection reason, fetched description, and detail-attempt count.
-8. **Notifier** (`claim_notification_batch`, `send_notification`, `finish_notification_batch`): Claims eligible jobs, sends one JSON `{ "notify": "<WEBHOOK_ID>", "message": "..." }` to `WEBHOOK_BASE`, and marks the batch as notified. It does not send a request when the claim is empty.
+`NotifyWorkflow` claims unemailed `ready` jobs and sends one batched notification. It does not filter jobs or fetch descriptions. The claim writes the email dedupe marker before the POST. A failed POST clears the claim markers for a later notify run. Review state stays unchanged.
 
 Manual HTTP starts unique workflow IDs. `/run` and `/notify` are not blocked when a scheduled workflow run is still active.
 
@@ -160,8 +164,9 @@ Base path: `http://localhost:8001/api/v0`
 | GET | `/workflow/{id}` | Read workflow status and run ID. |
 | GET | `/jobs` | List jobs with filters, stable paging, and an `as_of` anchor. |
 | GET | `/jobs/{id}` | Read one job, including its description. |
+| POST | `/jobs/{id}/review` | Mark a `ready` job as `applied` or `dismissed`. |
 | GET | `/jobs/stats` | Read job counts. `new_jobs` is the `pending` count. |
-| POST | `/jobs/re-evaluate` | Move rejected jobs to `pending`. Returns the updated row count. |
+| POST | `/jobs/re-evaluate` | Move rejected jobs to `pending`, reset detail attempts, and wake processing. Returns the updated row count. |
 | GET, PUT | `/search-settings` | Read or replace universal search settings. |
 | POST | `/search-settings/reset` | Reset universal search settings to seed values. |
 | GET | `/scraper-settings`, `/scraper-settings/all` | Read one provider or all providers. |

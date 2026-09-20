@@ -6,16 +6,16 @@ import (
 )
 
 const (
-	StatePending   = "pending"
-	StateRejected  = "rejected"
-	StateEligible  = "eligible"
-	StateNotifying = "notifying"
-	StateNotified  = "notified"
+	StatePending     = "pending"
+	StateRejected    = "rejected"
+	StateNeedsDetail = "needs_detail"
+	StateReady       = "ready"
 
-	ReasonDuplicate    = "duplicate"
-	ReasonTitleCompany = "title_company"
-	ReasonDescription  = "description"
-	ReasonDetailFailed = "detail_failed"
+	ReasonDuplicate         = "duplicate"
+	ReasonTitleCompany      = "title_company"
+	ReasonDescription       = "description"
+	ReasonDetailFailed      = "detail_failed"
+	ReasonUnsupportedSource = "unsupported_source"
 
 	MaxDetailAttempts = 3
 )
@@ -66,7 +66,7 @@ func FilterPending(job Job, all []Job, lists Lists) Decision {
 		return base
 	}
 	if strings.TrimSpace(job.Description) == "" {
-		base.State = StatePending
+		base.State = StateNeedsDetail
 		base.NeedFetch = true
 		base.Description = ""
 		return base
@@ -76,13 +76,16 @@ func FilterPending(job Job, all []Job, lists Lists) Decision {
 
 // FilterAfterDescription applies description include/exclude checks.
 func FilterAfterDescription(job Job, lists Lists) Decision {
+	if strings.TrimSpace(job.Description) == "" {
+		return OnDetailFetchFailure(job)
+	}
 	d := Decision{Description: job.Description, DetailAttempts: job.DetailAttempts}
 	if !passInclude(job.Description, lists.DescInclude) || !passExclude(job.Description, lists.DescExclude) {
 		d.State = StateRejected
 		d.RejectReason = ReasonDescription
 		return d
 	}
-	d.State = StateEligible
+	d.State = StateReady
 	return d
 }
 
@@ -92,7 +95,7 @@ func OnDetailFetchFailure(job Job) Decision {
 	if attempts >= MaxDetailAttempts {
 		return Decision{State: StateRejected, RejectReason: ReasonDetailFailed, DetailAttempts: attempts}
 	}
-	return Decision{State: StatePending, DetailAttempts: attempts}
+	return Decision{State: StateNeedsDetail, DetailAttempts: attempts}
 }
 
 func passTitleCompany(job Job, lists Lists) bool {

@@ -76,6 +76,11 @@ func runAPI(cfg config.Config) {
 	if err := handler.InstallSchedules(ctx); err != nil {
 		fatal("install schedules", err)
 	}
+	// The next scrape, sync scrape, or re-evaluate starts the dispatchers again
+	// if this boot attempt fails, so a failure must not stop the API.
+	if err := handler.StartDispatchers(ctx); err != nil {
+		slog.Error("start filter/process-pending dispatchers failed", "err", err)
+	}
 
 	srv := api.NewServer(":"+cfg.APIPort, handler)
 
@@ -109,10 +114,12 @@ func runWorker(cfg config.Config) {
 	defer temporalClient.Close()
 
 	acts := &pipeline.Activities{
-		Scraper:       scraper.NewServiceWithConfig(database, cfg),
-		DB:            database,
-		Webhook:       pipeline.NewWebhookClient(cfg),
-		NotifyMaxJobs: cfg.NotifyMaxJobs,
+		Scraper:                   scraper.NewServiceWithConfig(database, cfg),
+		DB:                        database,
+		Webhook:                   pipeline.NewWebhookClient(cfg),
+		Temporal:                  temporalClient,
+		NotifyMaxJobs:             cfg.NotifyMaxJobs,
+		NotifyClaimTimeoutSeconds: cfg.NotifyClaimTimeoutSeconds,
 	}
 
 	slog.Info("starting temporal worker", "taskQueue", config.TaskQueue)
