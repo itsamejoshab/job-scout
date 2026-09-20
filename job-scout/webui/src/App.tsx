@@ -274,7 +274,7 @@ const palette = {
 const statusGroupColors = {
   Applied: "#0d9488",
   Pending: palette.cerulean,
-  Skipped: palette.alabaster,
+  Rejected: palette.alabaster,
 };
 
 const statusDonutColors: Record<string, string> = {
@@ -295,6 +295,16 @@ const skippedDonutColors: Record<string, string> = {
   dismissed: palette.alabaster,
   none: "#b8bcb4",
 };
+
+function providerStatusLabel(status: string) {
+  if (status === "due") {
+    return "ready";
+  }
+  if (status === "waiting") {
+    return "on cooldown";
+  }
+  return status;
+}
 
 function jobStateLabel(state: string) {
   if (state === "ready") {
@@ -410,7 +420,7 @@ function DashboardPage() {
         day: point.day,
         Applied: point.applied,
         Pending: point.pending,
-        Skipped: point.skipped,
+        Rejected: point.skipped,
       }))
       .sort((left, right) => left.day.localeCompare(right.day));
   }, [dashboard.data]);
@@ -499,11 +509,11 @@ function DashboardPage() {
                 <div className="flex items-center justify-between">
                   <h2 className="text-lg font-semibold tracking-tight">{provider.job_source}</h2>
                   <Badge variant={provider.status === "due" ? "destructive" : "secondary"}>
-                    {provider.status}
+                    {providerStatusLabel(provider.status)}
                   </Badge>
                 </div>
                 <div className="mt-4 grid gap-1 text-sm text-muted-foreground sm:grid-cols-2">
-                  <p>Status: {provider.status}</p>
+                  <p>Status: {providerStatusLabel(provider.status)}</p>
                   <p>Implemented: {provider.implemented ? "yes" : "no"}</p>
                   <p>Enabled: {provider.enabled ? "yes" : "no"}</p>
                   <p>Interval seconds: {provider.scrape_interval_seconds}</p>
@@ -587,9 +597,9 @@ function DashboardPage() {
                     fill={statusGroupColors.Pending}
                   />
                   <Bar
-                    dataKey="Skipped"
+                    dataKey="Rejected"
                     stackId="status"
-                    fill={statusGroupColors.Skipped}
+                    fill={statusGroupColors.Rejected}
                     radius={[4, 4, 0, 0]}
                   />
                 </BarChart>
@@ -604,8 +614,8 @@ function DashboardPage() {
               slices={statusDonutData}
             />
             <DonutCard
-              title="Skipped jobs by reason"
-              emptyLabel="No skipped jobs yet."
+              title="Rejected jobs by reason"
+              emptyLabel="No rejected jobs yet."
               slices={skippedDonutData}
             />
           </section>
