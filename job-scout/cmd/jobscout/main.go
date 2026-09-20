@@ -76,10 +76,10 @@ func runAPI(cfg config.Config) {
 	if err := handler.InstallSchedules(ctx); err != nil {
 		fatal("install schedules", err)
 	}
-	// The next scrape, sync scrape, or re-evaluate starts the dispatcher again
+	// The next scrape, sync scrape, or re-evaluate starts the dispatchers again
 	// if this boot attempt fails, so a failure must not stop the API.
-	if err := handler.StartProcessPending(ctx); err != nil {
-		slog.Error("start process-pending dispatcher failed", "err", err)
+	if err := handler.StartDispatchers(ctx); err != nil {
+		slog.Error("start filter/process-pending dispatchers failed", "err", err)
 	}
 
 	srv := api.NewServer(":"+cfg.APIPort, handler)

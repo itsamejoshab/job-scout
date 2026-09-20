@@ -44,7 +44,7 @@ Automated tests POST only to `httptest` servers. They must not use live webhook 
 
 ### Pipeline (Temporal workflows)
 
-Four workflows run on `main-task-queue`:
+Five workflows run on `main-task-queue`:
 
 #### ScrapeWorkflow
 
@@ -52,15 +52,19 @@ Four workflows run on `main-task-queue`:
 
 1. **Scraper** (`scrape_jobs`): Scrapes each enabled provider that is due. A forced run ignores provider cadence. The scraper collects high-level fields such as company, title, location, URL, remote status, and any description that the provider supplies.
 2. **URL Duplicate Remover** (part of `scrape_jobs`): Stores each job URL once. Repeated search results and repeated scrape rounds do not create another row.
-3. **Process Wake** (`wake_process_pending`): Signals or starts the singleton pending dispatcher after every scrape result.
+3. **Filter Wake** (`wake_filter_pending`): Signals or starts the singleton fast-filter dispatcher after every scrape result.
+
+#### FilterPendingWorkflow
+
+`FilterPendingWorkflow` is a singleton fast-filter dispatcher (`filter-pending`). It takes `pending` jobs in FIFO order and applies duplicate, title/company, and existing-description checks without provider HTTP. Outcomes are `rejected`, `ready`, or `needs_detail`. When it writes `needs_detail`, it wakes the detail dispatcher.
 
 #### ProcessPendingWorkflow
 
-`ProcessPendingWorkflow` is a singleton queue dispatcher. It takes `pending` jobs in FIFO order and runs one `ProcessJobWorkflow` child at a time. It waits between source HTTP attempts, responds to `JobsAvailable`, and uses continue-as-new to keep Temporal history small.
+`ProcessPendingWorkflow` is a singleton detail dispatcher (`process-pending`). It takes only `needs_detail` jobs in FIFO order and runs one `ProcessJobWorkflow` child at a time. It waits between source HTTP attempts, responds to `JobsAvailable`, and uses continue-as-new to keep Temporal history small.
 
 #### ProcessJobWorkflow
 
-`ProcessJobWorkflow` evaluates one job. It runs duplicate and title/company checks first. It reuses an existing description, or uses the source Enricher to fetch one while holding the provider advisory lock. A passing job becomes `ready`; automated drops become `rejected`.
+`ProcessJobWorkflow` fetches a description for one `needs_detail` job while holding the provider advisory lock, then applies description filters. Child workflow IDs use `scrape-more-details-{jobID}`. A passing job becomes `ready`; automated drops become `rejected`. Fetch failures stay `needs_detail` until the third failure.
 
 #### NotifyWorkflow
 

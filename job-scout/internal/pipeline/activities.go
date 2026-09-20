@@ -25,8 +25,12 @@ type Activities struct {
 	NotifyClaimTimeoutSeconds int
 }
 
-// wake_process_pending signals or starts the pending dispatcher singleton.
-// Workflows cannot signal-with-start, so they call this activity.
+// wake_filter_pending signals or starts the fast-filter singleton.
+func (a *Activities) wake_filter_pending(ctx context.Context) error {
+	return WakeFilterPending(ctx, a.Temporal)
+}
+
+// wake_process_pending signals or starts the detail dispatcher singleton.
 func (a *Activities) wake_process_pending(ctx context.Context) error {
 	return WakeProcessPending(ctx, a.Temporal)
 }
@@ -41,6 +45,66 @@ func (a *Activities) load_next_pending_job(ctx context.Context, input LoadNextPe
 	return db.NextPendingJobID(ctx, a.DB, input.SkipIDs)
 }
 
+// load_next_needs_detail_job returns the oldest needs_detail row not skipped.
+func (a *Activities) load_next_needs_detail_job(ctx context.Context, input LoadNextPendingInput) (int64, error) {
+	return db.NextNeedsDetailJobID(ctx, a.DB, input.SkipIDs)
+}
+
+// filter_pending_job applies cheap filters to one pending row. It never GETs
+// provider detail HTML. NeedFetch outcomes become needs_detail or an
+// unsupported_source reject.
+func (a *Activities) filter_pending_job(ctx context.Context, jobID int64) (FilterPendingJobResult, error) {
+	row, err := db.GetJob(ctx, a.DB, jobID)
+	if err != nil {
+		return FilterPendingJobResult{}, err
+	}
+	if row.State != db.JobStatePending {
+		return FilterPendingJobResult{}, nil
+	}
+
+	groupRows, err := db.ListDuplicateCandidates(ctx, a.DB)
+	if err != nil {
+		return FilterPendingJobResult{}, err
+	}
+	group := make([]domain.Job, len(groupRows))
+	for i, g := range groupRows {
+		group[i] = domainJobFromDB(g)
+	}
+
+	settings, err := db.GetSearchSettings(ctx, a.DB)
+	if err != nil {
+		return FilterPendingJobResult{}, err
+	}
+	lists := domain.Lists{}
+	if settings != nil {
+		lists = domain.Lists{
+			TitleInclude: settings.TitleInclude, TitleExclude: settings.TitleExclude,
+			CompanyExclude: settings.CompanyExclude, DescInclude: settings.DescIncludeWords,
+			DescExclude: settings.DescExcludeWords,
+		}
+	}
+
+	job := domainJobFromDB(row)
+	decision := domain.FilterPending(job, group, lists)
+	if decision.NeedFetch {
+		if _, ok := selectEnricher(string(row.JobSource)); !ok {
+			decision = domain.Decision{
+				State: domain.StateRejected, RejectReason: domain.ReasonUnsupportedSource,
+				DetailAttempts: job.DetailAttempts,
+			}
+		} else {
+			decision.State = domain.StateNeedsDetail
+			decision.NeedFetch = true
+			decision.Description = ""
+		}
+	}
+
+	if err := persistFilterDecision(ctx, a.DB, jobID, decision); err != nil {
+		return FilterPendingJobResult{}, err
+	}
+	return FilterPendingJobResult{WroteNeedsDetail: decision.State == domain.StateNeedsDetail}, nil
+}
+
 // load_process_job loads the current row before any processing decision.
 func (a *Activities) load_process_job(ctx context.Context, jobID int64) (ProcessJob, error) {
 	row, err := db.GetJob(ctx, a.DB, jobID)
@@ -48,19 +112,6 @@ func (a *Activities) load_process_job(ctx context.Context, jobID int64) (Process
 		return ProcessJob{}, err
 	}
 	return processJobFromDB(row), nil
-}
-
-// load_duplicate_group loads title+company peers without filtering by state.
-func (a *Activities) load_duplicate_group(ctx context.Context, _ DuplicateGroupInput) ([]domain.Job, error) {
-	rows, err := db.ListDuplicateCandidates(ctx, a.DB)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]domain.Job, len(rows))
-	for i, row := range rows {
-		out[i] = domainJobFromDB(row)
-	}
-	return out, nil
 }
 
 // load_filter_lists reads the current word lists for one processing decision.
@@ -113,17 +164,21 @@ func (a *Activities) get_job_description(ctx context.Context, in DetailFetchInpu
 
 // save_job_filter_result persists one filter decision. It does not claim or notify.
 func (a *Activities) save_job_filter_result(ctx context.Context, in ApplyJobDecisionInput) error {
+	return persistFilterDecision(ctx, a.DB, in.JobID, in.Decision)
+}
+
+func persistFilterDecision(ctx context.Context, database *sql.DB, jobID int64, decision domain.Decision) error {
 	var reason *string
-	if in.Decision.RejectReason != "" {
-		r := in.Decision.RejectReason
+	if decision.RejectReason != "" {
+		r := decision.RejectReason
 		reason = &r
 	}
 	var desc *string
-	if persistDescription(in.Decision) {
-		d := in.Decision.Description
+	if persistDescription(decision) {
+		d := decision.Description
 		desc = &d
 	}
-	return db.UpdateJobNotifyState(ctx, a.DB, in.JobID, in.Decision.State, reason, desc, in.Decision.DetailAttempts)
+	return db.UpdateJobNotifyState(ctx, database, jobID, decision.State, reason, desc, decision.DetailAttempts)
 }
 
 // ClaimedJob is one row taken for this webhook POST.

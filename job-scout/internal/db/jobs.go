@@ -8,11 +8,12 @@ import (
 )
 
 const (
-	JobStatePending   = "pending"
-	JobStateRejected  = "rejected"
-	JobStateReady     = "ready"
-	JobStateApplied   = "applied"
-	JobStateDismissed = "dismissed"
+	JobStatePending     = "pending"
+	JobStateRejected    = "rejected"
+	JobStateNeedsDetail = "needs_detail"
+	JobStateReady       = "ready"
+	JobStateApplied     = "applied"
+	JobStateDismissed   = "dismissed"
 )
 
 // InsertJobIfNew inserts a job unless one with the same trimmed job_url already
@@ -165,6 +166,15 @@ func GetJob(ctx context.Context, database *sql.DB, id int64) (Job, error) {
 
 // NextPendingJobID returns the oldest pending row that is not excluded.
 func NextPendingJobID(ctx context.Context, database *sql.DB, skipIDs []int64) (int64, error) {
+	return nextJobIDByState(ctx, database, JobStatePending, skipIDs)
+}
+
+// NextNeedsDetailJobID returns the oldest needs_detail row that is not excluded.
+func NextNeedsDetailJobID(ctx context.Context, database *sql.DB, skipIDs []int64) (int64, error) {
+	return nextJobIDByState(ctx, database, JobStateNeedsDetail, skipIDs)
+}
+
+func nextJobIDByState(ctx context.Context, database *sql.DB, state string, skipIDs []int64) (int64, error) {
 	if skipIDs == nil {
 		skipIDs = []int64{}
 	}
@@ -176,7 +186,7 @@ func NextPendingJobID(ctx context.Context, database *sql.DB, skipIDs []int64) (i
 		  AND id <> ALL($2)
 		ORDER BY created_at ASC, id ASC
 		LIMIT 1
-	`, JobStatePending, skipIDs).Scan(&id)
+	`, state, skipIDs).Scan(&id)
 	if err == sql.ErrNoRows {
 		return 0, nil
 	}
@@ -217,13 +227,14 @@ type JobStats struct {
 
 func GetJobStats(ctx context.Context, db *sql.DB) (JobStats, error) {
 	s := JobStats{ByState: map[string]int{
-		JobStatePending:   0,
-		JobStateRejected:  0,
-		JobStateReady:     0,
-		JobStateApplied:   0,
-		JobStateDismissed: 0,
+		JobStatePending:     0,
+		JobStateRejected:    0,
+		JobStateNeedsDetail: 0,
+		JobStateReady:       0,
+		JobStateApplied:     0,
+		JobStateDismissed:   0,
 	}}
-	var pending, rejected, ready, applied, dismissed int
+	var pending, rejected, needsDetail, ready, applied, dismissed int
 	err := db.QueryRowContext(ctx, `
 		SELECT
 			COUNT(*),
@@ -231,17 +242,19 @@ func GetJobStats(ctx context.Context, db *sql.DB) (JobStats, error) {
 			COUNT(*) FILTER (WHERE relevant),
 			COUNT(*) FILTER (WHERE state = 'pending'),
 			COUNT(*) FILTER (WHERE state = 'rejected'),
+			COUNT(*) FILTER (WHERE state = 'needs_detail'),
 			COUNT(*) FILTER (WHERE state = 'ready'),
 			COUNT(*) FILTER (WHERE state = 'applied'),
 			COUNT(*) FILTER (WHERE state = 'dismissed')
 		FROM jobs
 	`).Scan(&s.TotalJobs, &s.NewJobs, &s.RelevantJobs,
-		&pending, &rejected, &ready, &applied, &dismissed)
+		&pending, &rejected, &needsDetail, &ready, &applied, &dismissed)
 	if err != nil {
 		return s, err
 	}
 	s.ByState[JobStatePending] = pending
 	s.ByState[JobStateRejected] = rejected
+	s.ByState[JobStateNeedsDetail] = needsDetail
 	s.ByState[JobStateReady] = ready
 	s.ByState[JobStateApplied] = applied
 	s.ByState[JobStateDismissed] = dismissed

@@ -28,6 +28,7 @@ const dashboardStats = {
       by_state: {
         pending: 1,
         rejected: 1,
+        needs_detail: 0,
         ready: 0,
         applied: 0,
         dismissed: 0,
@@ -52,6 +53,7 @@ const dashboardStats = {
       by_state: {
         pending: 0,
         rejected: 0,
+        needs_detail: 0,
         ready: 0,
         applied: 0,
         dismissed: 0,
@@ -387,6 +389,7 @@ describe("operator shell", () => {
     expect(screen.getByText("Status: waiting")).toBeInTheDocument();
     expect(screen.getByText("Status: disabled")).toBeInTheDocument();
     expect(screen.getByText("pending: 1")).toBeInTheDocument();
+    expect(screen.getAllByText("Requires further processing: 0")).toHaveLength(2);
     expect(screen.getByText("title_company: 1")).toBeInTheDocument();
     expect(screen.getByText("Jobs over time (America/New_York)")).toBeInTheDocument();
   });

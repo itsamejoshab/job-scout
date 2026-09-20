@@ -11,38 +11,52 @@ import (
 	"github.com/jobscout/jobscout/internal/config"
 	"github.com/jobscout/jobscout/internal/db"
 	"github.com/jobscout/jobscout/internal/db/pgtest"
+	"github.com/jobscout/jobscout/internal/pipeline"
 	"github.com/jobscout/jobscout/internal/scraper"
 	"go.temporal.io/api/serviceerror"
 	"go.temporal.io/api/workflowservice/v1"
 	"go.temporal.io/sdk/client"
 )
 
-func TestStartProcessPending_BootSignalWithStartsTheSingleton(t *testing.T) {
+func TestStartDispatchers_TerminatesLegacyAndStartsBoth(t *testing.T) {
 	fake := &wakeTemporalFake{}
 	h := &Handler{Temporal: fake}
 
-	if err := h.StartProcessPending(context.Background()); err != nil {
-		t.Fatalf("API boot must start the dispatcher: %v", err)
+	if err := h.StartDispatchers(context.Background()); err != nil {
+		t.Fatalf("API boot must start the dispatchers: %v", err)
 	}
-	assertWakeCall(t, fake)
+	if len(fake.terminates) != 1 || fake.terminates[0] != pipeline.LegacyProcessPendingWorkflowID {
+		t.Errorf("terminates = %v, want [%s]", fake.terminates, pipeline.LegacyProcessPendingWorkflowID)
+	}
+	assertWakeCalls(t, fake, "filter-pending", "process-pending")
 }
 
-func TestStartProcessPending_IgnoresAlreadyStarted(t *testing.T) {
+func TestStartDispatchers_IgnoresAlreadyStarted(t *testing.T) {
 	fake := &wakeTemporalFake{
 		err: serviceerror.NewWorkflowExecutionAlreadyStarted(
 			"already running", "start-request", "run-id"),
 	}
 	h := &Handler{Temporal: fake}
 
-	if err := h.StartProcessPending(context.Background()); err != nil {
+	if err := h.StartDispatchers(context.Background()); err != nil {
 		t.Errorf("already-started must be ignored on boot, got %v", err)
 	}
-	if len(fake.calls) != 1 {
-		t.Errorf("SignalWithStartWorkflow calls = %d, want 1", len(fake.calls))
+	if len(fake.calls) != 2 {
+		t.Errorf("SignalWithStartWorkflow calls = %d, want 2", len(fake.calls))
 	}
 }
 
-func TestReEvaluateJobs_WakesProcessPendingWhenRowsMoveBackToPending(t *testing.T) {
+func TestStartDispatchers_IgnoresMissingLegacy(t *testing.T) {
+	fake := &wakeTemporalFake{terminateErr: serviceerror.NewNotFound("missing")}
+	h := &Handler{Temporal: fake}
+
+	if err := h.StartDispatchers(context.Background()); err != nil {
+		t.Fatalf("missing legacy singleton must not fail boot: %v", err)
+	}
+	assertWakeCalls(t, fake, "filter-pending", "process-pending")
+}
+
+func TestReEvaluateJobs_WakesFilterPendingWhenRowsMoveBackToPending(t *testing.T) {
 	pool := newRejectedJobPool(t)
 	fake := &wakeTemporalFake{}
 	h := &Handler{DB: pool, Temporal: fake}
@@ -50,7 +64,7 @@ func TestReEvaluateJobs_WakesProcessPendingWhenRowsMoveBackToPending(t *testing.
 	if updated := postReEvaluate(t, h); updated != 1 {
 		t.Fatalf("updated = %d, want 1 rejected row", updated)
 	}
-	assertWakeCall(t, fake)
+	assertWakeCalls(t, fake, "filter-pending")
 }
 
 func TestReEvaluateJobs_NoRowsUpdatedDoesNotWake(t *testing.T) {
@@ -69,7 +83,7 @@ func TestReEvaluateJobs_NoRowsUpdatedDoesNotWake(t *testing.T) {
 	}
 }
 
-func TestScrape_SyncScrapeWakesProcessPending(t *testing.T) {
+func TestScrape_SyncScrapeWakesFilterPending(t *testing.T) {
 	pool := pgtest.Open(t)
 	if err := db.Migrate(pool); err != nil {
 		t.Fatalf("migrate: %v", err)
@@ -77,8 +91,6 @@ func TestScrape_SyncScrapeWakesProcessPending(t *testing.T) {
 	if err := db.SeedSettings(t.Context(), pool); err != nil {
 		t.Fatalf("seed settings: %v", err)
 	}
-	// A disabled provider keeps the debug scrape off the network while it still
-	// returns a non-error result.
 	if _, err := pool.Exec(`UPDATE scraper_settings SET enabled = FALSE`); err != nil {
 		t.Fatalf("disable providers: %v", err)
 	}
@@ -91,7 +103,7 @@ func TestScrape_SyncScrapeWakesProcessPending(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("POST /api/v0/scrape status=%d body=%s", rec.Code, rec.Body.String())
 	}
-	assertWakeCall(t, fake)
+	assertWakeCalls(t, fake, "filter-pending")
 }
 
 func newRejectedJobPool(t *testing.T) *sql.DB {
@@ -134,26 +146,32 @@ func postReEvaluate(t *testing.T, h *Handler) int {
 	return *body.Updated
 }
 
-func assertWakeCall(t *testing.T, fake *wakeTemporalFake) {
+func assertWakeCalls(t *testing.T, fake *wakeTemporalFake, wantIDs ...string) {
 	t.Helper()
-	if len(fake.calls) != 1 {
-		t.Fatalf("SignalWithStartWorkflow calls = %d, want 1", len(fake.calls))
+	if len(fake.calls) != len(wantIDs) {
+		t.Fatalf("SignalWithStartWorkflow calls = %d, want %d (%v)", len(fake.calls), len(wantIDs), wantIDs)
 	}
-	call := fake.calls[0]
-	if call.workflowID != "jobscout-process-pending" {
-		t.Errorf("workflow id = %q, want jobscout-process-pending", call.workflowID)
-	}
-	if call.signalName != "JobsAvailable" {
-		t.Errorf("signal name = %q, want JobsAvailable", call.signalName)
-	}
-	if call.signalArg != nil {
-		t.Errorf("signal payload = %v, want empty", call.signalArg)
-	}
-	if call.options.TaskQueue != config.TaskQueue {
-		t.Errorf("task queue = %q, want %q", call.options.TaskQueue, config.TaskQueue)
-	}
-	if name := workflowFuncName(call.workflow); name != "ProcessPendingWorkflow" {
-		t.Errorf("started workflow = %s, want ProcessPendingWorkflow", name)
+	for i, wantID := range wantIDs {
+		call := fake.calls[i]
+		if call.workflowID != wantID {
+			t.Errorf("call %d workflow id = %q, want %q", i, call.workflowID, wantID)
+		}
+		if call.signalName != "JobsAvailable" {
+			t.Errorf("call %d signal name = %q, want JobsAvailable", i, call.signalName)
+		}
+		if call.signalArg != nil {
+			t.Errorf("call %d signal payload = %v, want empty", i, call.signalArg)
+		}
+		if call.options.TaskQueue != config.TaskQueue {
+			t.Errorf("call %d task queue = %q, want %q", i, call.options.TaskQueue, config.TaskQueue)
+		}
+		wantName := "FilterPendingWorkflow"
+		if wantID == "process-pending" {
+			wantName = "ProcessPendingWorkflow"
+		}
+		if name := workflowFuncName(call.workflow); name != wantName {
+			t.Errorf("call %d started workflow = %s, want %s", i, name, wantName)
+		}
 	}
 }
 
@@ -167,8 +185,10 @@ type wakeSignalStart struct {
 }
 
 type wakeTemporalFake struct {
-	calls []wakeSignalStart
-	err   error
+	calls        []wakeSignalStart
+	terminates   []string
+	err          error
+	terminateErr error
 }
 
 func (f *wakeTemporalFake) SignalWithStartWorkflow(
@@ -188,6 +208,11 @@ func (f *wakeTemporalFake) SignalWithStartWorkflow(
 		return nil, f.err
 	}
 	return &runWorkflowFake{id: workflowID, parent: &runTemporalFake{}}, nil
+}
+
+func (f *wakeTemporalFake) TerminateWorkflow(_ context.Context, workflowID string, _ string, _ string, _ ...interface{}) error {
+	f.terminates = append(f.terminates, workflowID)
+	return f.terminateErr
 }
 
 func (f *wakeTemporalFake) ExecuteWorkflow(context.Context, client.StartWorkflowOptions, interface{}, ...interface{}) (client.WorkflowRun, error) {

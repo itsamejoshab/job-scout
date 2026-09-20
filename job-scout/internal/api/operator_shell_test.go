@@ -187,3 +187,7 @@ func (f *statusTemporalFake) CheckHealth(ctx context.Context, _ *client.CheckHea
 	}
 	return &client.CheckHealthResponse{}, nil
 }
+
+func (f *statusTemporalFake) TerminateWorkflow(context.Context, string, string, string, ...interface{}) error {
+	panic("TerminateWorkflow unused in status tests")
+}

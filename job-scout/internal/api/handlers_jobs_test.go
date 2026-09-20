@@ -436,7 +436,7 @@ func TestJobStats_NewJobsIsPendingAndCountsByState(t *testing.T) {
 	if byState["rejected"] != float64(1) {
 		t.Errorf("by_state rejected = %v, want 1", byState["rejected"])
 	}
-	for _, st := range []string{"pending", "rejected", "ready", "applied", "dismissed"} {
+	for _, st := range []string{"pending", "rejected", "needs_detail", "ready", "applied", "dismissed"} {
 		if _, ok := byState[st]; !ok {
 			t.Errorf("by_state missing key %q", st)
 		}

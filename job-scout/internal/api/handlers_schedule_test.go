@@ -50,11 +50,11 @@ func TestInstallSchedules_UsesHandlerConfigAtAPIBoot(t *testing.T) {
 	}
 	scrapeAction, _ := scrape.Action.(*client.ScheduleWorkflowAction)
 	notifyAction, _ := notify.Action.(*client.ScheduleWorkflowAction)
-	if scrapeAction == nil || scrapeAction.ID != "jobscout-scrape-scheduled" {
-		t.Errorf("API boot scrape workflow ID = %v, want jobscout-scrape-scheduled", scrape.Action)
+	if scrapeAction == nil || scrapeAction.ID != "scrape-scheduled" {
+		t.Errorf("API boot scrape workflow ID = %v, want scrape-scheduled", scrape.Action)
 	}
-	if notifyAction == nil || notifyAction.ID != "jobscout-notify-scheduled" {
-		t.Errorf("API boot notify workflow ID = %v, want jobscout-notify-scheduled", notify.Action)
+	if notifyAction == nil || notifyAction.ID != "notify-scheduled" {
+		t.Errorf("API boot notify workflow ID = %v, want notify-scheduled", notify.Action)
 	}
 	if err := h.InstallSchedules(context.Background()); err != nil {
 		t.Fatalf("second InstallSchedules: %v", err)

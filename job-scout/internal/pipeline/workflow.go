@@ -1,30 +1,38 @@
 package pipeline
 
 import (
+	"fmt"
 	"math/rand"
 	"time"
 
 	"github.com/jobscout/jobscout/internal/domain"
 	"github.com/jobscout/jobscout/internal/scraper"
+	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
 )
 
 const (
 	// ScheduledScrapeWorkflowID is the reserved ID for the scrape schedule.
-	ScheduledScrapeWorkflowID = "jobscout-scrape-scheduled"
-	ProcessPendingWorkflowID  = "jobscout-process-pending"
-	manualScrapeIDPrefix      = "jobscout-scrape-manual-"
+	ScheduledScrapeWorkflowID = "scrape-scheduled"
+	FilterPendingWorkflowID   = "filter-pending"
+	ProcessPendingWorkflowID  = "process-pending"
+	// LegacyProcessPendingWorkflowID is the pre-rename singleton. API boot
+	// terminates it so old and new dispatchers cannot overlap.
+	LegacyProcessPendingWorkflowID = "jobscout-process-pending"
+	manualScrapeIDPrefix           = "scrape-manual-"
+	processJobIDPrefix             = "scrape-more-details-"
 
-	// SignalJobsAvailable wakes the idle dispatcher. It carries no payload.
+	// SignalJobsAvailable wakes an idle dispatcher. It carries no payload.
 	SignalJobsAvailable = "JobsAvailable"
 
 	ActivityScrapeJobs              = "scrape_jobs"
+	ActivityWakeFilterPending       = "wake_filter_pending"
 	ActivityWakeProcessPending      = "wake_process_pending"
 	ActivityLoadNextPendingJob      = "load_next_pending_job"
-	ActivityLoadJobsForFiltering    = "load_jobs_for_filtering"
+	ActivityLoadNextNeedsDetailJob  = "load_next_needs_detail_job"
+	ActivityFilterPendingJob        = "filter_pending_job"
 	ActivityLoadProcessJob          = "load_process_job"
-	ActivityLoadDuplicateGroup      = "load_duplicate_group"
 	ActivityLoadFilterLists         = "load_filter_lists"
 	ActivityGetJobDescription       = "get_job_description"
 	ActivitySaveJobFilterResult     = "save_job_filter_result"
@@ -40,6 +48,7 @@ const (
 	processPendingMaxJitter   = 30 * time.Second
 	processPendingIdleWait    = 2 * time.Minute
 	processPendingMaxChildren = 50
+	filterPendingMaxJobs      = 50
 )
 
 // ProcessJob is the row data needed by ProcessJobWorkflow.
@@ -59,10 +68,9 @@ type LoadNextPendingInput struct {
 	SkipIDs []int64
 }
 
-// DuplicateGroupInput identifies rows compared for duplicate winner selection.
-type DuplicateGroupInput struct {
-	Title   string
-	Company string
+// FilterPendingJobResult reports whether fast filtering staged a detail fetch.
+type FilterPendingJobResult struct {
+	WroteNeedsDetail bool
 }
 
 // DetailFetchInput identifies one provider detail request.
@@ -99,6 +107,11 @@ func ManualScrapeWorkflowID(now time.Time) string {
 	return manualScrapeIDPrefix + now.UTC().Format(time.RFC3339Nano)
 }
 
+// ProcessJobWorkflowID returns the child workflow ID for one detail fetch.
+func ProcessJobWorkflowID(jobID int64) string {
+	return fmt.Sprintf("%s%d", processJobIDPrefix, jobID)
+}
+
 // ScrapeWorkflow fetches provider search results and stores distinct jobs. It
 // does not filter or notify.
 func ScrapeWorkflow(ctx workflow.Context, input scraper.TickInput) (scraper.Result, error) {
@@ -118,7 +131,7 @@ func ScrapeWorkflow(ctx workflow.Context, input scraper.TickInput) (scraper.Resu
 		result = scraper.Result{Status: "error", JobSource: input.JobSource, Error: err.Error()}
 	}
 
-	// Wake the dispatcher for every outcome: an error or skipped scrape can
+	// Wake the fast filter for every outcome: an error or skipped scrape can
 	// still leave pending rows from an earlier run.
 	wakeCtx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
 		StartToCloseTimeout: 30 * time.Second,
@@ -126,16 +139,67 @@ func ScrapeWorkflow(ctx workflow.Context, input scraper.TickInput) (scraper.Resu
 			MaximumAttempts: 3,
 		},
 	})
-	if err := workflow.ExecuteActivity(wakeCtx, ActivityWakeProcessPending).Get(ctx, nil); err != nil {
-		logger.Error("Wake process-pending failed", "err", err)
+	if err := workflow.ExecuteActivity(wakeCtx, ActivityWakeFilterPending).Get(ctx, nil); err != nil {
+		logger.Error("Wake filter-pending failed", "err", err)
 	}
 
 	logger.Info("ScrapeWorkflow complete", "result", result)
 	return result, nil
 }
 
-// ProcessPendingWorkflow serially drains pending rows and rolls its history
-// after 50 children or one idle wait.
+// FilterPendingWorkflow drains pending rows with cheap checks only. It never
+// GETs provider detail HTML.
+func FilterPendingWorkflow(ctx workflow.Context) error {
+	dbCtx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
+		StartToCloseTimeout: 30 * time.Second,
+		RetryPolicy: &temporal.RetryPolicy{
+			MaximumAttempts: 3,
+		},
+	})
+	wakeCtx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
+		StartToCloseTimeout: 30 * time.Second,
+		RetryPolicy: &temporal.RetryPolicy{
+			MaximumAttempts: 3,
+		},
+	})
+	skipIDs := make([]int64, 0)
+	wokeDetail := false
+
+	for processed := 0; processed < filterPendingMaxJobs; processed++ {
+		var jobID int64
+		if err := workflow.ExecuteActivity(
+			dbCtx,
+			ActivityLoadNextPendingJob,
+			LoadNextPendingInput{SkipIDs: skipIDs},
+		).Get(ctx, &jobID); err != nil {
+			return err
+		}
+		if jobID == 0 {
+			if err := waitForJobsAvailable(ctx); err != nil {
+				return err
+			}
+			return workflow.NewContinueAsNewError(ctx, FilterPendingWorkflow)
+		}
+
+		var result FilterPendingJobResult
+		if err := workflow.ExecuteActivity(dbCtx, ActivityFilterPendingJob, jobID).Get(ctx, &result); err != nil {
+			skipIDs = append(skipIDs, jobID)
+			continue
+		}
+		if result.WroteNeedsDetail && !wokeDetail {
+			if err := workflow.ExecuteActivity(wakeCtx, ActivityWakeProcessPending).Get(ctx, nil); err != nil {
+				workflow.GetLogger(ctx).Error("Wake process-pending failed", "err", err)
+			} else {
+				wokeDetail = true
+			}
+		}
+	}
+
+	return workflow.NewContinueAsNewError(ctx, FilterPendingWorkflow)
+}
+
+// ProcessPendingWorkflow serially drains needs_detail rows and rolls its
+// history after 50 children or one idle wait.
 func ProcessPendingWorkflow(ctx workflow.Context) error {
 	dbCtx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
 		StartToCloseTimeout: 30 * time.Second,
@@ -149,7 +213,7 @@ func ProcessPendingWorkflow(ctx workflow.Context) error {
 		var jobID int64
 		if err := workflow.ExecuteActivity(
 			dbCtx,
-			ActivityLoadNextPendingJob,
+			ActivityLoadNextNeedsDetailJob,
 			LoadNextPendingInput{SkipIDs: skipIDs},
 		).Get(ctx, &jobID); err != nil {
 			return err
@@ -161,8 +225,13 @@ func ProcessPendingWorkflow(ctx workflow.Context) error {
 			return workflow.NewContinueAsNewError(ctx, ProcessPendingWorkflow)
 		}
 
+		childCtx := workflow.WithChildOptions(ctx, workflow.ChildWorkflowOptions{
+			WorkflowID:               ProcessJobWorkflowID(jobID),
+			WorkflowIDReusePolicy:    enumspb.WORKFLOW_ID_REUSE_POLICY_ALLOW_DUPLICATE,
+			WorkflowExecutionTimeout: 30 * time.Minute,
+		})
 		var result ProcessJobResult
-		childErr := workflow.ExecuteChildWorkflow(ctx, ProcessJobWorkflow, jobID).Get(ctx, &result)
+		childErr := workflow.ExecuteChildWorkflow(childCtx, ProcessJobWorkflow, jobID).Get(ctx, &result)
 		if childErr != nil {
 			skipIDs = append(skipIDs, jobID)
 			result.Throttle = true
@@ -205,7 +274,8 @@ func waitForJobsAvailable(ctx workflow.Context) error {
 	return waitErr
 }
 
-// ProcessJobWorkflow moves one pending row to ready or rejected.
+// ProcessJobWorkflow fetches a description for one needs_detail row and applies
+// description filters. Cheap title/company/duplicate checks run earlier.
 func ProcessJobWorkflow(ctx workflow.Context, jobID int64) (ProcessJobResult, error) {
 	dbCtx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
 		StartToCloseTimeout: 30 * time.Second,
@@ -224,30 +294,13 @@ func ProcessJobWorkflow(ctx workflow.Context, jobID int64) (ProcessJobResult, er
 	if err := workflow.ExecuteActivity(dbCtx, ActivityLoadProcessJob, jobID).Get(ctx, &loaded); err != nil {
 		return ProcessJobResult{}, err
 	}
-	if loaded.State != domain.StatePending {
+	if loaded.State != domain.StateNeedsDetail {
 		return ProcessJobResult{}, nil
-	}
-
-	var group []domain.Job
-	if err := workflow.ExecuteActivity(dbCtx, ActivityLoadDuplicateGroup, DuplicateGroupInput{
-		Title: loaded.Job.Title, Company: loaded.Job.Company,
-	}).Get(ctx, &group); err != nil {
-		return ProcessJobResult{}, err
-	}
-	if domain.IsDuplicateLoser(loaded.Job, group) {
-		return saveProcessDecision(ctx, dbCtx, loaded.Job.ID, domain.Decision{
-			State: domain.StateRejected, RejectReason: domain.ReasonDuplicate,
-			DetailAttempts: loaded.Job.DetailAttempts,
-		})
 	}
 
 	var lists domain.Lists
 	if err := workflow.ExecuteActivity(dbCtx, ActivityLoadFilterLists).Get(ctx, &lists); err != nil {
 		return ProcessJobResult{}, err
-	}
-	decision := domain.FilterPending(loaded.Job, group, lists)
-	if !decision.NeedFetch {
-		return saveProcessDecision(ctx, dbCtx, loaded.Job.ID, decision)
 	}
 
 	selected, ok := selectEnricher(loaded.JobSource)

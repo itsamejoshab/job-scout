@@ -10,8 +10,8 @@ func TestFilterAfterDescription_EmptyBodyIsFetchFailure(t *testing.T) {
 
 	got := FilterAfterDescription(job, Lists{})
 
-	if got.State != StatePending || got.DetailAttempts != 2 {
-		t.Errorf("empty body decision = %+v, want pending with detail_attempts=2", got)
+	if got.State != StateNeedsDetail || got.DetailAttempts != 2 {
+		t.Errorf("empty body decision = %+v, want needs_detail with detail_attempts=2", got)
 	}
 }
 
@@ -204,7 +204,7 @@ func TestFilterPending_Table(t *testing.T) {
 			job:  helpDesk,
 			all:  []Job{helpDesk},
 			list: lists,
-			want: Decision{State: StatePending, NeedFetch: true, DetailAttempts: 0},
+			want: Decision{State: StateNeedsDetail, NeedFetch: true, DetailAttempts: 0},
 		},
 		{
 			name: "whitespace description needs fetch",
@@ -217,7 +217,7 @@ func TestFilterPending_Table(t *testing.T) {
 			},
 			all:  []Job{{ID: 36, Title: "IT Help Desk", Company: "Acme", Description: "   \n", CreatedAt: now}},
 			list: lists,
-			want: Decision{State: StatePending, NeedFetch: true},
+			want: Decision{State: StateNeedsDetail, NeedFetch: true},
 		},
 		{
 			name: "empty parsed description still filtered",
@@ -230,7 +230,7 @@ func TestFilterPending_Table(t *testing.T) {
 			},
 			all:  []Job{{ID: 37, Title: "IT Help Desk", Company: "Acme", CreatedAt: now}},
 			list: lists,
-			want: Decision{State: StatePending, NeedFetch: true},
+			want: Decision{State: StateNeedsDetail, NeedFetch: true},
 		},
 		{
 			name: "description exclude rejects",
@@ -398,11 +398,11 @@ func TestFilterAfterDescription_EmptyParsedTextIsThirdFetchFailure(t *testing.T)
 func TestOnDetailFetchFailure_ThreeFailuresReject(t *testing.T) {
 	job := Job{ID: 7, Title: "IT Help Desk", Company: "Acme", DetailAttempts: 0}
 	first := OnDetailFetchFailure(job)
-	assertDecision(t, first, Decision{State: StatePending, DetailAttempts: 1})
+	assertDecision(t, first, Decision{State: StateNeedsDetail, DetailAttempts: 1})
 
 	job.DetailAttempts = 1
 	second := OnDetailFetchFailure(job)
-	assertDecision(t, second, Decision{State: StatePending, DetailAttempts: 2})
+	assertDecision(t, second, Decision{State: StateNeedsDetail, DetailAttempts: 2})
 
 	job.DetailAttempts = 2
 	third := OnDetailFetchFailure(job)

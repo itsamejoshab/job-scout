@@ -74,6 +74,7 @@ func loadDashboardProviders(ctx context.Context, database *sql.DB) ([]DashboardP
 			COUNT(j.id) AS total_jobs,
 			COUNT(*) FILTER (WHERE j.state = 'pending') AS pending,
 			COUNT(*) FILTER (WHERE j.state = 'rejected') AS rejected,
+			COUNT(*) FILTER (WHERE j.state = 'needs_detail') AS needs_detail,
 			COUNT(*) FILTER (WHERE j.state = 'ready') AS ready,
 			COUNT(*) FILTER (WHERE j.state = 'applied') AS applied,
 			COUNT(*) FILTER (WHERE j.state = 'dismissed') AS dismissed,
@@ -102,7 +103,7 @@ func loadDashboardProviders(ctx context.Context, database *sql.DB) ([]DashboardP
 		var (
 			p                                                           DashboardProviderStats
 			lastScraped, nextEligible                                   sql.NullTime
-			pending, rejected, ready                                    int
+			pending, rejected, needsDetail, ready                       int
 			applied, dismissed                                          int
 			duplicateCount, titleCompanyCount                           int
 			descriptionCount, detailFailedCount, unsupportedSourceCount int
@@ -116,6 +117,7 @@ func loadDashboardProviders(ctx context.Context, database *sql.DB) ([]DashboardP
 			&p.TotalJobs,
 			&pending,
 			&rejected,
+			&needsDetail,
 			&ready,
 			&applied,
 			&dismissed,
@@ -138,11 +140,12 @@ func loadDashboardProviders(ctx context.Context, database *sql.DB) ([]DashboardP
 		}
 
 		p.ByState = map[string]int{
-			JobStatePending:   pending,
-			JobStateRejected:  rejected,
-			JobStateReady:     ready,
-			JobStateApplied:   applied,
-			JobStateDismissed: dismissed,
+			JobStatePending:     pending,
+			JobStateRejected:    rejected,
+			JobStateNeedsDetail: needsDetail,
+			JobStateReady:       ready,
+			JobStateApplied:     applied,
+			JobStateDismissed:   dismissed,
 		}
 		p.ByRejectReason = map[string]int{
 			dashboardRejectReasons[0]: duplicateCount,

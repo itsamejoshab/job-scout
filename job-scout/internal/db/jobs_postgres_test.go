@@ -104,7 +104,7 @@ func TestJobs_SchemaIdentityStateAndRemoteColumns(t *testing.T) {
 		t.Error("jobs.state_changed_at column is required")
 	}
 	if !stateCheckExists(t, pool) {
-		t.Error("jobs.state must be CHECK-constrained to pending, rejected, ready, applied, dismissed")
+		t.Error("jobs.state must be CHECK-constrained to pending, rejected, needs_detail, ready, applied, dismissed")
 	}
 }
 
@@ -344,7 +344,7 @@ func TestInsertJobIfNew_StateCheckRejectsInvalid(t *testing.T) {
 	}
 	_, err := pool.Exec(`UPDATE jobs SET state = 'bogus'`)
 	if err == nil {
-		t.Error("state CHECK must reject values outside pending, rejected, ready, applied, dismissed")
+		t.Error("state CHECK must reject values outside pending, rejected, needs_detail, ready, applied, dismissed")
 	}
 }
 
@@ -390,12 +390,12 @@ func TestGetJobStats_NewJobsIsPendingCountByState(t *testing.T) {
 	if stats.ByState["rejected"] != 1 {
 		t.Errorf("by_state rejected = %d, want 1", stats.ByState["rejected"])
 	}
-	for _, st := range []string{"pending", "rejected", "ready", "applied", "dismissed"} {
+	for _, st := range []string{"pending", "rejected", "needs_detail", "ready", "applied", "dismissed"} {
 		if _, ok := stats.ByState[st]; !ok {
 			t.Errorf("by_state missing key %q", st)
 		}
 	}
-	for _, st := range []string{"ready", "applied", "dismissed"} {
+	for _, st := range []string{"needs_detail", "ready", "applied", "dismissed"} {
 		if stats.ByState[st] != 0 {
 			t.Errorf("by_state %s = %d, want 0", st, stats.ByState[st])
 		}

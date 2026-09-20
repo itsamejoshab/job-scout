@@ -255,12 +255,22 @@ function Header() {
   );
 }
 
-const stateOrder = ["pending", "rejected", "ready", "applied", "dismissed"];
+const stateOrder = ["pending", "rejected", "needs_detail", "ready", "applied", "dismissed"];
 const rejectReasonOrder = ["duplicate", "title_company", "description", "detail_failed", "unsupported_source"];
 const chartColors = {
   total: "#2563eb",
   notified: "#16a34a",
 };
+
+function jobStateLabel(state: string) {
+  if (state === "ready") {
+    return "Ready for review";
+  }
+  if (state === "needs_detail") {
+    return "Requires further processing";
+  }
+  return state;
+}
 
 function usePageVisible() {
   const [visible, setVisible] = useState(() => !document.hidden);
@@ -366,13 +376,13 @@ function DashboardPage() {
                   <p>Total stored jobs: {provider.total_jobs}</p>
                 </div>
 
-                <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-5">
+                <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
                   {stateOrder.map((state) => (
                     <p
                       key={state}
                       className="rounded-lg bg-muted px-2.5 py-2 text-xs font-medium text-muted-foreground"
                     >
-                      {state === "ready" ? "Ready for review" : state}: {provider.by_state[state] ?? 0}
+                      {jobStateLabel(state)}: {provider.by_state[state] ?? 0}
                     </p>
                   ))}
                 </div>
@@ -427,7 +437,7 @@ function DashboardPage() {
   );
 }
 
-const jobStates = ["", "pending", "rejected", "ready", "applied", "dismissed"];
+const jobStates = ["", "pending", "rejected", "needs_detail", "ready", "applied", "dismissed"];
 const pageSize = 50;
 
 type CreatedWindow =
@@ -573,7 +583,7 @@ function JobsPage() {
           >
             {jobStates.map((value) => (
               <option key={value} value={value}>
-                {value === "ready" ? "Ready for review" : value || "All states"}
+                {value ? jobStateLabel(value) : "All states"}
               </option>
             ))}
           </select>
@@ -677,7 +687,7 @@ function JobsPage() {
                 </td>
                 <td className="px-5 py-4 text-muted-foreground">{job.job_source}</td>
                 <td className="px-5 py-4">
-                  <Badge>{job.state === "ready" ? "Ready for review" : job.state}</Badge>
+                  <Badge>{jobStateLabel(job.state)}</Badge>
                 </td>
                 <td className="px-5 py-4 tabular-nums text-muted-foreground">
                   {formatAge(job.created_at)}

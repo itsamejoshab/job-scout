@@ -37,6 +37,9 @@ func TestRegister_ScrapeAndNotifyAreProductionPath(t *testing.T) {
 	if !rec.hasWorkflow("NotifyWorkflow") {
 		t.Errorf("worker must register NotifyWorkflow; registered %v", rec.workflows)
 	}
+	if !rec.hasWorkflow("FilterPendingWorkflow") {
+		t.Errorf("worker must register FilterPendingWorkflow; registered %v", rec.workflows)
+	}
 	if !rec.hasWorkflow("ProcessPendingWorkflow") {
 		t.Errorf("worker must register ProcessPendingWorkflow; registered %v", rec.workflows)
 	}
@@ -56,10 +59,13 @@ func TestRegister_ScrapeAndNotifyAreProductionPath(t *testing.T) {
 		t.Errorf("worker must register %s; registered %v", ActivityFinishNotificationBatch, rec.activities)
 	}
 	for _, required := range []string{
+		ActivityWakeFilterPending,
+		ActivityWakeProcessPending,
 		ActivityLoadNextPendingJob,
-		"load_process_job",
-		"load_duplicate_group",
-		"load_filter_lists",
+		ActivityLoadNextNeedsDetailJob,
+		ActivityFilterPendingJob,
+		ActivityLoadProcessJob,
+		ActivityLoadFilterLists,
 		ActivityGetJobDescription,
 		ActivitySaveJobFilterResult,
 	} {
@@ -105,7 +111,7 @@ func TestScrapeTick_StoresJobsWithoutSmartFilter(t *testing.T) {
 	if probe.scrape != 1 {
 		t.Errorf("ScrapeTick must fetch and store jobs once, scrape calls=%d", probe.scrape)
 	}
-	assertActivityNames(t, *started, ActivityScrapeJobs, wakeActivityName)
+	assertActivityNames(t, *started, ActivityScrapeJobs, ActivityWakeFilterPending)
 }
 
 func TestScrapeTick_LinkedInSearchActivityRunsOnce(t *testing.T) {
@@ -131,7 +137,7 @@ func TestScrapeTick_LinkedInSearchActivityRunsOnce(t *testing.T) {
 	if probe.scrape != 1 {
 		t.Errorf("LinkedIn search GET activity retry policy MaximumAttempts must be 1, got %d attempts", probe.scrape)
 	}
-	assertActivityNames(t, *started, ActivityScrapeJobs, wakeActivityName)
+	assertActivityNames(t, *started, ActivityScrapeJobs, ActivityWakeFilterPending)
 }
 
 func TestScrapeTick_ScrapeActivityAllowsFortyFiveMinutes(t *testing.T) {
@@ -211,88 +217,11 @@ func TestNotifyTick_ClaimsReadyJobsWithoutFilteringOrDetailGET(t *testing.T) {
 	}
 }
 
-func TestProcessJobWorkflow_CheapDuplicateRejectDoesNotLoadListsOrGET(t *testing.T) {
-	env, _, probe := newWorkflowEnv()
-	older := domainJobNeedingDescription()
-	older.ID = 9
-	older.CreatedAt = older.CreatedAt.Add(-time.Minute)
-	probe.processJob = ProcessJob{
-		Job: domainJobNeedingDescription(), State: domain.StatePending, JobSource: "LINKEDIN",
-	}
-	probe.duplicateGroup = []domain.Job{older, probe.processJob.Job}
-
-	env.ExecuteWorkflow(ProcessJobWorkflow, probe.processJob.Job.ID)
-
-	if err := env.GetWorkflowError(); err != nil {
-		t.Fatalf("ProcessJobWorkflow error: %v", err)
-	}
-	if probe.listLoads != 0 || probe.detailGet != 0 {
-		t.Errorf("duplicate reject loaded lists=%d detail GETs=%d, want zero", probe.listLoads, probe.detailGet)
-	}
-	assertLastDecision(t, probe, domain.StateRejected, domain.ReasonDuplicate, 0)
-}
-
-func TestProcessJobWorkflow_TitleCompanyRejectDoesNotGET(t *testing.T) {
-	env, _, probe := newWorkflowEnv()
-	job := domainJobNeedingDescription()
-	probe.processJob = ProcessJob{Job: job, State: domain.StatePending, JobSource: "LINKEDIN"}
-	probe.duplicateGroup = []domain.Job{job}
-	probe.filterLists = domain.Lists{TitleExclude: []string{"help desk"}}
-
-	env.ExecuteWorkflow(ProcessJobWorkflow, job.ID)
-
-	if err := env.GetWorkflowError(); err != nil {
-		t.Fatalf("ProcessJobWorkflow error: %v", err)
-	}
-	if probe.detailGet != 0 {
-		t.Errorf("title/company reject caused %d GETs, want zero", probe.detailGet)
-	}
-	assertLastDecision(t, probe, domain.StateRejected, domain.ReasonTitleCompany, 0)
-}
-
-func TestProcessJobWorkflow_ExistingDescriptionFiltersWithoutGET(t *testing.T) {
-	env, _, probe := newWorkflowEnv()
-	job := domainJobNeedingDescription()
-	job.Description = "computer troubleshooting"
-	probe.processJob = ProcessJob{Job: job, State: domain.StatePending, JobSource: "LINKEDIN"}
-	probe.duplicateGroup = []domain.Job{job}
-	probe.filterLists = domain.Lists{TitleInclude: []string{"help desk"}, DescInclude: []string{"computer"}}
-
-	env.ExecuteWorkflow(ProcessJobWorkflow, job.ID)
-
-	if err := env.GetWorkflowError(); err != nil {
-		t.Fatalf("ProcessJobWorkflow error: %v", err)
-	}
-	if probe.detailGet != 0 {
-		t.Errorf("existing description caused %d GETs, want zero", probe.detailGet)
-	}
-	assertLastDecision(t, probe, domain.StateReady, "", 0)
-}
-
-func TestProcessJobWorkflow_UnsupportedSourceRejectsWithoutGET(t *testing.T) {
-	env, _, probe := newWorkflowEnv()
-	job := domainJobNeedingDescription()
-	probe.processJob = ProcessJob{Job: job, State: domain.StatePending, JobSource: "INDEED"}
-	probe.duplicateGroup = []domain.Job{job}
-	probe.filterLists = domain.Lists{TitleInclude: []string{"help desk"}}
-
-	env.ExecuteWorkflow(ProcessJobWorkflow, job.ID)
-
-	if err := env.GetWorkflowError(); err != nil {
-		t.Fatalf("ProcessJobWorkflow error: %v", err)
-	}
-	if probe.detailGet != 0 {
-		t.Errorf("unsupported source caused %d GETs, want zero", probe.detailGet)
-	}
-	assertLastDecision(t, probe, domain.StateRejected, domain.ReasonUnsupportedSource, 0)
-}
-
-func TestProcessJobWorkflow_EmptyBodyStaysPendingAndThrottles(t *testing.T) {
+func TestProcessJobWorkflow_EmptyBodyStaysNeedsDetailAndThrottles(t *testing.T) {
 	env, _, probe := newWorkflowEnv()
 	job := domainJobNeedingDescription()
 	job.DetailAttempts = 1
-	probe.processJob = ProcessJob{Job: job, State: domain.StatePending, JobSource: "LINKEDIN"}
-	probe.duplicateGroup = []domain.Job{job}
+	probe.processJob = ProcessJob{Job: job, State: domain.StateNeedsDetail, JobSource: "LINKEDIN"}
 	probe.filterLists = domain.Lists{TitleInclude: []string{"help desk"}}
 	probe.detailResults = []DetailFetchResult{{}}
 
@@ -308,14 +237,13 @@ func TestProcessJobWorkflow_EmptyBodyStaysPendingAndThrottles(t *testing.T) {
 	if !result.Throttle {
 		t.Error("empty body must return Throttle=true")
 	}
-	assertLastDecision(t, probe, domain.StatePending, "", 2)
+	assertLastDecision(t, probe, domain.StateNeedsDetail, "", 2)
 }
 
 func TestProcessJobWorkflow_SuccessfulGETSavesDescriptionAndThrottles(t *testing.T) {
 	env, _, probe := newWorkflowEnv()
 	job := domainJobNeedingDescription()
-	probe.processJob = ProcessJob{Job: job, State: domain.StatePending, JobSource: "LINKEDIN"}
-	probe.duplicateGroup = []domain.Job{job}
+	probe.processJob = ProcessJob{Job: job, State: domain.StateNeedsDetail, JobSource: "LINKEDIN"}
 	probe.filterLists = domain.Lists{
 		TitleInclude: []string{"help desk"}, DescInclude: []string{"computer"},
 	}
@@ -342,8 +270,7 @@ func TestProcessJobWorkflow_SuccessfulGETSavesDescriptionAndThrottles(t *testing
 func TestProcessJobWorkflow_GETActivityDoesNotRetryErrors(t *testing.T) {
 	env, _, probe := newWorkflowEnv()
 	job := domainJobNeedingDescription()
-	probe.processJob = ProcessJob{Job: job, State: domain.StatePending, JobSource: "LINKEDIN"}
-	probe.duplicateGroup = []domain.Job{job}
+	probe.processJob = ProcessJob{Job: job, State: domain.StateNeedsDetail, JobSource: "LINKEDIN"}
 	probe.filterLists = domain.Lists{TitleInclude: []string{"help desk"}}
 	probe.detailErr = errors.New("unexpected activity failure")
 
@@ -361,8 +288,7 @@ func TestProcessJobWorkflow_ThirdDetailFailureRejects(t *testing.T) {
 	env, _, probe := newWorkflowEnv()
 	job := domainJobNeedingDescription()
 	job.DetailAttempts = 2
-	probe.processJob = ProcessJob{Job: job, State: domain.StatePending, JobSource: "LINKEDIN"}
-	probe.duplicateGroup = []domain.Job{job}
+	probe.processJob = ProcessJob{Job: job, State: domain.StateNeedsDetail, JobSource: "LINKEDIN"}
 	probe.filterLists = domain.Lists{TitleInclude: []string{"help desk"}}
 	probe.detailResults = []DetailFetchResult{{FetchFailed: true}}
 
@@ -374,11 +300,10 @@ func TestProcessJobWorkflow_ThirdDetailFailureRejects(t *testing.T) {
 	assertLastDecision(t, probe, domain.StateRejected, domain.ReasonDetailFailed, 3)
 }
 
-func TestProcessJobWorkflow_LockBusyRetriesEightThenLeavesPending(t *testing.T) {
+func TestProcessJobWorkflow_LockBusyRetriesEightThenLeavesNeedsDetail(t *testing.T) {
 	env, _, probe := newWorkflowEnv()
 	job := domainJobNeedingDescription()
-	probe.processJob = ProcessJob{Job: job, State: domain.StatePending, JobSource: "LINKEDIN"}
-	probe.duplicateGroup = []domain.Job{job}
+	probe.processJob = ProcessJob{Job: job, State: domain.StateNeedsDetail, JobSource: "LINKEDIN"}
 	probe.filterLists = domain.Lists{TitleInclude: []string{"help desk"}}
 	probe.detailResults = make([]DetailFetchResult, processJobLockMaxRetries)
 	for i := range probe.detailResults {
@@ -405,10 +330,27 @@ func TestProcessJobWorkflow_LockBusyRetriesEightThenLeavesPending(t *testing.T) 
 	}
 }
 
-func TestProcessJobWorkflow_NonPendingDoesNothing(t *testing.T) {
+func TestProcessJobWorkflow_UnsupportedSourceRejectsWithoutGET(t *testing.T) {
+	env, _, probe := newWorkflowEnv()
+	job := domainJobNeedingDescription()
+	probe.processJob = ProcessJob{Job: job, State: domain.StateNeedsDetail, JobSource: "INDEED"}
+	probe.filterLists = domain.Lists{}
+
+	env.ExecuteWorkflow(ProcessJobWorkflow, job.ID)
+
+	if err := env.GetWorkflowError(); err != nil {
+		t.Fatalf("ProcessJobWorkflow error: %v", err)
+	}
+	if probe.detailGet != 0 {
+		t.Errorf("unsupported source caused %d GETs, want zero", probe.detailGet)
+	}
+	assertLastDecision(t, probe, domain.StateRejected, domain.ReasonUnsupportedSource, 0)
+}
+
+func TestProcessJobWorkflow_NonNeedsDetailDoesNothing(t *testing.T) {
 	env, _, probe := newWorkflowEnv()
 	probe.processJob = ProcessJob{
-		Job: domainJobNeedingDescription(), State: domain.StateReady, JobSource: "LINKEDIN",
+		Job: domainJobNeedingDescription(), State: domain.StatePending, JobSource: "LINKEDIN",
 	}
 
 	env.ExecuteWorkflow(ProcessJobWorkflow, probe.processJob.Job.ID)
@@ -416,9 +358,28 @@ func TestProcessJobWorkflow_NonPendingDoesNothing(t *testing.T) {
 	if err := env.GetWorkflowError(); err != nil {
 		t.Fatalf("ProcessJobWorkflow error: %v", err)
 	}
-	if probe.groupLoads != 0 || probe.listLoads != 0 || probe.detailGet != 0 || probe.apply != 0 {
-		t.Errorf("non-pending job did work: %+v", probe)
+	if probe.listLoads != 0 || probe.detailGet != 0 || probe.apply != 0 {
+		t.Errorf("non-needs_detail job did work: %+v", probe)
 	}
+}
+
+func TestProcessJobWorkflow_DoesNotRunCheapFilters(t *testing.T) {
+	env, _, probe := newWorkflowEnv()
+	job := domainJobNeedingDescription()
+	job.Title = "Registered Nurse"
+	probe.processJob = ProcessJob{Job: job, State: domain.StateNeedsDetail, JobSource: "LINKEDIN"}
+	probe.filterLists = domain.Lists{TitleInclude: []string{"help desk"}, DescInclude: []string{"computer"}}
+	probe.detailResults = []DetailFetchResult{{Description: "computer troubleshooting"}}
+
+	env.ExecuteWorkflow(ProcessJobWorkflow, job.ID)
+
+	if err := env.GetWorkflowError(); err != nil {
+		t.Fatalf("ProcessJobWorkflow error: %v", err)
+	}
+	if probe.groupLoads != 0 {
+		t.Errorf("detail child must not load duplicate groups, loads=%d", probe.groupLoads)
+	}
+	assertLastDecision(t, probe, domain.StateReady, "", 0)
 }
 
 func TestNotifyTick_DetailGETRunsOnce(t *testing.T) {
@@ -458,7 +419,7 @@ func TestNotifyTick_DetailGETRunsOnce(t *testing.T) {
 	if len(probe.applied) != 1 || probe.applied[0].Decision.State != "pending" || probe.applied[0].Decision.DetailAttempts != 1 {
 		t.Errorf("first detail failure must leave job pending with detail_attempts=1, got %+v", probe.applied)
 	}
-	assertActivityContains(t, *started, ActivityLoadJobsForFiltering, ActivityGetJobDescription, ActivitySaveJobFilterResult)
+	assertActivityContains(t, *started, "load_jobs_for_filtering", ActivityGetJobDescription, ActivitySaveJobFilterResult)
 }
 
 func TestNotifyTick_DetailGETOncePerJobThenReady(t *testing.T) {
@@ -685,7 +646,7 @@ func TestScrapeTick_PassesForceAndCompletesWhenSkipped(t *testing.T) {
 	if probe.scrape != 1 {
 		t.Errorf("Scrape activity MaximumAttempts must stay 1, got %d", probe.scrape)
 	}
-	assertActivityNames(t, *started, ActivityScrapeJobs, wakeActivityName)
+	assertActivityNames(t, *started, ActivityScrapeJobs, ActivityWakeFilterPending)
 }
 
 func newWorkflowEnv() (*testsuite.TestWorkflowEnvironment, *[]string, *activityProbe) {
@@ -702,16 +663,16 @@ func newWorkflowEnv() (*testsuite.TestWorkflowEnvironment, *[]string, *activityP
 
 func registerProbeActivities(env *testsuite.TestWorkflowEnvironment, probe *activityProbe) {
 	env.RegisterActivityWithOptions(probe.Scrape, activity.RegisterOptions{Name: ActivityScrapeJobs})
-	env.RegisterActivityWithOptions(probe.LoadNotifySnapshot, activity.RegisterOptions{Name: ActivityLoadJobsForFiltering})
+	env.RegisterActivityWithOptions(probe.LoadNotifySnapshot, activity.RegisterOptions{Name: "load_jobs_for_filtering"})
 	env.RegisterActivityWithOptions(probe.LoadProcessJob, activity.RegisterOptions{Name: ActivityLoadProcessJob})
-	env.RegisterActivityWithOptions(probe.LoadDuplicateGroup, activity.RegisterOptions{Name: ActivityLoadDuplicateGroup})
 	env.RegisterActivityWithOptions(probe.LoadFilterLists, activity.RegisterOptions{Name: ActivityLoadFilterLists})
 	env.RegisterActivityWithOptions(probe.FetchJobDescription, activity.RegisterOptions{Name: ActivityGetJobDescription})
 	env.RegisterActivityWithOptions(probe.ApplyJobDecision, activity.RegisterOptions{Name: ActivitySaveJobFilterResult})
 	env.RegisterActivityWithOptions(probe.ClaimNotifyBatch, activity.RegisterOptions{Name: ActivityClaimNotificationBatch})
 	env.RegisterActivityWithOptions(probe.NotifyWebhook, activity.RegisterOptions{Name: ActivitySendNotification})
 	env.RegisterActivityWithOptions(probe.FinishNotifyBatch, activity.RegisterOptions{Name: ActivityFinishNotificationBatch})
-	env.RegisterActivityWithOptions(probe.WakeProcessPending, activity.RegisterOptions{Name: wakeActivityName})
+	env.RegisterActivityWithOptions(probe.WakeFilterPending, activity.RegisterOptions{Name: ActivityWakeFilterPending})
+	env.RegisterActivityWithOptions(probe.WakeProcessPending, activity.RegisterOptions{Name: ActivityWakeProcessPending})
 }
 
 func assertActivityNames(t *testing.T, got []string, want ...string) {
@@ -768,8 +729,10 @@ type activityProbe struct {
 	claimCalls     int
 	finish         int
 	wake           int
+	wakeProcess    int
 	scrapeErr      error
 	wakeErr        error
+	wakeProcessErr error
 	detailErr      error
 	webhookErr     error
 	result         scraper.Result
@@ -821,14 +784,19 @@ func (p *activityProbe) LoadProcessJob(context.Context, int64) (ProcessJob, erro
 	return p.processJob, nil
 }
 
-func (p *activityProbe) LoadDuplicateGroup(context.Context, DuplicateGroupInput) ([]domain.Job, error) {
-	p.groupLoads++
-	return p.duplicateGroup, nil
-}
-
 func (p *activityProbe) LoadFilterLists(context.Context) (domain.Lists, error) {
 	p.listLoads++
 	return p.filterLists, nil
+}
+
+func (p *activityProbe) WakeFilterPending(context.Context) error {
+	p.wake++
+	return p.wakeErr
+}
+
+func (p *activityProbe) WakeProcessPending(context.Context) error {
+	p.wakeProcess++
+	return p.wakeProcessErr
 }
 
 func (p *activityProbe) FetchJobDescription(_ context.Context, _ DetailFetchInput) (DetailFetchResult, error) {

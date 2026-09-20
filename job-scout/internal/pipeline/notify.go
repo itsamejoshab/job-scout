@@ -8,8 +8,8 @@ import (
 
 const (
 	// ScheduledNotifyWorkflowID is the reserved ID for the notify schedule.
-	ScheduledNotifyWorkflowID = "jobscout-notify-scheduled"
-	manualNotifyIDPrefix      = "jobscout-notify-manual-"
+	ScheduledNotifyWorkflowID = "notify-scheduled"
+	manualNotifyIDPrefix      = "notify-manual-"
 )
 
 // ManualNotifyWorkflowID returns a unique operator notify ID that cannot collide

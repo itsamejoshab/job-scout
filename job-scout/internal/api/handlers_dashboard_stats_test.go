@@ -133,7 +133,7 @@ func TestDashboardStats_AggregatesProvidersAndDailySeries(t *testing.T) {
 		t.Errorf("LINKEDIN total_jobs = %d, want 3", linked.TotalJobs)
 	}
 	assertStateCounts(t, linked.ByState, map[string]int{
-		"pending": 1, "rejected": 1, "ready": 1, "applied": 0, "dismissed": 0,
+		"pending": 1, "rejected": 1, "needs_detail": 0, "ready": 1, "applied": 0, "dismissed": 0,
 	})
 	assertReasonCounts(t, linked.ByRejectReason, map[string]int{
 		"duplicate": 0, "title_company": 1, "description": 0, "detail_failed": 0, "unsupported_source": 0,
@@ -156,7 +156,7 @@ func TestDashboardStats_AggregatesProvidersAndDailySeries(t *testing.T) {
 		t.Errorf("INDEED total_jobs = %d, want 0", indeed.TotalJobs)
 	}
 	assertStateCounts(t, indeed.ByState, map[string]int{
-		"pending": 0, "rejected": 0, "ready": 0, "applied": 0, "dismissed": 0,
+		"pending": 0, "rejected": 0, "needs_detail": 0, "ready": 0, "applied": 0, "dismissed": 0,
 	})
 	assertReasonCounts(t, indeed.ByRejectReason, map[string]int{
 		"duplicate": 0, "title_company": 0, "description": 0, "detail_failed": 0, "unsupported_source": 0,

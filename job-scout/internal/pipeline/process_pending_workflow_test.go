@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"go.temporal.io/sdk/activity"
+	"go.temporal.io/sdk/converter"
 	"go.temporal.io/sdk/testsuite"
 	"go.temporal.io/sdk/workflow"
 )
@@ -17,6 +18,7 @@ type pendingQueueProbe struct {
 	pending   []int64
 	loads     [][]int64
 	childSeen []int64
+	childIDs  []string
 	inChild   bool
 	overlap   bool
 	completed map[int64]bool
@@ -58,8 +60,11 @@ func newPendingWorkflowEnv(t *testing.T, probe *pendingQueueProbe) (*testsuite.T
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestWorkflowEnvironment()
 	probe.completed = map[int64]bool{}
-	env.RegisterActivityWithOptions(probe.load, activity.RegisterOptions{Name: "load_next_pending_job"})
+	env.RegisterActivityWithOptions(probe.load, activity.RegisterOptions{Name: ActivityLoadNextNeedsDetailJob})
 	env.RegisterWorkflowWithOptions(probe.child, workflow.RegisterOptions{Name: "ProcessJobWorkflow"})
+	env.SetOnChildWorkflowStartedListener(func(info *workflow.Info, _ workflow.Context, _ converter.EncodedValues) {
+		probe.childIDs = append(probe.childIDs, info.WorkflowExecution.ID)
+	})
 	var timers []time.Duration
 	env.SetOnTimerScheduledListener(func(timerID string, duration time.Duration) {
 		_ = timerID
@@ -94,6 +99,27 @@ func TestProcessPendingWorkflow_FIFOSequentialSkipAndThrottle(t *testing.T) {
 		t.Errorf("load skip lists = %v, want failed id 11 excluded after child error", probe.loads)
 	}
 	assertThrottleTimers(t, *timers, 2)
+}
+
+func TestProcessPendingWorkflow_ChildWorkflowIDsUseScrapeMoreDetailsPrefix(t *testing.T) {
+	probe := &pendingQueueProbe{
+		pending: []int64{42},
+		results: map[int64]ProcessJobResult{},
+		errs:    map[int64]error{},
+	}
+	env, _ := newPendingWorkflowEnv(t, probe)
+
+	env.ExecuteWorkflow(ProcessPendingWorkflow)
+
+	if !isContinueAsNewTestError(env.GetWorkflowError()) {
+		t.Fatalf("dispatcher error = %v, want continue-as-new", env.GetWorkflowError())
+	}
+	if len(probe.childIDs) != 1 || probe.childIDs[0] != "scrape-more-details-42" {
+		t.Errorf("child workflow IDs = %v, want [scrape-more-details-42]", probe.childIDs)
+	}
+	if ProcessJobWorkflowID(42) != "scrape-more-details-42" {
+		t.Errorf("ProcessJobWorkflowID(42) = %q", ProcessJobWorkflowID(42))
+	}
 }
 
 func TestProcessPendingWorkflow_NoThrottleSleepsForOrdinaryChildren(t *testing.T) {
@@ -170,8 +196,11 @@ func TestProcessPendingWorkflow_IdleTimeoutContinuesAsNew(t *testing.T) {
 }
 
 func TestProcessPendingWorkflow_UsesReservedSingletonID(t *testing.T) {
-	if ProcessPendingWorkflowID != "jobscout-process-pending" {
-		t.Errorf("dispatcher workflow ID = %q, want jobscout-process-pending", ProcessPendingWorkflowID)
+	if ProcessPendingWorkflowID != "process-pending" {
+		t.Errorf("dispatcher workflow ID = %q, want process-pending", ProcessPendingWorkflowID)
+	}
+	if FilterPendingWorkflowID != "filter-pending" {
+		t.Errorf("fast filter workflow ID = %q, want filter-pending", FilterPendingWorkflowID)
 	}
 }
 

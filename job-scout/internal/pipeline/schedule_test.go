@@ -163,11 +163,11 @@ func assertScheduledActions(t *testing.T, scrape, notify client.ScheduleOptions)
 	t.Helper()
 	scrapeAction := scheduleWorkflowAction(t, scrape)
 	notifyAction := scheduleWorkflowAction(t, notify)
-	if scrapeAction.ID != "jobscout-scrape-scheduled" {
-		t.Errorf("scrape scheduled workflow ID = %q, want jobscout-scrape-scheduled", scrapeAction.ID)
+	if scrapeAction.ID != "scrape-scheduled" {
+		t.Errorf("scrape scheduled workflow ID = %q, want scrape-scheduled", scrapeAction.ID)
 	}
-	if notifyAction.ID != "jobscout-notify-scheduled" {
-		t.Errorf("notify scheduled workflow ID = %q, want jobscout-notify-scheduled", notifyAction.ID)
+	if notifyAction.ID != "notify-scheduled" {
+		t.Errorf("notify scheduled workflow ID = %q, want notify-scheduled", notifyAction.ID)
 	}
 	if scrapeAction.ID == ManualScrapeWorkflowID(time.Now()) {
 		t.Error("scheduled scrape workflow ID must not be a manual scrape ID")

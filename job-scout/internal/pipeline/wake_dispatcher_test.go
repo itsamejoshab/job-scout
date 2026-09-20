@@ -11,15 +11,7 @@ import (
 	"go.temporal.io/sdk/client"
 )
 
-// wakeActivityName pins the registered name of the wake activity.
-const wakeActivityName = "wake_process_pending"
-
-func (p *activityProbe) WakeProcessPending(context.Context) error {
-	p.wake++
-	return p.wakeErr
-}
-
-func TestScrapeWorkflow_WakesProcessPendingAfterScrapeSucceeds(t *testing.T) {
+func TestScrapeWorkflow_WakesFilterPendingAfterScrapeSucceeds(t *testing.T) {
 	env, started, probe := newWorkflowEnv()
 
 	env.ExecuteWorkflow(ScrapeWorkflow, scraper.TickInput{JobSource: "LINKEDIN"})
@@ -30,10 +22,10 @@ func TestScrapeWorkflow_WakesProcessPendingAfterScrapeSucceeds(t *testing.T) {
 	if probe.wake != 1 {
 		t.Errorf("wake activity calls = %d, want 1 after a successful scrape", probe.wake)
 	}
-	assertActivityNames(t, *started, ActivityScrapeJobs, wakeActivityName)
+	assertActivityNames(t, *started, ActivityScrapeJobs, ActivityWakeFilterPending)
 }
 
-func TestScrapeWorkflow_WakesProcessPendingWhenScrapeFails(t *testing.T) {
+func TestScrapeWorkflow_WakesFilterPendingWhenScrapeFails(t *testing.T) {
 	env, started, probe := newWorkflowEnv()
 	probe.scrapeErr = errors.New("linkedin search failed")
 
@@ -52,10 +44,10 @@ func TestScrapeWorkflow_WakesProcessPendingWhenScrapeFails(t *testing.T) {
 	if probe.wake != 1 {
 		t.Errorf("wake activity calls = %d, want 1; pending rows may already exist", probe.wake)
 	}
-	assertActivityNames(t, *started, ActivityScrapeJobs, wakeActivityName)
+	assertActivityNames(t, *started, ActivityScrapeJobs, ActivityWakeFilterPending)
 }
 
-func TestScrapeWorkflow_WakesProcessPendingWhenScrapeSkipped(t *testing.T) {
+func TestScrapeWorkflow_WakesFilterPendingWhenScrapeSkipped(t *testing.T) {
 	env, started, probe := newWorkflowEnv()
 	probe.result = scraper.Result{Status: "skipped"}
 
@@ -67,7 +59,7 @@ func TestScrapeWorkflow_WakesProcessPendingWhenScrapeSkipped(t *testing.T) {
 	if probe.wake != 1 {
 		t.Errorf("wake activity calls = %d, want 1 on a skipped scrape", probe.wake)
 	}
-	assertActivityNames(t, *started, ActivityScrapeJobs, wakeActivityName)
+	assertActivityNames(t, *started, ActivityScrapeJobs, ActivityWakeFilterPending)
 }
 
 func TestScrapeWorkflow_FailedWakeKeepsScrapeResult(t *testing.T) {
@@ -88,12 +80,46 @@ func TestScrapeWorkflow_FailedWakeKeepsScrapeResult(t *testing.T) {
 	}
 }
 
-func TestRegister_RegistersWakeProcessPendingActivity(t *testing.T) {
+func TestRegister_RegistersWakeFilterPendingActivity(t *testing.T) {
 	rec := &registryRecorder{}
 	Register(rec, &Activities{})
 
-	if !rec.hasActivity(wakeActivityName) {
-		t.Errorf("worker must register %s; registered %v", wakeActivityName, rec.activities)
+	if !rec.hasActivity(ActivityWakeFilterPending) {
+		t.Errorf("worker must register %s; registered %v", ActivityWakeFilterPending, rec.activities)
+	}
+	if !rec.hasActivity(ActivityWakeProcessPending) {
+		t.Errorf("worker must register %s; registered %v", ActivityWakeProcessPending, rec.activities)
+	}
+}
+
+func TestWakeFilterPending_SignalWithStartsTheSingleton(t *testing.T) {
+	starter := &signalStarterFake{}
+
+	if err := WakeFilterPending(context.Background(), starter); err != nil {
+		t.Fatalf("WakeFilterPending error: %v", err)
+	}
+
+	if len(starter.calls) != 1 {
+		t.Fatalf("SignalWithStartWorkflow calls = %d, want 1", len(starter.calls))
+	}
+	call := starter.calls[0]
+	if call.workflowID != "filter-pending" {
+		t.Errorf("workflow id = %q, want filter-pending", call.workflowID)
+	}
+	if call.signalName != "JobsAvailable" {
+		t.Errorf("signal name = %q, want JobsAvailable", call.signalName)
+	}
+	if call.signalArg != nil {
+		t.Errorf("signal payload = %v, want empty", call.signalArg)
+	}
+	if call.options.TaskQueue != config.TaskQueue {
+		t.Errorf("task queue = %q, want %q", call.options.TaskQueue, config.TaskQueue)
+	}
+	if name := funcBaseName(call.workflow); name != "FilterPendingWorkflow" {
+		t.Errorf("started workflow = %s, want FilterPendingWorkflow", name)
+	}
+	if len(call.workflowArgs) != 0 {
+		t.Errorf("workflow args = %v, want none", call.workflowArgs)
 	}
 }
 
@@ -108,23 +134,25 @@ func TestWakeProcessPending_SignalWithStartsTheSingleton(t *testing.T) {
 		t.Fatalf("SignalWithStartWorkflow calls = %d, want 1", len(starter.calls))
 	}
 	call := starter.calls[0]
-	if call.workflowID != "jobscout-process-pending" {
-		t.Errorf("workflow id = %q, want jobscout-process-pending", call.workflowID)
-	}
-	if call.signalName != "JobsAvailable" {
-		t.Errorf("signal name = %q, want JobsAvailable", call.signalName)
-	}
-	if call.signalArg != nil {
-		t.Errorf("signal payload = %v, want empty", call.signalArg)
-	}
-	if call.options.TaskQueue != config.TaskQueue {
-		t.Errorf("task queue = %q, want %q", call.options.TaskQueue, config.TaskQueue)
+	if call.workflowID != "process-pending" {
+		t.Errorf("workflow id = %q, want process-pending", call.workflowID)
 	}
 	if name := funcBaseName(call.workflow); name != "ProcessPendingWorkflow" {
 		t.Errorf("started workflow = %s, want ProcessPendingWorkflow", name)
 	}
-	if len(call.workflowArgs) != 0 {
-		t.Errorf("workflow args = %v, want none", call.workflowArgs)
+}
+
+func TestWakeFilterPending_AlreadyStartedIsNotAnError(t *testing.T) {
+	starter := &signalStarterFake{
+		err: serviceerror.NewWorkflowExecutionAlreadyStarted(
+			"already running", "start-request", "run-id"),
+	}
+
+	if err := WakeFilterPending(context.Background(), starter); err != nil {
+		t.Errorf("already-started must be ignored, got %v", err)
+	}
+	if len(starter.calls) != 1 {
+		t.Errorf("SignalWithStartWorkflow calls = %d, want 1", len(starter.calls))
 	}
 }
 
@@ -137,8 +165,13 @@ func TestWakeProcessPending_AlreadyStartedIsNotAnError(t *testing.T) {
 	if err := WakeProcessPending(context.Background(), starter); err != nil {
 		t.Errorf("already-started must be ignored, got %v", err)
 	}
-	if len(starter.calls) != 1 {
-		t.Errorf("SignalWithStartWorkflow calls = %d, want 1", len(starter.calls))
+}
+
+func TestWakeFilterPending_ReportsOtherErrors(t *testing.T) {
+	starter := &signalStarterFake{err: errors.New("temporal unavailable")}
+
+	if err := WakeFilterPending(context.Background(), starter); err == nil {
+		t.Error("WakeFilterPending must report a transport error")
 	}
 }
 

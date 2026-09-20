@@ -57,10 +57,10 @@ func assertManualNotifyStart(t *testing.T, start workflowStart, responseID strin
 	if responseID != start.opts.ID {
 		t.Errorf("workflow_id %q must match started workflow ID %q", responseID, start.opts.ID)
 	}
-	if responseID == "jobscout-notify-scheduled" {
+	if responseID == "notify-scheduled" {
 		t.Errorf("manual notify workflow ID must differ from reserved scheduled ID %q", responseID)
 	}
-	const prefix = "jobscout-notify-manual-"
+	const prefix = "notify-manual-"
 	if !strings.HasPrefix(responseID, prefix) {
 		t.Errorf("manual notify workflow ID must start with %q, got %q", prefix, responseID)
 		return

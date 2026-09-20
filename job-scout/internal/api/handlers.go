@@ -17,6 +17,7 @@ import (
 	"github.com/jobscout/jobscout/internal/domain"
 	"github.com/jobscout/jobscout/internal/pipeline"
 	"github.com/jobscout/jobscout/internal/scraper"
+	"go.temporal.io/api/serviceerror"
 	"go.temporal.io/api/workflowservice/v1"
 	"go.temporal.io/sdk/client"
 )
@@ -27,6 +28,7 @@ type temporalAPI interface {
 	ExecuteWorkflow(ctx context.Context, options client.StartWorkflowOptions, workflow interface{}, args ...interface{}) (client.WorkflowRun, error)
 	DescribeWorkflowExecution(ctx context.Context, workflowID, runID string) (*workflowservice.DescribeWorkflowExecutionResponse, error)
 	CheckHealth(ctx context.Context, request *client.CheckHealthRequest) (*client.CheckHealthResponse, error)
+	TerminateWorkflow(ctx context.Context, workflowID string, runID string, reason string, details ...interface{}) error
 }
 
 // Handler carries the dependencies shared by all HTTP handlers.
@@ -43,20 +45,35 @@ func (h *Handler) InstallSchedules(ctx context.Context) error {
 	return pipeline.EnsureSchedules(ctx, h.Schedules, h.Cfg)
 }
 
-// StartProcessPending starts the pending dispatcher singleton at API boot. A
-// dispatcher that already runs is left alone.
-func (h *Handler) StartProcessPending(ctx context.Context) error {
+// StartDispatchers terminates the legacy process-pending singleton, then
+// signal-with-starts the fast-filter and detail dispatchers. A dispatcher that
+// already runs is left alone.
+func (h *Handler) StartDispatchers(ctx context.Context) error {
+	if h.Temporal != nil {
+		if err := h.Temporal.TerminateWorkflow(
+			ctx, pipeline.LegacyProcessPendingWorkflowID, "",
+			"replaced by filter-pending and process-pending",
+		); err != nil {
+			var notFound *serviceerror.NotFound
+			if !errors.As(err, &notFound) {
+				slog.Error("terminate legacy process-pending failed", "err", err)
+			}
+		}
+	}
+	if err := pipeline.WakeFilterPending(ctx, h.Temporal); err != nil {
+		return err
+	}
 	return pipeline.WakeProcessPending(ctx, h.Temporal)
 }
 
-// wakeProcessPending drains pending rows soon instead of at the next idle
-// poll. A failed wake must not fail the request that caused it.
-func (h *Handler) wakeProcessPending(ctx context.Context) {
+// wakeFilterPending drains pending rows soon instead of at the next idle poll.
+// A failed wake must not fail the request that caused it.
+func (h *Handler) wakeFilterPending(ctx context.Context) {
 	if h.Temporal == nil {
 		return
 	}
-	if err := pipeline.WakeProcessPending(ctx, h.Temporal); err != nil {
-		slog.Error("wake process-pending failed", "err", err)
+	if err := pipeline.WakeFilterPending(ctx, h.Temporal); err != nil {
+		slog.Error("wake filter-pending failed", "err", err)
 	}
 }
 
@@ -141,7 +158,7 @@ func (h *Handler) Scrape(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, result.Error)
 		return
 	}
-	h.wakeProcessPending(r.Context())
+	h.wakeFilterPending(r.Context())
 	writeJSON(w, http.StatusOK, result)
 }
 
@@ -695,7 +712,7 @@ func (h *Handler) ReEvaluateJobs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if updated > 0 {
-		h.wakeProcessPending(r.Context())
+		h.wakeFilterPending(r.Context())
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"updated": updated})
 }
