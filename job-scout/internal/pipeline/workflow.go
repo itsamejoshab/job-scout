@@ -39,6 +39,7 @@ const (
 	ActivityClaimNotificationBatch  = "claim_notification_batch"
 	ActivitySendNotification        = "send_notification"
 	ActivityFinishNotificationBatch = "finish_notification_batch"
+	ActivityNotificationStatus      = "notification_status"
 )
 
 const (
@@ -373,6 +374,15 @@ func NotifyWorkflow(ctx workflow.Context) error {
 			MaximumAttempts: 1,
 		},
 	})
+
+	var status NotificationStatus
+	if err := workflow.ExecuteActivity(dbCtx, ActivityNotificationStatus).Get(ctx, &status); err != nil {
+		return err
+	}
+	if !status.Active {
+		logger.Info("Notifications disabled", "reason", status.Reason)
+		return nil
+	}
 
 	var batch ClaimBatch
 	if err := workflow.ExecuteActivity(dbCtx, ActivityClaimNotificationBatch).Get(ctx, &batch); err != nil {

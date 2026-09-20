@@ -18,14 +18,16 @@ var seedFS embed.FS
 // none exists yet.
 func GetSearchSettings(ctx context.Context, db *sql.DB) (*SearchSettings, error) {
 	var (
-		s                                      SearchSettings
+		s                                     SearchSettings
 		inc, exc, titleIn, titleEx, companyEx []byte
 	)
 	err := db.QueryRowContext(ctx, `
 		SELECT id, desc_include_words, desc_exclude_words, title_include,
-		       title_exclude, company_exclude, created_at, updated_at
+		       title_exclude, company_exclude, notifications_enabled,
+		       created_at, updated_at
 		FROM search_settings ORDER BY id LIMIT 1
-	`).Scan(&s.ID, &inc, &exc, &titleIn, &titleEx, &companyEx, &s.CreatedAt, &s.UpdatedAt)
+	`).Scan(&s.ID, &inc, &exc, &titleIn, &titleEx, &companyEx,
+		&s.NotificationsEnabled, &s.CreatedAt, &s.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -41,6 +43,52 @@ func GetSearchSettings(ctx context.Context, db *sql.DB) (*SearchSettings, error)
 		}
 	}
 	return &s, nil
+}
+
+// GetNotificationsEnabled returns the saved delivery toggle. Missing settings
+// default to true so existing installs keep notifications on.
+func GetNotificationsEnabled(ctx context.Context, db *sql.DB) (bool, error) {
+	settings, err := GetSearchSettings(ctx, db)
+	if err != nil {
+		return false, err
+	}
+	if settings == nil {
+		return true, nil
+	}
+	return settings.NotificationsEnabled, nil
+}
+
+// SetNotificationsEnabled updates only the delivery toggle and returns the
+// saved value. It creates a search_settings row from seed when none exists.
+func SetNotificationsEnabled(ctx context.Context, database *sql.DB, enabled bool) (bool, error) {
+	existing, err := GetSearchSettings(ctx, database)
+	if err != nil {
+		return false, err
+	}
+	if existing == nil {
+		seed, err := loadSearchSettingsSeed()
+		if err != nil {
+			return false, err
+		}
+		if _, err := database.ExecContext(ctx, `
+			INSERT INTO search_settings (desc_include_words, desc_exclude_words, title_include,
+			                             title_exclude, company_exclude, notifications_enabled)
+			VALUES ($1::json, $2::json, $3::json, $4::json, $5::json, $6)
+		`, mustJSON(seed.DescIncludeWords), mustJSON(seed.DescExcludeWords),
+			mustJSON(seed.TitleInclude), mustJSON(seed.TitleExclude),
+			mustJSON(seed.CompanyExclude), enabled); err != nil {
+			return false, err
+		}
+		return GetNotificationsEnabled(ctx, database)
+	}
+	if _, err := database.ExecContext(ctx, `
+		UPDATE search_settings
+		SET notifications_enabled = $1, updated_at = now()
+		WHERE id = $2
+	`, enabled, existing.ID); err != nil {
+		return false, err
+	}
+	return GetNotificationsEnabled(ctx, database)
 }
 
 // ReplaceSearchSettings rewrites all five filter lists and returns the stored row.

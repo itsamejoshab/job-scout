@@ -58,6 +58,9 @@ func TestRegister_ScrapeAndNotifyAreProductionPath(t *testing.T) {
 	if !rec.hasActivity(ActivityFinishNotificationBatch) {
 		t.Errorf("worker must register %s; registered %v", ActivityFinishNotificationBatch, rec.activities)
 	}
+	if !rec.hasActivity(ActivityNotificationStatus) {
+		t.Errorf("worker must register %s; registered %v", ActivityNotificationStatus, rec.activities)
+	}
 	for _, required := range []string{
 		ActivityWakeFilterPending,
 		ActivityWakeProcessPending,
@@ -182,7 +185,7 @@ func TestNotifyTick_CompletesWithoutLinkedInSearchOrWebhook(t *testing.T) {
 	if probe.detailGet != 0 {
 		t.Errorf("empty pending set must not GET LinkedIn job detail, detail calls=%d", probe.detailGet)
 	}
-	assertActivityNames(t, *started, ActivityClaimNotificationBatch)
+	assertActivityNames(t, *started, ActivityNotificationStatus, ActivityClaimNotificationBatch)
 }
 
 func TestNotifyTick_ClaimsReadyJobsWithoutFilteringOrDetailGET(t *testing.T) {
@@ -516,7 +519,7 @@ func TestNotifyTick_ClaimsBatchPostsOnceAndMarksNotified(t *testing.T) {
 			t.Errorf("finish IDs = %v, want claimed [8 9]", probe.finished[0].IDs)
 		}
 	}
-	assertActivityNames(t, *started, ActivityClaimNotificationBatch, ActivitySendNotification)
+	assertActivityNames(t, *started, ActivityNotificationStatus, ActivityClaimNotificationBatch, ActivitySendNotification)
 }
 
 func TestNotifyTick_EmptyClaimDoesNotPost(t *testing.T) {
@@ -549,7 +552,31 @@ func TestNotifyTick_EmptyClaimDoesNotPost(t *testing.T) {
 	if probe.finish != 0 {
 		t.Errorf("zero claimed rows must not finish a batch, finish calls=%d", probe.finish)
 	}
-	assertActivityNames(t, *started, ActivityClaimNotificationBatch)
+	assertActivityNames(t, *started, ActivityNotificationStatus, ActivityClaimNotificationBatch)
+}
+
+func TestNotifyTick_InactiveSkipsClaimAndWebhook(t *testing.T) {
+	env, started, probe := newWorkflowEnv()
+	probe.notifyStatus = ResolveNotificationStatus(true, false)
+	probe.claim = ClaimBatch{
+		Jobs: []ClaimedJob{{ID: 1, JobURL: "https://example.test/jobs/1"}},
+	}
+
+	env.ExecuteWorkflow(NotifyWorkflow)
+
+	if !env.IsWorkflowCompleted() {
+		t.Fatal("NotifyTick must complete when notifications are inactive")
+	}
+	if err := env.GetWorkflowError(); err != nil {
+		t.Fatalf("inactive notify must not fail: %v", err)
+	}
+	if probe.claimCalls != 0 {
+		t.Errorf("inactive notify must not claim jobs, claim calls=%d", probe.claimCalls)
+	}
+	if probe.webhook != 0 {
+		t.Errorf("inactive notify must not POST, webhook calls=%d", probe.webhook)
+	}
+	assertActivityNames(t, *started, ActivityNotificationStatus)
 }
 
 func TestNotifyTick_WebhookFailureFinishesBatchThenFailsWorkflow(t *testing.T) {
@@ -652,7 +679,9 @@ func TestScrapeTick_PassesForceAndCompletesWhenSkipped(t *testing.T) {
 func newWorkflowEnv() (*testsuite.TestWorkflowEnvironment, *[]string, *activityProbe) {
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestWorkflowEnvironment()
-	probe := &activityProbe{}
+	probe := &activityProbe{
+		notifyStatus: ResolveNotificationStatus(true, true),
+	}
 	registerProbeActivities(env, probe)
 	var started []string
 	env.SetOnActivityStartedListener(func(info *activity.Info, _ context.Context, _ converter.EncodedValues) {
@@ -671,6 +700,7 @@ func registerProbeActivities(env *testsuite.TestWorkflowEnvironment, probe *acti
 	env.RegisterActivityWithOptions(probe.ClaimNotifyBatch, activity.RegisterOptions{Name: ActivityClaimNotificationBatch})
 	env.RegisterActivityWithOptions(probe.NotifyWebhook, activity.RegisterOptions{Name: ActivitySendNotification})
 	env.RegisterActivityWithOptions(probe.FinishNotifyBatch, activity.RegisterOptions{Name: ActivityFinishNotificationBatch})
+	env.RegisterActivityWithOptions(probe.NotificationStatus, activity.RegisterOptions{Name: ActivityNotificationStatus})
 	env.RegisterActivityWithOptions(probe.WakeFilterPending, activity.RegisterOptions{Name: ActivityWakeFilterPending})
 	env.RegisterActivityWithOptions(probe.WakeProcessPending, activity.RegisterOptions{Name: ActivityWakeProcessPending})
 }
@@ -730,6 +760,7 @@ type activityProbe struct {
 	finish         int
 	wake           int
 	wakeProcess    int
+	statusCalls    int
 	scrapeErr      error
 	wakeErr        error
 	wakeProcessErr error
@@ -746,6 +777,7 @@ type activityProbe struct {
 	duplicateGroup []domain.Job
 	filterLists    domain.Lists
 	detailResults  []DetailFetchResult
+	notifyStatus   NotificationStatus
 }
 
 func (p *activityProbe) Scrape(_ context.Context, in scraper.TickInput) (scraper.Result, error) {
@@ -819,6 +851,11 @@ func (p *activityProbe) ApplyJobDecision(_ context.Context, in ApplyJobDecisionI
 func (p *activityProbe) ClaimNotifyBatch(context.Context) (ClaimBatch, error) {
 	p.claimCalls++
 	return p.claim, nil
+}
+
+func (p *activityProbe) NotificationStatus(context.Context) (NotificationStatus, error) {
+	p.statusCalls++
+	return p.notifyStatus, nil
 }
 
 func (p *activityProbe) NotifyWebhook(_ context.Context, message string) error {

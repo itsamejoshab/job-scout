@@ -35,6 +35,7 @@ func Register(r Registrar, acts *Activities) {
 	r.RegisterActivityWithOptions(acts.claim_notification_batch, activity.RegisterOptions{Name: ActivityClaimNotificationBatch})
 	r.RegisterActivityWithOptions(acts.send_notification, activity.RegisterOptions{Name: ActivitySendNotification})
 	r.RegisterActivityWithOptions(acts.finish_notification_batch, activity.RegisterOptions{Name: ActivityFinishNotificationBatch})
+	r.RegisterActivityWithOptions(acts.notification_status, activity.RegisterOptions{Name: ActivityNotificationStatus})
 }
 
 // RunWorker registers the workflow + activities and blocks until interrupted.

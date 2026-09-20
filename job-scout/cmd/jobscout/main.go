@@ -120,6 +120,7 @@ func runWorker(cfg config.Config) {
 		Temporal:                  temporalClient,
 		NotifyMaxJobs:             cfg.NotifyMaxJobs,
 		NotifyClaimTimeoutSeconds: cfg.NotifyClaimTimeoutSeconds,
+		NotificationsConfigured:   cfg.NotificationsConfigured(),
 	}
 
 	slog.Info("starting temporal worker", "taskQueue", config.TaskQueue)

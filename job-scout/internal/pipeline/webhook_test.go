@@ -154,6 +154,17 @@ func TestPostMessage_TransportErrorIsError(t *testing.T) {
 	}
 }
 
+func TestPostMessage_EmptyTargetOrNotifyIsError(t *testing.T) {
+	client := NewWebhookClient(config.Config{})
+	err := client.PostMessage(context.Background(), "x")
+	if err == nil {
+		t.Fatal("empty WEBHOOK_BASE and WEBHOOK_ID must fail before HTTP")
+	}
+	if !strings.Contains(err.Error(), "not configured") {
+		t.Fatalf("empty webhook error = %v, want not configured", err)
+	}
+}
+
 func TestPostMessage_BearerFromPipedreamAPIToken(t *testing.T) {
 	var (
 		gotAuth string

@@ -23,6 +23,28 @@ type Activities struct {
 	Temporal                  SignalStarter
 	NotifyMaxJobs             int
 	NotifyClaimTimeoutSeconds int
+	NotificationsConfigured   bool
+}
+
+// NotificationStatus reports whether delivery may run for this tick.
+type NotificationStatus struct {
+	Enabled    bool   `json:"enabled"`
+	Configured bool   `json:"configured"`
+	Active     bool   `json:"active"`
+	Reason     string `json:"reason,omitempty"`
+}
+
+// notification_status loads the saved toggle and combines it with webhook env.
+func (a *Activities) notification_status(ctx context.Context) (NotificationStatus, error) {
+	enabled := true
+	if a.DB != nil {
+		var err error
+		enabled, err = db.GetNotificationsEnabled(ctx, a.DB)
+		if err != nil {
+			return NotificationStatus{}, err
+		}
+	}
+	return ResolveNotificationStatus(enabled, a.NotificationsConfigured), nil
 }
 
 // wake_filter_pending signals or starts the fast-filter singleton.
@@ -231,6 +253,22 @@ func (a *Activities) send_notification(ctx context.Context, message string) erro
 		return fmt.Errorf("webhook client is not configured")
 	}
 	return a.Webhook.PostMessage(ctx, message)
+}
+
+// ResolveNotificationStatus combines the Settings toggle with webhook env.
+func ResolveNotificationStatus(enabled, configured bool) NotificationStatus {
+	status := NotificationStatus{
+		Enabled:    enabled,
+		Configured: configured,
+		Active:     enabled && configured,
+	}
+	switch {
+	case !enabled:
+		status.Reason = "Notifications are turned off in Settings."
+	case !configured:
+		status.Reason = "Webhook delivery is not configured. Set WEBHOOK_BASE and WEBHOOK_ID."
+	}
+	return status
 }
 
 // finish_notification_batch clears dedupe markers after a failed POST.

@@ -63,14 +63,15 @@ type Job struct {
 
 // SearchSettings mirrors the universal `search_settings` table.
 type SearchSettings struct {
-	ID               int       `json:"id"`
-	DescIncludeWords []string  `json:"desc_include_words"`
-	DescExcludeWords []string  `json:"desc_exclude_words"`
-	TitleInclude     []string  `json:"title_include"`
-	TitleExclude     []string  `json:"title_exclude"`
-	CompanyExclude   []string  `json:"company_exclude"`
-	CreatedAt        time.Time `json:"created_at"`
-	UpdatedAt        time.Time `json:"updated_at"`
+	ID                   int       `json:"id"`
+	DescIncludeWords     []string  `json:"desc_include_words"`
+	DescExcludeWords     []string  `json:"desc_exclude_words"`
+	TitleInclude         []string  `json:"title_include"`
+	TitleExclude         []string  `json:"title_exclude"`
+	CompanyExclude       []string  `json:"company_exclude"`
+	NotificationsEnabled bool      `json:"notifications_enabled"`
+	CreatedAt            time.Time `json:"created_at"`
+	UpdatedAt            time.Time `json:"updated_at"`
 }
 
 // ScraperSettings mirrors the per-source `scraper_settings` table.

@@ -109,7 +109,7 @@ Base path: `http://localhost:8001/api/v0`
 | Method   | Path                                         | Description                                                                                                 |
 | -------- | -------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
 | POST     | `/run`                                       | Start `ScrapeWorkflow`. `?force=1` bypasses provider cadence.                                               |
-| POST     | `/notify`                                    | Start `NotifyWorkflow`.                                                                                     |
+| POST     | `/notify`                                    | Start `NotifyWorkflow`, or return `notifications_disabled` when delivery is inactive.                       |
 | POST     | `/scrape`                                    | Run a synchronous debug scrape without Temporal. Prefer `/run`.                                             |
 | GET      | `/health`, `/db-test`, `/temporal-test`      | Read service and dependency health.                                                                         |
 | GET      | `/status`                                    | Read aggregate database and Temporal status.                                                                |
@@ -123,6 +123,7 @@ Base path: `http://localhost:8001/api/v0`
 | POST     | `/jobs/re-evaluate`                          | Move rejected jobs to `pending`, reset detail attempts, and wake processing. Returns the updated row count. |
 | GET, PUT | `/search-settings`                           | Read or replace universal search settings.                                                                  |
 | POST     | `/search-settings/reset`                     | Reset universal search settings to seed values.                                                             |
+| GET, PUT | `/notification-settings`                     | Read or set the notifications toggle and effective delivery status.                                         |
 | GET      | `/scraper-settings`, `/scraper-settings/all` | Read one provider or all providers.                                                                         |
 | PUT      | `/scraper-settings/{job_source}`             | Replace one provider configuration.                                                                         |
 | POST     | `/scraper-settings/{job_source}/reset`       | Reset one provider to seed values.                                                                          |

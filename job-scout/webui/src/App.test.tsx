@@ -146,10 +146,18 @@ const providerSeed: Record<"LINKEDIN" | "INDEED", ProviderSettings> = {
   },
 };
 
+const notificationSeed = {
+  enabled: true,
+  configured: true,
+  active: true,
+};
+
 type RenderOptions = {
   status?: object;
   stats?: object;
   searchSettings?: typeof filterSeed;
+  notificationSettings?: typeof notificationSeed;
+  notifyResponse?: object;
   reEvaluatedCount?: number;
   workflowStatuses?: string[];
   jobs?: typeof jobsPage;
@@ -195,6 +203,7 @@ function renderPath(path: string, options: RenderOptions = {}) {
   const stats = options.stats ?? dashboardStats;
   const seed = options.searchSettings ?? filterSeed;
   let currentSettings = structuredClone(seed);
+  let currentNotifications = structuredClone(options.notificationSettings ?? notificationSeed);
   const currentProviders = structuredClone(providerSeed);
   let workflowStatusIndex = 0;
 
@@ -209,7 +218,7 @@ function renderPath(path: string, options: RenderOptions = {}) {
       });
     }
     if (url === "/api/v0/notify" && method === "POST") {
-      return new Response(JSON.stringify({ workflow_id: "manual-notify-1" }), {
+      return new Response(JSON.stringify(options.notifyResponse ?? { workflow_id: "manual-notify-1" }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       });
@@ -248,6 +257,31 @@ function renderPath(path: string, options: RenderOptions = {}) {
     }
     if (url === "/api/v0/search-settings" && method === "GET") {
       return new Response(JSON.stringify(currentSettings), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    if (url === "/api/v0/notification-settings" && method === "GET") {
+      return new Response(JSON.stringify(currentNotifications), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    if (url === "/api/v0/notification-settings" && method === "PUT") {
+      const payload = JSON.parse(String(init?.body ?? "{}")) as { enabled: boolean };
+      currentNotifications = {
+        enabled: payload.enabled,
+        configured: currentNotifications.configured,
+        active: payload.enabled && currentNotifications.configured,
+        ...(payload.enabled && currentNotifications.configured
+          ? {}
+          : {
+              reason: payload.enabled
+                ? "Webhook delivery is not configured. Set WEBHOOK_BASE and WEBHOOK_ID."
+                : "Notifications are turned off in Settings.",
+            }),
+      };
+      return new Response(JSON.stringify(currentNotifications), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       });
@@ -518,6 +552,26 @@ describe("operator shell", () => {
     );
   });
 
+  it("shows the disabled notification reason without starting a workflow link", async () => {
+    const user = userEvent.setup();
+    renderPath("/dashboard", {
+      notifyResponse: {
+        status: "notifications_disabled",
+        reason: "Webhook delivery is not configured. Set WEBHOOK_BASE and WEBHOOK_ID.",
+        enabled: true,
+        configured: false,
+        active: false,
+      },
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Send Email" }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "Webhook delivery is not configured. Set WEBHOOK_BASE and WEBHOOK_ID.",
+    );
+    expect(screen.queryByRole("link", { name: "manual-notify-1" })).not.toBeInTheDocument();
+  });
+
   it("disables manual runs while Temporal is down", async () => {
     renderPath("/dashboard", {
       status: {
@@ -663,7 +717,10 @@ describe("operator shell", () => {
       const calls = (fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls
         .map(([input]) => String(input));
       expect(calls).toContain("/api/v0/search-settings");
+      expect(calls).toContain("/api/v0/notification-settings");
     });
+    expect(await screen.findByRole("checkbox", { name: /enable notifications/i })).toBeChecked();
+    expect(screen.getByText("Notifications are on. Ready jobs can be sent.")).toBeInTheDocument();
     expect(screen.queryByRole("textbox", { name: /raw json/i })).not.toBeInTheDocument();
 
     const save = await screen.findByRole("button", { name: /save filter settings/i });
@@ -673,6 +730,25 @@ describe("operator shell", () => {
     await user.click(screen.getByRole("button", { name: "Add title include word" }));
     expect(screen.getByRole("button", { name: /remove Desktop Support/i })).toBeInTheDocument();
     expect(save).toBeEnabled();
+  });
+
+  it("toggles notification delivery from settings", async () => {
+    const user = userEvent.setup();
+    renderPath("/settings");
+
+    const toggle = await screen.findByRole("checkbox", { name: /enable notifications/i });
+    await user.click(toggle);
+
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/v0/notification-settings",
+        expect.objectContaining({
+          method: "PUT",
+          body: JSON.stringify({ enabled: false }),
+        }),
+      );
+    });
+    expect(await screen.findByText("Notifications are turned off in Settings.")).toBeInTheDocument();
   });
 
   it("clears dirty state from echoed stored row after save", async () => {

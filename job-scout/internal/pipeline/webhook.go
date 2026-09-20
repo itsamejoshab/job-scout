@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/jobscout/jobscout/internal/config"
@@ -40,6 +41,9 @@ func NewWebhookClient(cfg config.Config) *WebhookClient {
 
 // PostMessage POSTs {"notify": webhook_id, "message": message} once. Success is HTTP 200 only.
 func (c *WebhookClient) PostMessage(ctx context.Context, message string) error {
+	if c == nil || strings.TrimSpace(c.Target) == "" || strings.TrimSpace(c.Notify) == "" {
+		return fmt.Errorf("webhook delivery is not configured")
+	}
 	body, err := json.Marshal(struct {
 		Notify  string `json:"notify"`
 		Message string `json:"message"`

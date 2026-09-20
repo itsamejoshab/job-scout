@@ -48,14 +48,13 @@ cd job-scout
 Copy-Item .\job-scout\.env.sample .\job-scout\.env
 ```
 
-Open `job-scout\.env` in a text editor. Set at least:
+Open `job-scout\.env` in a text editor. Notification delivery is optional.
 
-- `WEBHOOK_BASE` — base URL of your webhook (no trailing slash if the sample has none)
-- `WEBHOOK_ID` — id that your webhook expects
+- To send alerts, set `WEBHOOK_BASE` (base URL, no trailing slash if the sample has none) and `WEBHOOK_ID`.
+- Leave both blank to run without notifications. The app stays healthy. Settings can also turn notifications off later.
+- Set `PIPEDREAM_API_TOKEN` only if the webhook uses a static Bearer token. Do not set `WEBHOOK_URL`. That name is not the send target.
 
-Set `PIPEDREAM_API_TOKEN` if the webhook uses a static Bearer token. Do not set `WEBHOOK_URL`. That name is not the send target.
-
-The worker must open TCP to the host in `WEBHOOK_BASE`. A timeout or connect error is an environment failure.
+When webhook values are set, the worker must open TCP to the host in `WEBHOOK_BASE`. A timeout or connect error is an environment failure.
 
 ### 5. Start the stack
 
@@ -114,14 +113,13 @@ cd job-scout
 cp job-scout/.env.sample job-scout/.env
 ```
 
-Open `job-scout/.env` in a text editor. Set at least:
+Open `job-scout/.env` in a text editor. Notification delivery is optional.
 
-- `WEBHOOK_BASE` — base URL of your webhook (no trailing slash if the sample has none)
-- `WEBHOOK_ID` — id that your webhook expects
+- To send alerts, set `WEBHOOK_BASE` (base URL, no trailing slash if the sample has none) and `WEBHOOK_ID`.
+- Leave both blank to run without notifications. The app stays healthy. Settings can also turn notifications off later.
+- Set `PIPEDREAM_API_TOKEN` only if the webhook uses a static Bearer token. Do not set `WEBHOOK_URL`. That name is not the send target.
 
-Set `PIPEDREAM_API_TOKEN` if the webhook uses a static Bearer token. Do not set `WEBHOOK_URL`. That name is not the send target.
-
-The worker must open TCP to the host in `WEBHOOK_BASE`. A timeout or connect error is an environment failure.
+When webhook values are set, the worker must open TCP to the host in `WEBHOOK_BASE`. A timeout or connect error is an environment failure.
 
 Optional: change search settings in `job-scout/internal/db/seed/` before the first start. The API writes those values to the database on startup.
 
@@ -223,14 +221,13 @@ cp job-scout/.env.sample job-scout/.env
 nano job-scout/.env
 ```
 
-Set at least:
+Notification delivery is optional.
 
-- `WEBHOOK_BASE` — base URL of your webhook (no trailing slash if the sample has none)
-- `WEBHOOK_ID` — id that your webhook expects
+- To send alerts, set `WEBHOOK_BASE` (base URL, no trailing slash if the sample has none) and `WEBHOOK_ID`.
+- Leave both blank to run without notifications. The app stays healthy. Settings can also turn notifications off later.
+- Set `PIPEDREAM_API_TOKEN` only if the webhook uses a static Bearer token. Do not set `WEBHOOK_URL`. That name is not the send target.
 
-Set `PIPEDREAM_API_TOKEN` if the webhook uses a static Bearer token. Do not set `WEBHOOK_URL`. That name is not the send target.
-
-The worker must open TCP to the host in `WEBHOOK_BASE`. A timeout or connect error is an environment failure. If Home Assistant runs on another device on your LAN, use that device IP in `WEBHOOK_BASE`. `localhost` on the Pi is the Pi itself, not your laptop.
+When webhook values are set, the worker must open TCP to the host in `WEBHOOK_BASE`. A timeout or connect error is an environment failure. If Home Assistant runs on another device on your LAN, use that device IP in `WEBHOOK_BASE`. `localhost` on the Pi is the Pi itself, not your laptop.
 
 Optional: change search settings in `job-scout/internal/db/seed/` before the first start. The API writes those values to the database on startup.
 

@@ -22,6 +22,8 @@ func NewServer(addr string, h *Handler) *http.Server {
 	mux.HandleFunc("GET /api/v0/search-settings", h.SearchSettings)
 	mux.HandleFunc("PUT /api/v0/search-settings", h.ReplaceSearchSettings)
 	mux.HandleFunc("POST /api/v0/search-settings/reset", h.ResetSearchSettings)
+	mux.HandleFunc("GET /api/v0/notification-settings", h.NotificationSettings)
+	mux.HandleFunc("PUT /api/v0/notification-settings", h.ReplaceNotificationSettings)
 	mux.HandleFunc("GET /api/v0/scraper-settings", h.ScraperSettings)
 	mux.HandleFunc("GET /api/v0/scraper-settings/all", h.AllScraperSettings)
 	mux.HandleFunc("PUT /api/v0/scraper-settings/{job_source}", h.ReplaceScraperSettings)

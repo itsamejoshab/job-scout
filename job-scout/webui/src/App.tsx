@@ -28,11 +28,13 @@ import {
   getConfig,
   getDashboardStats,
   getJobs,
+  getNotificationSettings,
   getSearchSettings,
   getStatus,
   getWorkflowStatus,
   reEvaluateRejectedJobs,
   reviewJob,
+  replaceNotificationSettings,
   replaceSearchSettings,
   resetSearchSettings,
   startNotify,
@@ -71,7 +73,17 @@ function Header() {
   const start = useMutation({
     mutationFn: (kind: "scrape" | "notify") =>
       kind === "scrape" ? startScrape() : startNotify(),
-    onSuccess: (workflow) => {
+    onSuccess: (workflow, kind) => {
+      if (kind === "notify" && workflow.status === "notifications_disabled") {
+        completedWorkflow.current = "";
+        setActiveWorkflow(null);
+        setRunMessage(workflow.reason || "Notifications are disabled.");
+        return;
+      }
+      if (!workflow.workflow_id) {
+        setRunMessage("Workflow could not start.");
+        return;
+      }
       completedWorkflow.current = "";
       setActiveWorkflow(workflow);
       setRunMessage("Workflow running.");
@@ -83,14 +95,14 @@ function Header() {
   const workflow = useQuery({
     queryKey: ["workflow", activeWorkflow?.workflow_id],
     queryFn: () => getWorkflowStatus(activeWorkflow?.workflow_id ?? ""),
-    enabled: activeWorkflow !== null,
+    enabled: Boolean(activeWorkflow?.workflow_id),
     refetchInterval: (query) =>
       workflowFinished(query.state.data?.status) ? false : 1_000,
   });
 
   useEffect(() => {
     if (
-      !activeWorkflow ||
+      !activeWorkflow?.workflow_id ||
       !workflowFinished(workflow.data?.status) ||
       completedWorkflow.current === activeWorkflow.workflow_id
     ) {
@@ -218,7 +230,7 @@ function Header() {
               {!reEvaluate.isPending && !reEvaluate.isSuccess && !reEvaluate.isError && runMessage}
             </p>
           )}
-          {activeWorkflow && config.data?.temporal_ui_address && (
+          {activeWorkflow?.workflow_id && config.data?.temporal_ui_address && (
             <a
               className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline"
               href={temporalWorkflowURL(
@@ -1197,6 +1209,10 @@ function SettingsPage() {
     queryKey: ["search-settings"],
     queryFn: getSearchSettings,
   });
+  const notifications = useQuery({
+    queryKey: ["notification-settings"],
+    queryFn: getNotificationSettings,
+  });
 
   const [base, setBase] = useState<SearchSettingsInput | null>(null);
   const [draft, setDraft] = useState<SearchSettingsInput | null>(null);
@@ -1227,6 +1243,13 @@ function SettingsPage() {
       setBase(next);
       setDraft(next);
       queryClient.setQueryData(["search-settings"], stored);
+    },
+  });
+
+  const saveNotifications = useMutation({
+    mutationFn: (enabled: boolean) => replaceNotificationSettings({ enabled }),
+    onSuccess: (stored) => {
+      queryClient.setQueryData(["notification-settings"], stored);
     },
   });
 
@@ -1270,12 +1293,52 @@ function SettingsPage() {
     reset.mutate();
   };
 
+  const notificationStatusText = notifications.data
+    ? notifications.data.active
+      ? "Notifications are on. Ready jobs can be sent."
+      : notifications.data.reason || "Notifications are off."
+    : "";
+
   return (
     <main className="w-full px-6 py-8 lg:px-10">
       <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
       <p className="mt-1 text-sm text-muted-foreground">
         Edit universal filters and provider scrape settings.
       </p>
+
+      <section className="surface mt-6 overflow-hidden">
+        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b border-border/60 bg-muted/40 px-4 py-3">
+          <div>
+            <h2 className="text-base font-semibold tracking-tight">Notifications</h2>
+            <p className="text-xs text-muted-foreground">
+              Turn email delivery on or off. Webhook values stay optional in the env file.
+            </p>
+          </div>
+        </div>
+        {notifications.isPending && (
+          <p className="px-4 py-3 text-sm text-muted-foreground">Loading notification settings.</p>
+        )}
+        {notifications.isError && (
+          <p className="px-4 py-3 text-sm text-destructive">Notification settings are unavailable.</p>
+        )}
+        {notifications.data && (
+          <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+            <label className="flex items-center gap-3 text-sm font-medium">
+              <input
+                type="checkbox"
+                className="h-4 w-4 rounded border-border"
+                checked={notifications.data.enabled}
+                disabled={saveNotifications.isPending}
+                onChange={(event) => saveNotifications.mutate(event.target.checked)}
+              />
+              Enable notifications
+            </label>
+            <p className="text-sm text-muted-foreground" role="status">
+              {notificationStatusText}
+            </p>
+          </div>
+        )}
+      </section>
 
       <section className="surface mt-6 overflow-hidden">
         <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b border-border/60 bg-muted/40 px-4 py-3">

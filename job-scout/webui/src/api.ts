@@ -15,6 +15,17 @@ export interface SystemStatus {
   temporal: DependencyStatus;
 }
 
+export interface NotificationSettings {
+  enabled: boolean;
+  configured: boolean;
+  active: boolean;
+  reason?: string;
+}
+
+export interface NotificationSettingsInput {
+  enabled: boolean;
+}
+
 export interface DashboardProviderStats {
   job_source: string;
   implemented: boolean;
@@ -46,7 +57,12 @@ export interface DashboardStats {
 }
 
 export interface WorkflowStart {
-  workflow_id: string;
+  status?: string;
+  workflow_id?: string;
+  reason?: string;
+  enabled?: boolean;
+  configured?: boolean;
+  active?: boolean;
 }
 
 export interface WorkflowStatus {
@@ -230,6 +246,18 @@ export function reEvaluateRejectedJobs() {
 
 export function getSearchSettings() {
   return requestJSON<SearchSettings>("/api/v0/search-settings");
+}
+
+export function getNotificationSettings() {
+  return requestJSON<NotificationSettings>("/api/v0/notification-settings");
+}
+
+export function replaceNotificationSettings(settings: NotificationSettingsInput) {
+  return requestJSON<NotificationSettings>("/api/v0/notification-settings", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(settings),
+  });
 }
 
 export function replaceSearchSettings(settings: SearchSettingsInput) {
