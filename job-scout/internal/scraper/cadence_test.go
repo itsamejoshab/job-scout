@@ -385,11 +385,9 @@ func TestRunTick_CombinesDueProviderResults(t *testing.T) {
 			t.Fatalf("configure LinkedIn: %v", err)
 		}
 		if _, err := pool.Exec(`
-			UPDATE scraper_settings
-			SET enabled = true, last_scraped_at = NULL, next_eligible_at = NULL
-			WHERE job_source = 'INDEED'
+			UPDATE scraper_settings SET enabled = false WHERE job_source IN ('INDEED', 'DICE')
 		`); err != nil {
-			t.Fatalf("enable Indeed so two providers are due: %v", err)
+			t.Fatalf("keep Apify providers off for LinkedIn-only combine test: %v", err)
 		}
 		if _, err := pool.Exec(`
 			INSERT INTO jobs (job_source, title, company, location, job_url)
@@ -425,21 +423,21 @@ func TestRunTick_CombinesDueProviderResults(t *testing.T) {
 		if result.Status != "error" {
 			t.Errorf("combined status = %q, want error when any provider failed", result.Status)
 		}
-		if result.JobSource != "" {
-			t.Errorf("combined job_source = %q, want empty when more than one provider ran", result.JobSource)
+		if result.JobSource != "LINKEDIN" {
+			t.Errorf("job_source = %q, want LINKEDIN for single due provider with query errors", result.JobSource)
 		}
-		wantErr := "linkedin returned status 500; indeed scraper is not implemented"
+		wantErr := "linkedin returned status 500"
 		if result.Error != wantErr {
-			t.Errorf("combined error = %q, want %q", result.Error, wantErr)
+			t.Errorf("error = %q, want %q", result.Error, wantErr)
 		}
 		if result.ScrapedCount != 2 {
-			t.Errorf("combined scraped_count = %d, want 2 (LinkedIn fixture jobs + Indeed 0)", result.ScrapedCount)
+			t.Errorf("scraped_count = %d, want 2", result.ScrapedCount)
 		}
 		if result.SavedCount != 1 {
-			t.Errorf("combined saved_count = %d, want 1 (new LinkedIn job + Indeed 0)", result.SavedCount)
+			t.Errorf("saved_count = %d, want 1", result.SavedCount)
 		}
 		if result.DuplicateCount != 1 {
-			t.Errorf("combined duplicate_count = %d, want 1 (seeded LinkedIn URL + Indeed 0)", result.DuplicateCount)
+			t.Errorf("duplicate_count = %d, want 1", result.DuplicateCount)
 		}
 	})
 
@@ -478,9 +476,14 @@ func TestRunTick_CombinesDueProviderResults(t *testing.T) {
 	})
 }
 
-func TestRunFullScrape_IndeedStubDoesNotUpdateLastScrapedAt(t *testing.T) {
+func TestRunFullScrape_IndeedWithoutTokenDoesNotUpdateLastScrapedAt(t *testing.T) {
 	pool := cadencePool(t)
 	ctx := t.Context()
+	if _, err := pool.Exec(`
+		UPDATE scraper_settings SET enabled = true WHERE job_source = 'INDEED'
+	`); err != nil {
+		t.Fatalf("enable Indeed: %v", err)
+	}
 
 	s := NewService(pool)
 	var lastBefore, nextBefore sql.NullTime
@@ -495,8 +498,11 @@ func TestRunFullScrape_IndeedStubDoesNotUpdateLastScrapedAt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunFullScrape Indeed: %v", err)
 	}
-	if result.Status == "success" {
-		t.Error("empty Indeed stub must not look like a successful scrape that can update last_scraped_at")
+	if result.Status != "skipped" {
+		t.Errorf("status = %q, want skipped without Apify token", result.Status)
+	}
+	if !strings.Contains(result.Error, "Apify") {
+		t.Errorf("error = %q, want Apify setup message", result.Error)
 	}
 
 	var last, next sql.NullTime
@@ -507,7 +513,7 @@ func TestRunFullScrape_IndeedStubDoesNotUpdateLastScrapedAt(t *testing.T) {
 		return
 	}
 	if last.Valid != lastBefore.Valid || next.Valid != nextBefore.Valid {
-		t.Error("empty Indeed stub must not change last_scraped_at or next_eligible_at")
+		t.Error("Indeed without token must not change last_scraped_at or next_eligible_at")
 	}
 }
 
@@ -698,7 +704,10 @@ func TestRunFullScrape_DebugForceStillSkipsDisabledAndTakesLock(t *testing.T) {
 		t.Fatalf("debug scrape Indeed: %v", err)
 	}
 	if indeed.Status == "success" {
-		t.Error("debug scrape must not treat the empty Indeed stub as success")
+		t.Error("debug scrape must not succeed for disabled Indeed")
+	}
+	if indeed.Status != "skipped" {
+		t.Errorf("disabled Indeed status = %q, want skipped", indeed.Status)
 	}
 }
 
@@ -734,9 +743,9 @@ func cadencePool(t *testing.T) *sql.DB {
 		t.Fatalf("shrink LinkedIn queries for tests: %v", err)
 	}
 	if _, err := pool.Exec(`
-		UPDATE scraper_settings SET enabled = false WHERE job_source = 'DICE'
+		UPDATE scraper_settings SET enabled = false WHERE job_source IN ('DICE', 'INDEED')
 	`); err != nil {
-		t.Fatalf("disable Dice so LinkedIn cadence tests stay isolated: %v", err)
+		t.Fatalf("disable Apify providers so LinkedIn cadence tests stay isolated: %v", err)
 	}
 	return pool
 }

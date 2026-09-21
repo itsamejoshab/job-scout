@@ -142,6 +142,13 @@ func (c Config) NotificationsConfigured() bool {
 
 const TaskQueue = "main-task-queue"
 
+// Provider scrape activities run on dedicated queues so each family stays
+// single-flight (Apify budget accounting cannot see a sibling still RUNNING).
+const (
+	ApifyScrapeTaskQueue    = "apify-scrape"
+	LinkedInScrapeTaskQueue = "linkedin-scrape"
+)
+
 func trimEnvQuotes(v string) string {
 	if len(v) >= 2 {
 		if (v[0] == '"' && v[len(v)-1] == '"') || (v[0] == '\'' && v[len(v)-1] == '\'') {

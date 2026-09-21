@@ -1,13 +1,16 @@
 package pipeline
 
 import (
+	"errors"
 	"fmt"
 	"math/rand"
 	"time"
 
+	"github.com/jobscout/jobscout/internal/config"
 	"github.com/jobscout/jobscout/internal/domain"
 	"github.com/jobscout/jobscout/internal/scraper"
 	enumspb "go.temporal.io/api/enums/v1"
+	"go.temporal.io/sdk/log"
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
 )
@@ -26,7 +29,10 @@ const (
 	// SignalJobsAvailable wakes an idle dispatcher. It carries no payload.
 	SignalJobsAvailable = "JobsAvailable"
 
-	ActivityScrapeJobs              = "scrape_jobs"
+	ActivityListDueProviders        = "list_due_providers"
+	ActivityScrapeProviderLinkedIn  = "scrape_provider_linkedin"
+	ActivityScrapeProviderDice      = "scrape_provider_dice"
+	ActivityScrapeProviderIndeed    = "scrape_provider_indeed"
 	ActivityWakeFilterPending       = "wake_filter_pending"
 	ActivityWakeProcessPending      = "wake_process_pending"
 	ActivityLoadNextPendingJob      = "load_next_pending_job"
@@ -108,32 +114,115 @@ func ManualScrapeWorkflowID(now time.Time) string {
 	return manualScrapeIDPrefix + now.UTC().Format(time.RFC3339Nano)
 }
 
+// ScrapeProviderTaskQueue selects the serial activity queue for one provider.
+func ScrapeProviderTaskQueue(source string) string {
+	switch source {
+	case "LINKEDIN":
+		return config.LinkedInScrapeTaskQueue
+	case "DICE", "INDEED":
+		return config.ApifyScrapeTaskQueue
+	default:
+		return config.TaskQueue
+	}
+}
+
+// ScrapeProviderActivityName returns the Temporal activity type for one provider.
+func ScrapeProviderActivityName(source string) string {
+	switch source {
+	case "LINKEDIN":
+		return ActivityScrapeProviderLinkedIn
+	case "DICE":
+		return ActivityScrapeProviderDice
+	case "INDEED":
+		return ActivityScrapeProviderIndeed
+	default:
+		return ActivityScrapeProviderLinkedIn
+	}
+}
+
 // ProcessJobWorkflowID returns the child workflow ID for one detail fetch.
 func ProcessJobWorkflowID(jobID int64) string {
 	return fmt.Sprintf("%s%d", processJobIDPrefix, jobID)
 }
 
-// ScrapeWorkflow fetches provider search results and stores distinct jobs. It
-// does not filter or notify.
+// ScrapeWorkflow resolves due providers, scrapes each as a parallel activity
+// on a provider task queue, then wakes the fast filter. One provider failure
+// does not cancel the others.
 func ScrapeWorkflow(ctx workflow.Context, input scraper.TickInput) (scraper.Result, error) {
 	logger := workflow.GetLogger(ctx)
 	logger.Info("ScrapeWorkflow starting", "force", input.Force, "jobSource", input.JobSource)
 
-	ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
-		StartToCloseTimeout: 45 * time.Minute,
+	listCtx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
+		StartToCloseTimeout: 30 * time.Second,
 		RetryPolicy: &temporal.RetryPolicy{
-			MaximumAttempts: 1,
+			MaximumAttempts: 3,
 		},
 	})
-
-	var result scraper.Result
-	if err := workflow.ExecuteActivity(ctx, ActivityScrapeJobs, input).Get(ctx, &result); err != nil {
-		logger.Error("Scrape activity failed", "err", err)
-		result = scraper.Result{Status: "error", JobSource: input.JobSource, Error: err.Error()}
+	var sources []string
+	if err := workflow.ExecuteActivity(listCtx, ActivityListDueProviders, input).Get(ctx, &sources); err != nil {
+		logger.Error("List due providers failed", "err", err)
+		result := scraper.Result{Status: "error", JobSource: input.JobSource, Error: err.Error()}
+		wakeFilterPending(ctx, logger)
+		return result, nil
 	}
 
-	// Wake the fast filter for every outcome: an error or skipped scrape can
-	// still leave pending rows from an earlier run.
+	result := scraper.Result{Status: "skipped", JobSource: input.JobSource}
+	if len(sources) > 0 {
+		type scrapeFuture struct {
+			source string
+			future workflow.Future
+		}
+		futures := make([]scrapeFuture, 0, len(sources))
+		for _, source := range sources {
+			actCtx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
+				TaskQueue:           ScrapeProviderTaskQueue(source),
+				StartToCloseTimeout: 45 * time.Minute,
+				// Scrape loops and Apify polls emit heartbeats; fail if stalled.
+				HeartbeatTimeout: 2 * time.Minute,
+				RetryPolicy: &temporal.RetryPolicy{
+					MaximumAttempts: 1,
+				},
+			})
+			futures = append(futures, scrapeFuture{
+				source: source,
+				future: workflow.ExecuteActivity(actCtx, ScrapeProviderActivityName(source), source),
+			})
+		}
+
+		results := make([]scraper.Result, 0, len(futures))
+		for _, item := range futures {
+			var providerResult scraper.Result
+			if err := item.future.Get(ctx, &providerResult); err != nil {
+				logger.Error("Provider scrape failed", "source", item.source, "err", err)
+				providerResult = scraper.Result{
+					Status:    "error",
+					JobSource: item.source,
+					Error:     err.Error(),
+				}
+				var appErr *temporal.ApplicationError
+				if errors.As(err, &appErr) && appErr != nil && appErr.HasDetails() {
+					var detail scraper.Result
+					if detailErr := appErr.Details(&detail); detailErr == nil && detail.JobSource != "" {
+						providerResult = detail
+						if providerResult.Status == "" {
+							providerResult.Status = "error"
+						}
+					}
+				}
+			} else if providerResult.Status == "error" {
+				logger.Error("Provider scrape returned error status", "source", item.source, "error", providerResult.Error)
+			}
+			results = append(results, providerResult)
+		}
+		result = scraper.CombineResults(results)
+	}
+
+	wakeFilterPending(ctx, logger)
+	logger.Info("ScrapeWorkflow complete", "result", result)
+	return result, nil
+}
+
+func wakeFilterPending(ctx workflow.Context, logger log.Logger) {
 	wakeCtx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
 		StartToCloseTimeout: 30 * time.Second,
 		RetryPolicy: &temporal.RetryPolicy{
@@ -143,9 +232,6 @@ func ScrapeWorkflow(ctx workflow.Context, input scraper.TickInput) (scraper.Resu
 	if err := workflow.ExecuteActivity(wakeCtx, ActivityWakeFilterPending).Get(ctx, nil); err != nil {
 		logger.Error("Wake filter-pending failed", "err", err)
 	}
-
-	logger.Info("ScrapeWorkflow complete", "result", result)
-	return result, nil
 }
 
 // FilterPendingWorkflow drains pending rows with cheap checks only. It never

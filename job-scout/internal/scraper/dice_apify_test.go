@@ -595,7 +595,8 @@ func (f *apifyFake) server() *httptest.Server {
 			writeJSON(w, map[string]any{"data": map[string]any{
 				"total": len(f.listedRuns), "count": len(f.listedRuns), "items": f.listedRuns,
 			}})
-		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "Dice-Job-Scraper") && strings.HasSuffix(r.URL.Path, "/runs"):
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/runs") &&
+			(strings.Contains(r.URL.Path, "Dice-Job-Scraper") || strings.Contains(r.URL.Path, "indeed-scraper")):
 			f.startCount.Add(1)
 			select {
 			case f.enteredStart <- struct{}{}:

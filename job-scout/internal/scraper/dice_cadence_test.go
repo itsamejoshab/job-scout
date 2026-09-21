@@ -260,7 +260,14 @@ func TestRunFullScrape_DiceTakesApifyLockAroundStart(t *testing.T) {
 	s.ApifyBudgetCents = 100
 	s.ApifyBaseURL = srv.URL
 	s.Now = clock.Now
-	s.Sleep = clock.Sleep
+	waits := 0
+	s.Sleep = func(ctx context.Context, d time.Duration) error {
+		waits++
+		if waits >= 3 {
+			return context.DeadlineExceeded
+		}
+		return nil
+	}
 	result, err := s.RunFullScrape(ctx, db.SourceDice)
 	if err != nil {
 		t.Fatalf("RunFullScrape: %v", err)
@@ -270,6 +277,12 @@ func TestRunFullScrape_DiceTakesApifyLockAroundStart(t *testing.T) {
 	}
 	if fake.startCount.Load() != 0 {
 		t.Errorf("starts = %d, want 0 while APIFY lock is held", fake.startCount.Load())
+	}
+	if waits < 1 {
+		t.Errorf("must wait/retry for APIFY lock, waits=%d", waits)
+	}
+	if result.Status != "skipped" {
+		t.Errorf("status = %q, want skipped when APIFY lock wait times out", result.Status)
 	}
 	if !IsApifyFailClosed(errResultFrom(result)) && !strings.Contains(strings.ToLower(result.Error), "lock") {
 		t.Errorf("error = %q, want APIFY lock busy", result.Error)

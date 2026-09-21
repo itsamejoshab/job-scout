@@ -53,26 +53,49 @@ func TestRun_ForceQueryEchoesAndStartsScrapeTick(t *testing.T) {
 	}
 }
 
-func TestRun_ForceDoesNotTargetIndeed(t *testing.T) {
+func TestRun_JobSourceIndeedTargetsIndeedProvider(t *testing.T) {
 	fake := &runTemporalFake{}
-	h := &Handler{Temporal: fake}
+	h := &Handler{Temporal: fake, Cfg: config.Config{ApifyAPIToken: "configured"}}
 	srv := NewServer("", h)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v0/run?force=1&job_source=INDEED", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/v0/run?job_source=INDEED&force=1", nil)
 	rec := httptest.NewRecorder()
 	srv.Handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
-		t.Fatalf("POST /api/v0/run?force=1&job_source=INDEED status=%d body=%s", rec.Code, rec.Body.String())
+		t.Fatalf("POST /api/v0/run?job_source=INDEED status=%d body=%s", rec.Code, rec.Body.String())
 	}
 	if len(fake.starts) != 1 {
 		t.Fatalf("starts=%d, want 1", len(fake.starts))
 	}
-	if bodyForce(t, rec) != true {
-		t.Errorf("force=1 must echo force=true even when job_source=INDEED")
+	if jobSourceArg(fake.starts[0].args) != "INDEED" {
+		t.Errorf("TickInput.JobSource = %q, want INDEED", jobSourceArg(fake.starts[0].args))
 	}
-	assertTickArg(t, fake.starts[0].args, true)
-	if jobSourceArg(fake.starts[0].args) == "INDEED" {
-		t.Error("force=1 must not select Indeed; ScrapeTick discovers enabled due-or-forced providers")
+	if forceArg(fake.starts[0].args[0]) != true {
+		t.Error("force=1 must echo onto the Indeed tick")
+	}
+}
+
+func TestRun_JobSourceIndeedWithoutApifyTokenDoesNotStartWorkflow(t *testing.T) {
+	fake := &runTemporalFake{}
+	h := &Handler{Temporal: fake}
+	srv := NewServer("", h)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v0/run?job_source=INDEED&force=1", nil)
+	rec := httptest.NewRecorder()
+	srv.Handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST /api/v0/run?job_source=INDEED status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if len(fake.starts) != 0 {
+		t.Fatalf("starts=%d, want 0 when APIFY_API_TOKEN is empty", len(fake.starts))
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("response must be JSON: %v", err)
+	}
+	if body["status"] != "provider_disabled" || body["configured"] != false {
+		t.Fatalf("body=%v, want provider_disabled and configured=false", body)
 	}
 }
 
@@ -143,9 +166,6 @@ func assertTickArg(t *testing.T, args []any, wantForce bool) {
 	}
 	if forceArg(args[0]) != wantForce {
 		t.Errorf("ScrapeTick force = %v, want %v, args=%v", forceArg(args[0]), wantForce, args)
-	}
-	if jobSourceArg(args) == "INDEED" {
-		t.Error("ScrapeTick must not target Indeed")
 	}
 }
 

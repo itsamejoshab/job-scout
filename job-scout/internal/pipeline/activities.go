@@ -12,6 +12,8 @@ import (
 	"github.com/jobscout/jobscout/internal/db"
 	"github.com/jobscout/jobscout/internal/domain"
 	"github.com/jobscout/jobscout/internal/scraper"
+	"go.temporal.io/sdk/activity"
+	"go.temporal.io/sdk/temporal"
 )
 
 // Activities holds dependencies for pipeline activities. Registering the struct
@@ -57,9 +59,33 @@ func (a *Activities) wake_process_pending(ctx context.Context) error {
 	return WakeProcessPending(ctx, a.Temporal)
 }
 
-// scrape_jobs fetches due (or forced) enabled providers and persists jobs.
-func (a *Activities) scrape_jobs(ctx context.Context, input scraper.TickInput) (scraper.Result, error) {
-	return a.Scraper.RunTick(ctx, input)
+// list_due_providers returns job sources that should scrape for this tick.
+func (a *Activities) list_due_providers(ctx context.Context, input scraper.TickInput) ([]string, error) {
+	return a.Scraper.ListDueProviders(ctx, input)
+}
+
+// scrape_provider scrapes one job source and persists new jobs.
+// Status "error" is raised as a non-retryable Temporal failure so the UI
+// shows Failed. Status "skipped" and success complete normally.
+// Progress checkpoints are recorded as Temporal heartbeats.
+// Durable API contracts are on Result.Metadata (and failure details).
+func (a *Activities) scrape_provider(ctx context.Context, source string) (scraper.Result, error) {
+	ctx = scraper.WithProgressReporter(ctx, func(progress scraper.Progress) {
+		activity.RecordHeartbeat(ctx, progress)
+	})
+	res, err := a.Scraper.ScrapeProvider(ctx, source)
+	if err != nil {
+		return res, err
+	}
+	if res.Status == "error" {
+		msg := strings.TrimSpace(res.Error)
+		if msg == "" {
+			msg = "provider scrape failed"
+		}
+		// Keep Result (including metadata.api_calls) on the failure event.
+		return res, temporal.NewNonRetryableApplicationError(msg, "ScrapeProviderFailed", nil, res)
+	}
+	return res, nil
 }
 
 // load_next_pending_job returns the oldest pending row not skipped by this run.
