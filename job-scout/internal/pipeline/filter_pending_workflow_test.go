@@ -128,10 +128,10 @@ func TestFilterPendingWorkflow_IdleTimeoutContinuesAsNew(t *testing.T) {
 	if !isContinueAsNewTestError(env.GetWorkflowError()) {
 		t.Fatalf("filter dispatcher error = %v, want continue-as-new", env.GetWorkflowError())
 	}
-	if !containsDuration(*timers, 2*time.Minute) {
-		t.Errorf("timers = %v, want 2m idle timer", *timers)
+	if !containsDuration(*timers, time.Hour) {
+		t.Errorf("timers = %v, want 1h idle timer", *timers)
 	}
-	if elapsed := env.Now().Sub(startedAt); elapsed != 2*time.Minute {
-		t.Errorf("idle timeout elapsed = %s, want 2m", elapsed)
+	if elapsed := env.Now().Sub(startedAt); elapsed != time.Hour {
+		t.Errorf("idle timeout elapsed = %s, want 1h", elapsed)
 	}
 }

@@ -53,7 +53,7 @@ const (
 	processJobLockMaxRetries  = 8
 	processPendingThrottle    = 60 * time.Second
 	processPendingMaxJitter   = 30 * time.Second
-	processPendingIdleWait    = 2 * time.Minute
+	processPendingIdleWait    = time.Hour
 	processPendingMaxChildren = 50
 	filterPendingMaxJobs      = 50
 )
