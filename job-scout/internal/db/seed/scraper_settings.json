@@ -67,5 +67,48 @@
     "rounds": 1,
     "enabled": true,
     "scrape_interval_seconds": 43200
+  },
+  {
+    "job_source": "FANTASTIC",
+    "search_queries": [
+      {
+        "keywords": "Desktop Support, Application Support",
+        "location": "United States"
+      }
+    ],
+    "global_searches": [],
+    "timespan_code": "all",
+    "pages_to_scrape": 1,
+    "rounds": 1,
+    "enabled": true,
+    "scrape_interval_seconds": 43200,
+    "provider_options": {
+      "queries": [
+        {
+          "titleSearch": [
+            "Desktop Support",
+            "Application Support"
+          ],
+          "titleExclusionSearch": [
+            "Manager",
+            "Director"
+          ],
+          "locationSearch": [
+            "United States"
+          ],
+          "locationExclusionSearch": [
+            "India:*",
+            "India"
+          ],
+          "aiWorkArrangementFilter": [
+            "Remote Solely"
+          ],
+          "aiEmploymentTypeFilter": [
+            "FULL_TIME"
+          ],
+          "limit": 200
+        }
+      ]
+    }
   }
 ]

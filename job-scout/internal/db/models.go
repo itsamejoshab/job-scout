@@ -11,14 +11,15 @@ import (
 type JobSource string
 
 const (
-	SourceLinkedIn JobSource = "LINKEDIN"
-	SourceIndeed   JobSource = "INDEED"
-	SourceDice     JobSource = "DICE"
+	SourceLinkedIn  JobSource = "LINKEDIN"
+	SourceIndeed    JobSource = "INDEED"
+	SourceDice      JobSource = "DICE"
+	SourceFantastic JobSource = "FANTASTIC"
 )
 
 // AllJobSources lists every valid source, used for validation messages.
 func AllJobSources() []JobSource {
-	return []JobSource{SourceLinkedIn, SourceIndeed, SourceDice}
+	return []JobSource{SourceLinkedIn, SourceIndeed, SourceDice, SourceFantastic}
 }
 
 // ParseJobSource normalizes case and validates. The old Python app was
@@ -32,6 +33,8 @@ func ParseJobSource(s string) (JobSource, error) {
 		return SourceIndeed, nil
 	case SourceDice:
 		return SourceDice, nil
+	case SourceFantastic:
+		return SourceFantastic, nil
 	default:
 		return "", fmt.Errorf("invalid job source: %s (valid: %v)", s, AllJobSources())
 	}
@@ -125,6 +128,59 @@ func ValidIndeedRadius(radius string) bool {
 	radius = strings.TrimSpace(radius)
 	for _, allowed := range IndeedAllowedRadii {
 		if radius == allowed {
+			return true
+		}
+	}
+	return false
+}
+
+// FantasticWorkArrangements is the actor whitelist for aiWorkArrangementFilter.
+var FantasticWorkArrangements = []string{"On-site", "Hybrid", "Remote OK", "Remote Solely"}
+
+// FantasticEmploymentTypes is the actor whitelist for aiEmploymentTypeFilter.
+var FantasticEmploymentTypes = []string{
+	"FULL_TIME", "PART_TIME", "CONTRACTOR", "TEMPORARY",
+	"INTERN", "VOLUNTEER", "PER_DIEM", "OTHER",
+}
+
+const (
+	FantasticMinLimit   = 200
+	FantasticMaxLimit   = 10000
+	FantasticMaxQueries = 10
+)
+
+// FantasticQuery is one Career Site Job Listing Feed actor query.
+type FantasticQuery struct {
+	TitleSearch             []string `json:"titleSearch"`
+	TitleExclusionSearch    []string `json:"titleExclusionSearch"`
+	LocationSearch          []string `json:"locationSearch"`
+	LocationExclusionSearch []string `json:"locationExclusionSearch"`
+	AIWorkArrangementFilter []string `json:"aiWorkArrangementFilter"`
+	AIEmploymentTypeFilter  []string `json:"aiEmploymentTypeFilter"`
+	Limit                   int      `json:"limit"`
+}
+
+// FantasticProviderOptions is the typed view of Fantastic provider_options JSON.
+type FantasticProviderOptions struct {
+	Queries []FantasticQuery `json:"queries"`
+}
+
+// ValidFantasticWorkArrangement reports whether value is an allowed actor work arrangement.
+func ValidFantasticWorkArrangement(value string) bool {
+	value = strings.TrimSpace(value)
+	for _, allowed := range FantasticWorkArrangements {
+		if value == allowed {
+			return true
+		}
+	}
+	return false
+}
+
+// ValidFantasticEmploymentType reports whether value is an allowed actor employment type.
+func ValidFantasticEmploymentType(value string) bool {
+	value = strings.TrimSpace(value)
+	for _, allowed := range FantasticEmploymentTypes {
+		if value == allowed {
 			return true
 		}
 	}

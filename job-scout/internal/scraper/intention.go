@@ -25,9 +25,40 @@ func DeriveSearchIntention(source db.JobSource, query map[string]string, indeedF
 			return db.SearchIntentionRemote
 		}
 		return db.SearchIntentionOnsite
+	case db.SourceFantastic:
+		return fantasticSearchIntention(query["aiWorkArrangementFilter"])
 	default:
 		return linkedInSearchIntention(query["f_WT"])
 	}
+}
+
+func fantasticSearchIntention(raw string) string {
+	hasOnsite := false
+	hasRemote := false
+	hasHybrid := false
+	for _, part := range strings.Split(raw, ",") {
+		switch strings.TrimSpace(part) {
+		case "On-site":
+			hasOnsite = true
+		case "Remote OK", "Remote Solely":
+			hasRemote = true
+		case "Hybrid":
+			hasHybrid = true
+		}
+	}
+	if hasOnsite {
+		return db.SearchIntentionOnsite
+	}
+	if hasRemote && hasHybrid {
+		return db.SearchIntentionRemoteHybrid
+	}
+	if hasRemote {
+		return db.SearchIntentionRemote
+	}
+	if hasHybrid {
+		return db.SearchIntentionHybrid
+	}
+	return db.SearchIntentionOnsite
 }
 
 func linkedInSearchIntention(fWT string) string {

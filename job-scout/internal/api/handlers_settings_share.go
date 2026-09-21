@@ -23,11 +23,23 @@ var providerQueryFields = map[db.JobSource]map[string]struct{}{
 	db.SourceIndeed: {
 		"keywords": {}, "location": {}, "include_remote": {}, "include_hybrid": {}, "radius": {},
 	},
+	db.SourceFantastic: {"keywords": {}, "location": {}},
 }
 
 var indeedOptionFields = map[string]struct{}{
 	"country": {}, "jobType": {}, "fromDays": {}, "maxRows": {},
 	"enableUniqueJobs": {}, "includeSimilarJobs": {},
+}
+
+var fantasticOptionFields = map[string]struct{}{
+	"queries": {},
+}
+
+var fantasticQueryFields = map[string]struct{}{
+	"titleSearch": {}, "titleExclusionSearch": {},
+	"locationSearch": {}, "locationExclusionSearch": {},
+	"aiWorkArrangementFilter": {}, "aiEmploymentTypeFilter": {},
+	"limit": {},
 }
 
 // GET /api/v0/settings/export
@@ -159,6 +171,7 @@ func shareableProvider(row db.ScraperSettings) settingshare.Provider {
 			item["include_remote"] = storedFlag(query["include_remote"])
 			item["include_hybrid"] = storedFlag(query["include_hybrid"])
 			item["radius"] = query["radius"]
+		case db.SourceFantastic:
 		}
 		queries = append(queries, item)
 	}
@@ -178,6 +191,13 @@ func shareableProvider(row db.ScraperSettings) settingshare.Provider {
 			opts = db.DefaultIndeedOptions()
 		}
 		out.ProviderOptions = db.IndeedOptionsMap(opts)
+	}
+	if row.JobSource == db.SourceFantastic {
+		opts, err := db.ParseFantasticOptions(row.ProviderOptions)
+		if err != nil {
+			opts = db.DefaultFantasticOptions()
+		}
+		out.ProviderOptions = db.FantasticOptionsMap(opts)
 	}
 	return out
 }
@@ -287,15 +307,42 @@ func rejectUnknownShareFields(source db.JobSource, provider settingshare.Provide
 			}
 		}
 	}
-	if source != db.SourceIndeed {
+	if source != db.SourceIndeed && source != db.SourceFantastic {
 		if len(provider.ProviderOptions) > 0 {
 			return fmt.Errorf("%s must not include provider_options", source)
 		}
 		return nil
 	}
+	if source == db.SourceIndeed {
+		for key := range provider.ProviderOptions {
+			if _, known := indeedOptionFields[key]; !known {
+				return fmt.Errorf("%s provider_options has unknown field %s", source, key)
+			}
+		}
+		return nil
+	}
 	for key := range provider.ProviderOptions {
-		if _, known := indeedOptionFields[key]; !known {
+		if _, known := fantasticOptionFields[key]; !known {
 			return fmt.Errorf("%s provider_options has unknown field %s", source, key)
+		}
+	}
+	rawQueries, ok := provider.ProviderOptions["queries"]
+	if !ok {
+		return nil
+	}
+	queries, ok := rawQueries.([]any)
+	if !ok {
+		return fmt.Errorf("%s provider_options.queries must be a list", source)
+	}
+	for i, rawQuery := range queries {
+		query, ok := rawQuery.(map[string]any)
+		if !ok {
+			return fmt.Errorf("%s provider_options.queries[%d] must be an object", source, i)
+		}
+		for key := range query {
+			if _, known := fantasticQueryFields[key]; !known {
+				return fmt.Errorf("%s provider_options.queries[%d] has unknown field %s", source, i, key)
+			}
 		}
 	}
 	return nil

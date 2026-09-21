@@ -910,6 +910,7 @@ function JobsPage() {
             <option value="LINKEDIN">LinkedIn</option>
             <option value="INDEED">Indeed</option>
             <option value="DICE">Dice</option>
+            <option value="FANTASTIC">Fantastic</option>
           </select>
         </label>
         <label className="text-sm font-medium">

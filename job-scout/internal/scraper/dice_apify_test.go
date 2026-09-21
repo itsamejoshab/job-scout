@@ -596,7 +596,9 @@ func (f *apifyFake) server() *httptest.Server {
 				"total": len(f.listedRuns), "count": len(f.listedRuns), "items": f.listedRuns,
 			}})
 		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/runs") &&
-			(strings.Contains(r.URL.Path, "Dice-Job-Scraper") || strings.Contains(r.URL.Path, "indeed-scraper")):
+			(strings.Contains(r.URL.Path, "Dice-Job-Scraper") ||
+				strings.Contains(r.URL.Path, "indeed-scraper") ||
+				strings.Contains(r.URL.Path, "career-site-job-listing-feed")):
 			f.startCount.Add(1)
 			select {
 			case f.enteredStart <- struct{}{}:

@@ -49,10 +49,11 @@ func RegisterMain(r Registrar, acts *Activities) {
 	r.RegisterActivityWithOptions(acts.notification_status, activity.RegisterOptions{Name: ActivityNotificationStatus})
 }
 
-// RegisterApifyScrapeActivities attaches Dice and Indeed scrape activities.
+// RegisterApifyScrapeActivities attaches Dice, Indeed, and Fantastic scrape activities.
 func RegisterApifyScrapeActivities(r Registrar, acts *Activities) {
 	r.RegisterActivityWithOptions(acts.scrape_provider, activity.RegisterOptions{Name: ActivityScrapeProviderDice})
 	r.RegisterActivityWithOptions(acts.scrape_provider, activity.RegisterOptions{Name: ActivityScrapeProviderIndeed})
+	r.RegisterActivityWithOptions(acts.scrape_provider, activity.RegisterOptions{Name: ActivityScrapeProviderFantastic})
 }
 
 // RegisterLinkedInScrapeActivities attaches the LinkedIn scrape activity.

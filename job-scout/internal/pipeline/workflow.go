@@ -33,6 +33,7 @@ const (
 	ActivityScrapeProviderLinkedIn  = "scrape_provider_linkedin"
 	ActivityScrapeProviderDice      = "scrape_provider_dice"
 	ActivityScrapeProviderIndeed    = "scrape_provider_indeed"
+	ActivityScrapeProviderFantastic = "scrape_provider_fantastic"
 	ActivityWakeFilterPending       = "wake_filter_pending"
 	ActivityWakeProcessPending      = "wake_process_pending"
 	ActivityLoadNextPendingJob      = "load_next_pending_job"
@@ -119,7 +120,7 @@ func ScrapeProviderTaskQueue(source string) string {
 	switch source {
 	case "LINKEDIN":
 		return config.LinkedInScrapeTaskQueue
-	case "DICE", "INDEED":
+	case "DICE", "INDEED", "FANTASTIC":
 		return config.ApifyScrapeTaskQueue
 	default:
 		return config.TaskQueue
@@ -135,6 +136,8 @@ func ScrapeProviderActivityName(source string) string {
 		return ActivityScrapeProviderDice
 	case "INDEED":
 		return ActivityScrapeProviderIndeed
+	case "FANTASTIC":
+		return ActivityScrapeProviderFantastic
 	default:
 		return ActivityScrapeProviderLinkedIn
 	}

@@ -642,6 +642,8 @@ func (in replaceScraperSettingsRequest) validate(source db.JobSource) error {
 		return in.validateDice()
 	case db.SourceIndeed:
 		return in.validateIndeed()
+	case db.SourceFantastic:
+		return in.validateFantastic()
 	}
 	for i, query := range *in.SearchQueries {
 		if strings.TrimSpace(query.Keywords) == "" {
@@ -786,6 +788,58 @@ func (in replaceScraperSettingsRequest) validateIndeed() error {
 	return nil
 }
 
+func (in replaceScraperSettingsRequest) validateFantastic() error {
+	if in.ProviderOptions == nil {
+		return errors.New("missing required field: provider_options")
+	}
+	opts, err := db.ParseFantasticOptions(*in.ProviderOptions)
+	if err != nil {
+		return errors.New("provider_options must be a valid Fantastic options object")
+	}
+	if strings.TrimSpace(*in.TimespanCode) != "all" {
+		return errors.New("timespan_code must be all")
+	}
+	for _, keywords := range *in.GlobalSearches {
+		if strings.TrimSpace(keywords) != "" {
+			return errors.New("Fantastic global_searches must be empty")
+		}
+	}
+	if len(opts.Queries) == 0 {
+		return errors.New("provider_options.queries must include at least 1 query")
+	}
+	if len(opts.Queries) > db.FantasticMaxQueries {
+		return fmt.Errorf("Fantastic queries must not exceed %d", db.FantasticMaxQueries)
+	}
+	for i, query := range opts.Queries {
+		if len(query.TitleSearch) == 0 {
+			return fmt.Errorf("provider_options.queries[%d].titleSearch must include at least 1 title", i)
+		}
+		if len(query.LocationSearch) == 0 {
+			return fmt.Errorf("provider_options.queries[%d].locationSearch must include at least 1 location", i)
+		}
+		if query.Limit < db.FantasticMinLimit || query.Limit > db.FantasticMaxLimit {
+			return fmt.Errorf("provider_options.queries[%d].limit must be between %d and %d", i, db.FantasticMinLimit, db.FantasticMaxLimit)
+		}
+		if len(query.AIWorkArrangementFilter) == 0 {
+			return fmt.Errorf("provider_options.queries[%d].aiWorkArrangementFilter must include at least 1 value", i)
+		}
+		for _, value := range query.AIWorkArrangementFilter {
+			if !db.ValidFantasticWorkArrangement(value) {
+				return fmt.Errorf("provider_options.queries[%d].aiWorkArrangementFilter must be one or more of On-site, Hybrid, Remote OK, Remote Solely", i)
+			}
+		}
+		if len(query.AIEmploymentTypeFilter) == 0 {
+			return fmt.Errorf("provider_options.queries[%d].aiEmploymentTypeFilter must include at least 1 value", i)
+		}
+		for _, value := range query.AIEmploymentTypeFilter {
+			if !db.ValidFantasticEmploymentType(value) {
+				return fmt.Errorf("provider_options.queries[%d].aiEmploymentTypeFilter must be one or more of FULL_TIME, PART_TIME, CONTRACTOR, TEMPORARY, INTERN, VOLUNTEER, PER_DIEM, OTHER", i)
+			}
+		}
+	}
+	return nil
+}
+
 func (in replaceScraperSettingsRequest) settings(source db.JobSource) db.ScraperSettings {
 	queries := make([]map[string]string, 0, len(*in.SearchQueries))
 	for _, query := range *in.SearchQueries {
@@ -800,6 +854,7 @@ func (in replaceScraperSettingsRequest) settings(source db.JobSource) db.Scraper
 			item["include_remote"] = strconv.FormatBool(query.IncludeRemote != nil && *query.IncludeRemote)
 			item["include_hybrid"] = strconv.FormatBool(query.IncludeHybrid != nil && *query.IncludeHybrid)
 			item["radius"] = strings.TrimSpace(query.Radius)
+		case db.SourceFantastic:
 		default:
 			item["f_WT"] = strings.TrimSpace(query.Remote)
 		}
@@ -821,6 +876,14 @@ func (in replaceScraperSettingsRequest) settings(source db.JobSource) db.Scraper
 				parsed.JobType = strings.TrimSpace(parsed.JobType)
 				parsed.FromDays = strings.TrimSpace(parsed.FromDays)
 				options = db.IndeedOptionsMap(parsed)
+			}
+		}
+	case db.SourceFantastic:
+		global = []string{}
+		if in.ProviderOptions != nil {
+			if parsed, err := db.ParseFantasticOptions(*in.ProviderOptions); err == nil {
+				options = db.FantasticOptionsMap(parsed)
+				queries = db.FantasticSearchQueries(parsed)
 			}
 		}
 	}
@@ -1054,7 +1117,7 @@ func newJobListItem(job db.Job) jobListItem {
 		Relevant: job.Relevant, Promising: job.Promising, Notified: job.Notified,
 		State: job.State, RejectReason: job.RejectReason, IsRemote: job.IsRemote,
 		SearchIntention: job.SearchIntention,
-		DetailAttempts: job.DetailAttempts, StateChangedAt: job.StateChangedAt,
+		DetailAttempts:  job.DetailAttempts, StateChangedAt: job.StateChangedAt,
 		NotifiedAt: job.NotifiedAt,
 	}
 }
@@ -1276,7 +1339,7 @@ func (h *Handler) DashboardStats(w http.ResponseWriter, r *http.Request) {
 
 func isProviderImplemented(source db.JobSource) bool {
 	switch source {
-	case db.SourceLinkedIn, db.SourceDice, db.SourceIndeed:
+	case db.SourceLinkedIn, db.SourceDice, db.SourceIndeed, db.SourceFantastic:
 		return true
 	default:
 		return false
@@ -1284,7 +1347,7 @@ func isProviderImplemented(source db.JobSource) bool {
 }
 
 func isApifyProvider(source db.JobSource) bool {
-	return source == db.SourceDice || source == db.SourceIndeed
+	return source == db.SourceDice || source == db.SourceIndeed || source == db.SourceFantastic
 }
 
 func (h *Handler) cachedApifyBudget(ctx context.Context) scraper.ApifyBudgetView {

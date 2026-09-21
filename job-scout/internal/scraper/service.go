@@ -114,6 +114,8 @@ func (s *Service) newProvider(source db.JobSource, settings db.ScraperSettings) 
 		return NewIndeed(settings, s.apifyClient(), s.ApifyBudgetCents), nil
 	case db.SourceDice:
 		return NewDice(settings, s.apifyClient(), s.ApifyBudgetCents), nil
+	case db.SourceFantastic:
+		return NewFantastic(settings, s.apifyClient(), s.ApifyBudgetCents), nil
 	default:
 		return nil, fmt.Errorf("no scraper available for job source: %s", source)
 	}
@@ -298,6 +300,9 @@ func (s *Service) scrapeSource(ctx context.Context, source db.JobSource) (Result
 	if source == db.SourceLinkedIn {
 		queries = combineLinkedInSearchQueries(queries)
 	}
+	if source == db.SourceFantastic {
+		queries = fantasticQueryMaps(*scraperSettings)
+	}
 
 	ReportProgress(ctx, Progress{
 		Phase:      "starting",
@@ -394,7 +399,7 @@ queryLoop:
 }
 
 func isApifySource(source db.JobSource) bool {
-	return source == db.SourceDice || source == db.SourceIndeed
+	return source == db.SourceDice || source == db.SourceIndeed || source == db.SourceFantastic
 }
 
 func attachApifyStartLock(provider Provider, conn *sql.Conn, sleepFn func(context.Context, time.Duration) error) {
@@ -431,6 +436,8 @@ func attachApifyStartLock(provider Provider, conn *sql.Conn, sleepFn func(contex
 	case *DiceScraper:
 		p.AroundStart = around
 	case *IndeedScraper:
+		p.AroundStart = around
+	case *FantasticScraper:
 		p.AroundStart = around
 	}
 }
@@ -627,6 +634,13 @@ func querySearchContext(source db.JobSource, query map[string]string) string {
 			query["location"],
 			query["include_remote"],
 			query["include_hybrid"],
+		)
+	case db.SourceFantastic:
+		return fmt.Sprintf(
+			`query titleSearch=%q locationSearch=%q aiWorkArrangementFilter=%q`,
+			query["keywords"],
+			query["location"],
+			query["aiWorkArrangementFilter"],
 		)
 	default:
 		return fmt.Sprintf(

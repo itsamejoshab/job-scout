@@ -13,7 +13,7 @@ func TestRunTick_EmptyApifyTokenSkipsIndeedWithoutErrorBackoff(t *testing.T) {
 	pool := cadencePool(t)
 	ctx := t.Context()
 	if _, err := pool.Exec(`
-		UPDATE scraper_settings SET enabled = false WHERE job_source IN ('LINKEDIN', 'DICE');
+		UPDATE scraper_settings SET enabled = false WHERE job_source IN ('LINKEDIN', 'DICE', 'FANTASTIC');
 		UPDATE scraper_settings SET enabled = true, last_scraped_at = NULL, next_eligible_at = NULL
 		WHERE job_source = 'INDEED'
 	`); err != nil {

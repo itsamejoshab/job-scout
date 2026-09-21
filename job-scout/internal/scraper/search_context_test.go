@@ -36,6 +36,19 @@ func TestQuerySearchContext_DiceRecordsIncludeRemoteNotWorkType(t *testing.T) {
 	}
 }
 
+func TestQuerySearchContext_FantasticRecordsTitleLocationAndWork(t *testing.T) {
+	got := querySearchContext(db.SourceFantastic, map[string]string{
+		"keywords":                "Desktop Support, Application Support",
+		"location":                "United States",
+		"aiWorkArrangementFilter": "Remote Solely",
+		"query_index":             "0",
+	})
+	want := `query titleSearch="Desktop Support, Application Support" locationSearch="United States" aiWorkArrangementFilter="Remote Solely"`
+	if got != want {
+		t.Errorf("querySearchContext() = %q, want %q", got, want)
+	}
+}
+
 func TestGlobalSearchContext_IdentifiesConfiguredSearch(t *testing.T) {
 	got := globalSearchContext("Remote IT Help Desk near Port Orange FL")
 	want := `global keywords="Remote IT Help Desk near Port Orange FL"`

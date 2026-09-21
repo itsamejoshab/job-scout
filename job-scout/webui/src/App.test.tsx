@@ -118,6 +118,44 @@ const dashboardStats = {
         reason: "token_missing" as const,
       },
     },
+    {
+      job_source: "FANTASTIC",
+      implemented: true,
+      configured: false,
+      configuration_message:
+        "Create an Apify account and set APIFY_API_TOKEN in job-scout/.env to enable this provider.",
+      enabled: false,
+      scrape_interval_seconds: 43200,
+      last_scraped_at: null,
+      next_eligible_at: null,
+      status: "setup_required",
+      total_jobs: 0,
+      by_state: {
+        pending: 0,
+        rejected: 0,
+        needs_detail: 0,
+        ready: 0,
+        applied: 0,
+        dismissed: 0,
+      },
+      by_reject_reason: {
+        duplicate: 0,
+        title_company: 0,
+        description: 0,
+        detail_failed: 0,
+        unsupported_source: 0,
+        remote_lie: 0,
+      },
+      apify_budget: {
+        period_start: "2026-09-21T00:00:00Z",
+        period_end: "2026-10-21T00:00:00Z",
+        limit_usd: 1,
+        used_usd: null,
+        remaining_usd: null,
+        blocked: true,
+        reason: "token_missing" as const,
+      },
+    },
   ],
   daily: [
     { day: "2026-09-17", total: 2, notified: 1, applied: 0, pending: 1, skipped: 1 },
@@ -162,7 +200,7 @@ const filterSeed = {
   updated_at: "2026-09-18T20:00:00Z",
 };
 
-const providerSeed: Record<"LINKEDIN" | "INDEED" | "DICE", ProviderSettings> = {
+const providerSeed: Record<"LINKEDIN" | "INDEED" | "DICE" | "FANTASTIC", ProviderSettings> = {
   LINKEDIN: {
     id: 1,
     job_source: "LINKEDIN",
@@ -230,6 +268,39 @@ const providerSeed: Record<"LINKEDIN" | "INDEED" | "DICE", ProviderSettings> = {
     rounds: 1,
     enabled: true,
     scrape_interval_seconds: 43200,
+    last_scraped_at: null,
+    next_eligible_at: null,
+    created_at: "2026-09-18T20:00:00Z",
+    updated_at: "2026-09-18T20:00:00Z",
+  },
+  FANTASTIC: {
+    id: 4,
+    job_source: "FANTASTIC",
+    search_queries: [
+      {
+        keywords: "Desktop Support, Application Support",
+        location: "United States",
+      },
+    ],
+    global_searches: [],
+    timespan_code: "all",
+    pages_to_scrape: 1,
+    rounds: 1,
+    enabled: true,
+    scrape_interval_seconds: 43200,
+    provider_options: {
+      queries: [
+        {
+          titleSearch: ["Desktop Support", "Application Support"],
+          titleExclusionSearch: ["Manager", "Director"],
+          locationSearch: ["United States"],
+          locationExclusionSearch: ["India:*", "India"],
+          aiWorkArrangementFilter: ["Remote Solely"],
+          aiEmploymentTypeFilter: ["FULL_TIME"],
+          limit: 200,
+        },
+      ],
+    },
     last_scraped_at: null,
     next_eligible_at: null,
     created_at: "2026-09-18T20:00:00Z",
@@ -434,7 +505,7 @@ function renderPath(path: string, options: RenderOptions = {}) {
         headers: { "Content-Type": "application/json" },
       });
     }
-    const providerMatch = url.match(/^\/api\/v0\/scraper-settings\/(LINKEDIN|INDEED|DICE)(\/reset)?$/);
+    const providerMatch = url.match(/^\/api\/v0\/scraper-settings\/(LINKEDIN|INDEED|DICE|FANTASTIC)(\/reset)?$/);
     if (providerMatch && method === "PUT") {
       const source = providerMatch[1] as keyof typeof currentProviders;
       const payload = JSON.parse(String(init?.body ?? "{}"));
@@ -606,7 +677,7 @@ afterEach(() => {
 
 async function expandProvider(
   user: ReturnType<typeof userEvent.setup>,
-  source: "LINKEDIN" | "INDEED" | "DICE",
+  source: "LINKEDIN" | "INDEED" | "DICE" | "FANTASTIC",
 ) {
   const toggle = await screen.findByRole("button", { name: `${source} provider` });
   if (toggle.getAttribute("aria-expanded") !== "true") {
@@ -666,8 +737,9 @@ describe("operator shell", () => {
     expect(await screen.findByText("LINKEDIN")).toBeInTheDocument();
     expect(screen.getByText("INDEED")).toBeInTheDocument();
     expect(screen.getByText("DICE")).toBeInTheDocument();
+    expect(screen.getByText("FANTASTIC")).toBeInTheDocument();
     expect(screen.getByText("Status: on cooldown")).toBeInTheDocument();
-    expect(screen.getAllByText("Status: setup required")).toHaveLength(2);
+    expect(screen.getAllByText("Status: setup required")).toHaveLength(3);
     const linkedInCard = screen.getByText("LINKEDIN").closest("article");
     expect(linkedInCard).not.toBeNull();
     expect(linkedInCard).toHaveTextContent("Pending");
@@ -848,6 +920,7 @@ describe("operator shell", () => {
     expect(screen.getByLabelText("Created")).toHaveValue("24h");
     expect(screen.getByLabelText("Job source")).toHaveValue("");
     expect(screen.getByRole("option", { name: "Dice" })).toHaveValue("DICE");
+    expect(screen.getByRole("option", { name: "Fantastic" })).toHaveValue("FANTASTIC");
     expect(screen.queryByLabelText("Created from")).not.toBeInTheDocument();
 
     const titleLink = screen.getByRole("link", { name: /platform engineer/i });
@@ -1106,23 +1179,26 @@ describe("operator shell", () => {
     expect(await screen.findByRole("heading", { name: "LINKEDIN provider" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "INDEED provider" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "DICE provider" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "FANTASTIC provider" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "LINKEDIN provider" })).toHaveAttribute(
       "aria-expanded",
       "false",
     );
     expect(screen.queryByRole("checkbox", { name: "Enable INDEED" })).not.toBeInTheDocument();
     expect(screen.queryByText("Not implemented")).not.toBeInTheDocument();
-    expect(screen.getAllByText(/setup required/i)).toHaveLength(2);
+    expect(screen.getAllByText(/setup required/i)).toHaveLength(3);
     expect(screen.getByRole("button", { name: "Save LINKEDIN settings" })).toBeDisabled();
 
     await expandProvider(user, "LINKEDIN");
     await expandProvider(user, "INDEED");
     await expandProvider(user, "DICE");
+    await expandProvider(user, "FANTASTIC");
     expect(screen.getByRole("checkbox", { name: "Enable INDEED" })).toBeDisabled();
     expect(screen.getByRole("checkbox", { name: "Enable DICE" })).toBeDisabled();
+    expect(screen.getByRole("checkbox", { name: "Enable FANTASTIC" })).toBeDisabled();
     expect(screen.getAllByText(/set APIFY_API_TOKEN/).length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText(/^Last scraped: (?!never)/)).toBeInTheDocument();
-    expect(screen.getAllByText("Next eligible: never")).toHaveLength(3);
+    expect(screen.getAllByText("Next eligible: never")).toHaveLength(4);
   });
 
   it("edits Indeed queries, locations, run options, and hides globals", async () => {
@@ -1435,6 +1511,66 @@ describe("operator shell", () => {
         include_remote: true,
         include_hybrid: false,
       },
+    ]);
+  });
+
+  it("edits Fantastic nested queries and hides globals", async () => {
+    const user = userEvent.setup();
+    renderPath("/settings");
+    await expandProvider(user, "FANTASTIC");
+
+    const save = await screen.findByRole("button", { name: "Save FANTASTIC settings" });
+    expect(save).toBeDisabled();
+    expect(screen.getByRole("checkbox", { name: "Enable FANTASTIC" })).toBeDisabled();
+    expect(screen.getByLabelText("Fantastic query 1 title search 1")).toHaveValue("Desktop Support");
+    expect(screen.getByLabelText("Fantastic query 1 title search 2")).toHaveValue("Application Support");
+    expect(screen.getByLabelText("Fantastic query 1 title exclusion 1")).toHaveValue("Manager");
+    expect(screen.getByLabelText("Fantastic query 1 location search 1")).toHaveValue("United States");
+    expect(screen.getByLabelText("Fantastic query 1 location exclusion 1")).toHaveValue("India:*");
+    expect(screen.getByLabelText("Fantastic query 1 work arrangement Remote Solely")).toBeChecked();
+    expect(screen.getByLabelText("Fantastic query 1 work arrangement On-site")).not.toBeChecked();
+    expect(screen.getByLabelText("Fantastic query 1 employment type FULL_TIME")).toBeChecked();
+    expect(screen.getByLabelText("Fantastic query 1 limit")).toHaveValue(200);
+    expect(screen.queryByLabelText("FANTASTIC timespan code")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("FANTASTIC pages to scrape")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("FANTASTIC global search 1")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Add Fantastic query 1 title search" }));
+    await user.type(screen.getByLabelText("Fantastic query 1 title search 3"), "Endpoint Support");
+    await user.click(screen.getByLabelText("Fantastic query 1 work arrangement Hybrid"));
+    await user.click(screen.getByRole("button", { name: "Add Fantastic query" }));
+    expect(screen.getByLabelText("Fantastic query 2 title search 1")).toHaveValue("Desktop Support");
+    await user.clear(screen.getByLabelText("Fantastic query 2 location search 1"));
+    await user.type(screen.getByLabelText("Fantastic query 2 location search 1"), "Canada");
+    await user.click(save);
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/v0/scraper-settings/FANTASTIC",
+        expect.objectContaining({ method: "PUT" }),
+      );
+    });
+    const putCall = (fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls.find(
+      ([input, init]) =>
+        String(input) === "/api/v0/scraper-settings/FANTASTIC" &&
+        (init as RequestInit | undefined)?.method === "PUT",
+    );
+    const payload = JSON.parse(String((putCall?.[1] as RequestInit | undefined)?.body));
+    expect(payload.timespan_code).toBe("all");
+    expect(payload.global_searches).toEqual([]);
+    expect(payload.provider_options.queries).toHaveLength(2);
+    expect(payload.provider_options.queries[0].titleSearch).toEqual([
+      "Desktop Support",
+      "Application Support",
+      "Endpoint Support",
+    ]);
+    expect(payload.provider_options.queries[0].aiWorkArrangementFilter).toEqual([
+      "Remote Solely",
+      "Hybrid",
+    ]);
+    expect(payload.provider_options.queries[1].locationSearch).toEqual(["Canada"]);
+    expect(payload.search_queries).toEqual([
+      { keywords: "Desktop Support, Application Support, Endpoint Support", location: "United States" },
+      { keywords: "Desktop Support, Application Support", location: "Canada" },
     ]);
   });
 

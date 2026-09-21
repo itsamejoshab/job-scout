@@ -194,6 +194,20 @@ export interface IndeedProviderOptions {
   includeSimilarJobs: boolean;
 }
 
+export interface FantasticQuery {
+  titleSearch: string[];
+  titleExclusionSearch: string[];
+  locationSearch: string[];
+  locationExclusionSearch: string[];
+  aiWorkArrangementFilter: string[];
+  aiEmploymentTypeFilter: string[];
+  limit: number;
+}
+
+export interface FantasticProviderOptions {
+  queries: FantasticQuery[];
+}
+
 export interface ProviderSettings {
   id: number;
   job_source: string;
@@ -204,7 +218,7 @@ export interface ProviderSettings {
   rounds: number;
   enabled: boolean;
   scrape_interval_seconds: number;
-  provider_options?: IndeedProviderOptions | Record<string, unknown>;
+  provider_options?: IndeedProviderOptions | FantasticProviderOptions | Record<string, unknown>;
   last_scraped_at: string | null;
   next_eligible_at: string | null;
   created_at: string;
@@ -365,7 +379,7 @@ export interface SharedProviderSettings {
   rounds: number;
   search_queries: ProviderSearchQuery[];
   global_searches: string[];
-  provider_options?: IndeedProviderOptions | Record<string, unknown>;
+  provider_options?: IndeedProviderOptions | FantasticProviderOptions | Record<string, unknown>;
 }
 
 export interface SharedSettings {
