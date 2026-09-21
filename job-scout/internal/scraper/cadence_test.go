@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -223,7 +224,7 @@ func TestRunTick_PartialPageFailurePersistsJobsAndAppliesBackoff(t *testing.T) {
 	}
 
 	client, hits, restore := interceptLinkedIn(t, func(w http.ResponseWriter, r *http.Request) {
-		if strings.Contains(r.URL.RawQuery, "start=25") || strings.Contains(r.URL.Path, "start=25") {
+		if start := r.URL.Query().Get("start"); start != "" && start != "0" {
 			w.WriteHeader(http.StatusInternalServerError)
 			_, _ = io.WriteString(w, "page 2 failed")
 			return
@@ -264,6 +265,52 @@ func TestRunTick_PartialPageFailurePersistsJobsAndAppliesBackoff(t *testing.T) {
 	}
 	if !next.Valid {
 		t.Error("page-2 failure must set next_eligible_at")
+	}
+}
+
+func TestRunTick_LinkedIn429RetriesThenSucceeds(t *testing.T) {
+	pool := cadencePool(t)
+	ctx := t.Context()
+	if _, err := pool.Exec(`
+		UPDATE scraper_settings
+		SET last_scraped_at = NULL, next_eligible_at = NULL, global_searches = '[]'
+		WHERE job_source = 'LINKEDIN'
+	`); err != nil {
+		t.Fatalf("configure LinkedIn: %v", err)
+	}
+
+	calls := 0
+	client, hits, restore := interceptLinkedIn(t, func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if calls == 1 {
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = io.WriteString(w, "slow down")
+			return
+		}
+		linkedInFixtureHandler(t, 200)(w, r)
+	})
+	defer restore()
+
+	s := NewService(pool)
+	s.HTTPClient = client
+	result, err := s.RunTick(ctx, TickInput{Force: true})
+	if err != nil {
+		t.Fatalf("RunTick: %v", err)
+	}
+	if result.Status != "success" {
+		t.Errorf("status = %q (%s), want success after 429 retry", result.Status, result.Error)
+	}
+	if *hits < 2 {
+		t.Errorf("429 must retry the same GET, hits=%d", *hits)
+	}
+	var next sql.NullTime
+	if err := pool.QueryRow(`
+		SELECT next_eligible_at FROM scraper_settings WHERE job_source = 'LINKEDIN'
+	`).Scan(&next); err != nil {
+		t.Fatalf("read next_eligible_at: %v", err)
+	}
+	if next.Valid {
+		t.Errorf("successful 429 retry must not set next_eligible_at, got %s", next.Time)
 	}
 }
 
@@ -723,11 +770,14 @@ func cadencePool(t *testing.T) *sql.DB {
 	}
 	oldSleep := sleepBetween
 	oldPause := linkedInPagePause
+	oldRetryInitial := linkedInRetryInitial
 	sleepBetween = 0
 	linkedInPagePause = 0
+	linkedInRetryInitial = 0
 	t.Cleanup(func() {
 		sleepBetween = oldSleep
 		linkedInPagePause = oldPause
+		linkedInRetryInitial = oldRetryInitial
 	})
 	queries, err := json.Marshal([]map[string]string{
 		{"keywords": "IT Help Desk", "location": "101076143"},
@@ -760,6 +810,23 @@ func linkedInFixtureHandler(t *testing.T, status int) http.HandlerFunc {
 		w.WriteHeader(status)
 		_, _ = w.Write(raw)
 	}
+}
+
+func linkedInCardsHTML(n, idBase int) string {
+	var b strings.Builder
+	b.WriteString(`<ul class="jobs-search__results-list">`)
+	for i := 0; i < n; i++ {
+		id := strconv.Itoa(idBase + i)
+		b.WriteString(`<li><div class="base-card base-search-card job-search-card" data-entity-urn="urn:li:jobPosting:`)
+		b.WriteString(id)
+		b.WriteString(`"><div class="base-search-card__info"><h3 class="base-search-card__title">Job `)
+		b.WriteString(id)
+		b.WriteString(`</h3><h4 class="base-search-card__subtitle"><a class="hidden-nested-link">Co</a></h4>`)
+		b.WriteString(`<span class="job-search-card__location">Remote</span>`)
+		b.WriteString(`<time datetime="2026-09-18">1 day ago</time></div></div></li>`)
+	}
+	b.WriteString(`</ul>`)
+	return b.String()
 }
 
 func interceptLinkedIn(t *testing.T, h http.HandlerFunc) (*http.Client, *int, func()) {

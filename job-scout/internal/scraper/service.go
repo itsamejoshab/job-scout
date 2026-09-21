@@ -108,6 +108,7 @@ func (s *Service) newProvider(source db.JobSource, settings db.ScraperSettings) 
 		if s.HTTPClient != nil {
 			li.client = s.HTTPClient
 		}
+		li.sleep = s.Sleep
 		return li, nil
 	case db.SourceIndeed:
 		return NewIndeed(settings, s.apifyClient(), s.ApifyBudgetCents), nil
@@ -652,6 +653,7 @@ func (s *Service) FetchJobDescription(ctx context.Context, jobURL string) (strin
 		}
 		li.client = &client
 	}
+	li.sleep = s.Sleep
 	return li.FetchJobDescription(ctx, jobURL)
 }
 
