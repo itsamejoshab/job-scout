@@ -18,7 +18,7 @@ var seedFS embed.FS
 // none exists yet.
 func GetSearchSettings(ctx context.Context, db *sql.DB) (*SearchSettings, error) {
 	var (
-		s SearchSettings
+		s                                     SearchSettings
 		inc, exc, titleIn, titleEx, companyEx []byte
 		onsite, remote, hybrid                []byte
 	)
@@ -418,6 +418,7 @@ func normalizeSearchQueries(source JobSource, in []map[string]string) []map[stri
 			if _, ok := query["radius"]; ok {
 				item["radius"] = query["radius"]
 			}
+		case SourceFantastic:
 		default:
 			if _, ok := query["f_WT"]; ok {
 				item["f_WT"] = query["f_WT"]
@@ -481,6 +482,101 @@ func IndeedOptionsMap(in IndeedProviderOptions) map[string]any {
 		"enableUniqueJobs":   in.EnableUniqueJobs,
 		"includeSimilarJobs": in.IncludeSimilarJobs,
 	}
+}
+
+// ParseFantasticOptions maps provider_options onto the typed Fantastic struct.
+func ParseFantasticOptions(in map[string]any) (FantasticProviderOptions, error) {
+	raw, err := json.Marshal(normalizeProviderOptionsMap(in))
+	if err != nil {
+		return FantasticProviderOptions{}, err
+	}
+	var out FantasticProviderOptions
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return FantasticProviderOptions{}, err
+	}
+	queries := make([]FantasticQuery, 0, len(out.Queries))
+	for _, query := range out.Queries {
+		queries = append(queries, normalizeFantasticQuery(query))
+	}
+	out.Queries = queries
+	return out, nil
+}
+
+// DefaultFantasticQuery returns one Career Site Job Listing Feed query.
+func DefaultFantasticQuery() FantasticQuery {
+	return FantasticQuery{
+		TitleSearch:             []string{"Desktop Support", "Application Support"},
+		TitleExclusionSearch:    []string{"Manager", "Director"},
+		LocationSearch:          []string{"United States"},
+		LocationExclusionSearch: []string{"India:*", "India"},
+		AIWorkArrangementFilter: []string{"Remote Solely"},
+		AIEmploymentTypeFilter:  []string{"FULL_TIME"},
+		Limit:                   200,
+	}
+}
+
+// DefaultFantasticOptions returns the seed defaults for Fantastic actor queries.
+func DefaultFantasticOptions() FantasticProviderOptions {
+	return FantasticProviderOptions{Queries: []FantasticQuery{DefaultFantasticQuery()}}
+}
+
+// FantasticOptionsMap converts typed Fantastic options to a JSON object map.
+func FantasticOptionsMap(in FantasticProviderOptions) map[string]any {
+	queries := make([]FantasticQuery, 0, len(in.Queries))
+	for _, query := range in.Queries {
+		queries = append(queries, normalizeFantasticQuery(query))
+	}
+	raw, err := json.Marshal(FantasticProviderOptions{Queries: queries})
+	if err != nil {
+		return map[string]any{"queries": []any{}}
+	}
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil || out == nil {
+		return map[string]any{"queries": []any{}}
+	}
+	return out
+}
+
+// FantasticSearchQueries flattens actor queries onto search_queries for display and scrape context.
+func FantasticSearchQueries(in FantasticProviderOptions) []map[string]string {
+	out := make([]map[string]string, 0, len(in.Queries))
+	for _, query := range in.Queries {
+		normalized := normalizeFantasticQuery(query)
+		out = append(out, map[string]string{
+			"keywords": strings.Join(normalized.TitleSearch, ", "),
+			"location": strings.Join(normalized.LocationSearch, ", "),
+		})
+	}
+	return out
+}
+
+func normalizeFantasticQuery(in FantasticQuery) FantasticQuery {
+	return FantasticQuery{
+		TitleSearch:             normalizeWordList(in.TitleSearch),
+		TitleExclusionSearch:    normalizeWordList(in.TitleExclusionSearch),
+		LocationSearch:          normalizeWordListKeepCase(in.LocationSearch),
+		LocationExclusionSearch: normalizeWordListKeepCase(in.LocationExclusionSearch),
+		AIWorkArrangementFilter: normalizeWordListKeepCase(in.AIWorkArrangementFilter),
+		AIEmploymentTypeFilter:  normalizeWordList(in.AIEmploymentTypeFilter),
+		Limit:                   in.Limit,
+	}
+}
+
+func normalizeWordListKeepCase(in []string) []string {
+	out := make([]string, 0, len(in))
+	seen := make(map[string]struct{}, len(in))
+	for _, raw := range in {
+		word := strings.TrimSpace(raw)
+		if word == "" {
+			continue
+		}
+		if _, ok := seen[word]; ok {
+			continue
+		}
+		seen[word] = struct{}{}
+		out = append(out, word)
+	}
+	return out
 }
 
 func normalizeGlobalSearches(in []string) []string {

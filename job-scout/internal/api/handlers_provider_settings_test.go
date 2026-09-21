@@ -987,6 +987,194 @@ func decodeSettingsBudget(t *testing.T, raw []byte) map[string]any {
 	return requireApifyBudget(t, body)
 }
 
+func validFantasticPutBody() map[string]any {
+	return map[string]any{
+		"enabled":                 true,
+		"scrape_interval_seconds": 43200,
+		"timespan_code":           "all",
+		"pages_to_scrape":         1,
+		"rounds":                  1,
+		"search_queries":          []map[string]any{},
+		"global_searches":         []string{},
+		"provider_options": map[string]any{
+			"queries": []map[string]any{
+				{
+					"titleSearch":             []string{"Desktop Support", "Application Support"},
+					"titleExclusionSearch":    []string{"Manager", "Director"},
+					"locationSearch":          []string{"United States"},
+					"locationExclusionSearch": []string{"India:*", "India"},
+					"aiWorkArrangementFilter": []string{"Remote Solely"},
+					"aiEmploymentTypeFilter":  []string{"FULL_TIME"},
+					"limit":                   200,
+				},
+			},
+		},
+	}
+}
+
+func TestProviderSettings_FantasticGetPutResetQueries(t *testing.T) {
+	pool := pgtest.Open(t)
+	if err := db.Migrate(pool); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	if err := db.SeedSettings(t.Context(), pool); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	handler := NewServer("", &Handler{DB: pool}).Handler
+
+	getReq := httptest.NewRequest(http.MethodGet, "/api/v0/scraper-settings?job_source=FANTASTIC", nil)
+	getRec := httptest.NewRecorder()
+	handler.ServeHTTP(getRec, getReq)
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("GET Fantastic status=%d body=%s", getRec.Code, getRec.Body.String())
+	}
+	var seed db.ScraperSettings
+	if err := json.Unmarshal(getRec.Body.Bytes(), &seed); err != nil {
+		t.Fatalf("decode Fantastic GET: %v", err)
+	}
+	if seed.JobSource != "FANTASTIC" {
+		t.Errorf("GET job_source=%q, want FANTASTIC", seed.JobSource)
+	}
+	if !seed.Enabled || seed.ScrapeIntervalSeconds != 43200 || seed.TimespanCode != "all" {
+		t.Errorf("GET Fantastic seed cadence fields: %#v", seed)
+	}
+	opts, err := db.ParseFantasticOptions(seed.ProviderOptions)
+	if err != nil {
+		t.Fatalf("parse options: %v", err)
+	}
+	if !reflect.DeepEqual(opts, db.DefaultFantasticOptions()) {
+		t.Errorf("GET Fantastic provider_options=%#v", opts)
+	}
+
+	putBody := validFantasticPutBody()
+	putBody["scrape_interval_seconds"] = 120
+	putBody["provider_options"] = map[string]any{
+		"queries": []map[string]any{
+			{
+				"titleSearch":             []string{"Endpoint Support"},
+				"titleExclusionSearch":    []string{"Director"},
+				"locationSearch":          []string{"Canada"},
+				"locationExclusionSearch": []string{"India"},
+				"aiWorkArrangementFilter": []string{"Hybrid", "Remote OK"},
+				"aiEmploymentTypeFilter":  []string{"FULL_TIME", "CONTRACTOR"},
+				"limit":                   400,
+			},
+			{
+				"titleSearch":             []string{"Application Support"},
+				"titleExclusionSearch":    []string{},
+				"locationSearch":          []string{"United States"},
+				"locationExclusionSearch": []string{},
+				"aiWorkArrangementFilter": []string{"On-site"},
+				"aiEmploymentTypeFilter":  []string{"FULL_TIME"},
+				"limit":                   200,
+			},
+		},
+	}
+	raw, err := json.Marshal(putBody)
+	if err != nil {
+		t.Fatalf("marshal Fantastic PUT: %v", err)
+	}
+	putReq := httptest.NewRequest(http.MethodPut, "/api/v0/scraper-settings/FANTASTIC", bytes.NewReader(raw))
+	putReq.Header.Set("Content-Type", "application/json")
+	putRec := httptest.NewRecorder()
+	handler.ServeHTTP(putRec, putReq)
+	if putRec.Code != http.StatusOK {
+		t.Fatalf("PUT Fantastic status=%d body=%s", putRec.Code, putRec.Body.String())
+	}
+	var got db.ScraperSettings
+	if err := json.Unmarshal(putRec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode Fantastic PUT: %v", err)
+	}
+	if got.ScrapeIntervalSeconds != 120 {
+		t.Errorf("interval = %d, want 120", got.ScrapeIntervalSeconds)
+	}
+	storedOpts, err := db.ParseFantasticOptions(got.ProviderOptions)
+	if err != nil {
+		t.Fatalf("parse stored options: %v", err)
+	}
+	if len(storedOpts.Queries) != 2 {
+		t.Fatalf("stored queries = %d, want 2", len(storedOpts.Queries))
+	}
+	if storedOpts.Queries[0].TitleSearch[0] != "Endpoint Support" || storedOpts.Queries[0].Limit != 400 {
+		t.Errorf("stored query 0 = %#v", storedOpts.Queries[0])
+	}
+	if storedOpts.Queries[1].LocationSearch[0] != "United States" {
+		t.Errorf("stored query 1 = %#v", storedOpts.Queries[1])
+	}
+	if got.SearchQueries[0]["keywords"] != "Endpoint Support" || got.SearchQueries[0]["location"] != "Canada" {
+		t.Errorf("flattened search_queries = %#v", got.SearchQueries)
+	}
+
+	resetReq := httptest.NewRequest(http.MethodPost, "/api/v0/scraper-settings/FANTASTIC/reset", nil)
+	resetRec := httptest.NewRecorder()
+	handler.ServeHTTP(resetRec, resetReq)
+	if resetRec.Code != http.StatusOK {
+		t.Fatalf("reset Fantastic status=%d body=%s", resetRec.Code, resetRec.Body.String())
+	}
+	var reset db.ScraperSettings
+	if err := json.Unmarshal(resetRec.Body.Bytes(), &reset); err != nil {
+		t.Fatalf("decode Fantastic reset: %v", err)
+	}
+	resetOpts, err := db.ParseFantasticOptions(reset.ProviderOptions)
+	if err != nil {
+		t.Fatalf("parse reset options: %v", err)
+	}
+	if !reflect.DeepEqual(resetOpts, db.DefaultFantasticOptions()) {
+		t.Errorf("Fantastic reset options=%#v", resetOpts)
+	}
+}
+
+func TestProviderSettings_FantasticPutRejectsInvalidQueries(t *testing.T) {
+	pool := pgtest.Open(t)
+	if err := db.Migrate(pool); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	if err := db.SeedSettings(t.Context(), pool); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	handler := NewServer("", &Handler{DB: pool}).Handler
+	tests := []struct {
+		name string
+		edit func(map[string]any)
+		want string
+	}{
+		{"missing options", func(body map[string]any) { delete(body, "provider_options") }, "provider_options"},
+		{"empty queries", func(body map[string]any) {
+			body["provider_options"] = map[string]any{"queries": []any{}}
+		}, "queries"},
+		{"limit too low", func(body map[string]any) {
+			opts := body["provider_options"].(map[string]any)
+			queries := opts["queries"].([]map[string]any)
+			queries[0]["limit"] = 50
+		}, "limit"},
+		{"bad work arrangement", func(body map[string]any) {
+			opts := body["provider_options"].(map[string]any)
+			queries := opts["queries"].([]map[string]any)
+			queries[0]["aiWorkArrangementFilter"] = []string{"Remote"}
+		}, "aiWorkArrangementFilter"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			body := validFantasticPutBody()
+			tc.edit(body)
+			raw, err := json.Marshal(body)
+			if err != nil {
+				t.Fatalf("marshal: %v", err)
+			}
+			req := httptest.NewRequest(http.MethodPut, "/api/v0/scraper-settings/FANTASTIC", bytes.NewReader(raw))
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status=%d want 400 body=%s", rec.Code, rec.Body.String())
+			}
+			if !strings.Contains(rec.Body.String(), tc.want) {
+				t.Errorf("body=%s, want %q", rec.Body.String(), tc.want)
+			}
+		})
+	}
+}
+
 func keysOf(all map[string]db.ScraperSettings) []string {
 	keys := make([]string, 0, len(all))
 	for key := range all {

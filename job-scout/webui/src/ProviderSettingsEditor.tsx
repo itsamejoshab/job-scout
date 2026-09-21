@@ -7,6 +7,8 @@ import {
   getProviderSettings,
   replaceProviderSettings,
   resetProviderSettings,
+  type FantasticProviderOptions,
+  type FantasticQuery,
   type IndeedProviderOptions,
   type ProviderSettings,
   type ProviderSettingsInput,
@@ -36,6 +38,19 @@ const indeedJobTypes = [
 
 const indeedFromDays = ["1", "3", "7", "14"] as const;
 const indeedRadii = ["0", "5", "10", "15", "25", "35", "50", "100"] as const;
+const fantasticWorkArrangements = ["On-site", "Hybrid", "Remote OK", "Remote Solely"] as const;
+const fantasticEmploymentTypes = [
+  "FULL_TIME",
+  "PART_TIME",
+  "CONTRACTOR",
+  "TEMPORARY",
+  "INTERN",
+  "VOLUNTEER",
+  "PER_DIEM",
+  "OTHER",
+] as const;
+const fantasticMinLimit = 200;
+const fantasticMaxLimit = 10000;
 
 type LinkedInWorkType = (typeof linkedInWorkTypes)[number]["code"];
 
@@ -75,6 +90,7 @@ interface ProviderDraft extends ProviderSettingsInput {
   linkedInMatrix?: LinkedInMatrix;
   diceMatrix?: DiceMatrix;
   indeedMatrix?: IndeedMatrix;
+  fantasticQueries?: FantasticQuery[];
 }
 
 const defaultIndeedRadius = "15";
@@ -299,6 +315,71 @@ function fromIndeedMatrix(matrix: IndeedMatrix): ProviderSettingsInput["search_q
   );
 }
 
+function defaultFantasticQuery(): FantasticQuery {
+  return {
+    titleSearch: ["Desktop Support", "Application Support"],
+    titleExclusionSearch: ["Manager", "Director"],
+    locationSearch: ["United States"],
+    locationExclusionSearch: ["India:*", "India"],
+    aiWorkArrangementFilter: ["Remote Solely"],
+    aiEmploymentTypeFilter: ["FULL_TIME"],
+    limit: 200,
+  };
+}
+
+function stringList(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const out: string[] = [];
+  for (const item of value) {
+    if (typeof item !== "string") {
+      continue;
+    }
+    const word = item.trim();
+    if (word !== "" && !out.includes(word)) {
+      out.push(word);
+    }
+  }
+  return out;
+}
+
+function toFantasticQueries(raw: ProviderSettings["provider_options"]): FantasticQuery[] {
+  const fallback = [defaultFantasticQuery()];
+  if (!raw || typeof raw !== "object") {
+    return fallback;
+  }
+  const options = raw as Partial<FantasticProviderOptions>;
+  if (!Array.isArray(options.queries) || options.queries.length === 0) {
+    return fallback;
+  }
+  return options.queries.map((query) => {
+    const limit = typeof query?.limit === "number" && query.limit >= fantasticMinLimit
+      ? query.limit
+      : 200;
+    return {
+      titleSearch: stringList(query?.titleSearch),
+      titleExclusionSearch: stringList(query?.titleExclusionSearch),
+      locationSearch: stringList(query?.locationSearch),
+      locationExclusionSearch: stringList(query?.locationExclusionSearch),
+      aiWorkArrangementFilter: stringList(query?.aiWorkArrangementFilter),
+      aiEmploymentTypeFilter: stringList(query?.aiEmploymentTypeFilter),
+      limit: Math.min(limit, fantasticMaxLimit),
+    };
+  });
+}
+
+function fromFantasticQueries(queries: FantasticQuery[]): ProviderSettingsInput["search_queries"] {
+  return queries.map((query) => ({
+    keywords: query.titleSearch.join(", "),
+    location: query.locationSearch.join(", "),
+  }));
+}
+
+function fantasticOptions(queries: FantasticQuery[]): FantasticProviderOptions {
+  return { queries: queries.map((query) => ({ ...query })) };
+}
+
 function toInput(settings: ProviderSettings): ProviderDraft {
   const diceMatrix = settings.job_source === "DICE"
     ? toDiceMatrix(settings.search_queries)
@@ -309,32 +390,42 @@ function toInput(settings: ProviderSettings): ProviderDraft {
   const indeedOptions = settings.job_source === "INDEED"
     ? toIndeedOptions(settings.provider_options)
     : undefined;
+  const fantasticQueries = settings.job_source === "FANTASTIC"
+    ? toFantasticQueries(settings.provider_options)
+    : undefined;
   return {
     enabled: settings.enabled,
     scrape_interval_seconds: settings.scrape_interval_seconds,
     timespan_code: settings.job_source === "INDEED" && indeedOptions
       ? indeedOptions.fromDays
-      : settings.timespan_code,
+      : settings.job_source === "FANTASTIC"
+        ? "all"
+        : settings.timespan_code,
     pages_to_scrape: settings.pages_to_scrape,
     rounds: settings.rounds,
     search_queries: settings.job_source === "DICE" && diceMatrix
       ? fromDiceMatrix(diceMatrix)
       : settings.job_source === "INDEED" && indeedMatrix
         ? fromIndeedMatrix(indeedMatrix)
-        : settings.search_queries.map((query) => ({
+        : settings.job_source === "FANTASTIC" && fantasticQueries
+          ? fromFantasticQueries(fantasticQueries)
+          : settings.search_queries.map((query) => ({
             keywords: query.keywords,
             location: query.location,
             f_WT: query.f_WT ?? "",
           })),
-    global_searches: settings.job_source === "DICE" || settings.job_source === "INDEED"
+    global_searches: settings.job_source === "DICE" ||
+      settings.job_source === "INDEED" ||
+      settings.job_source === "FANTASTIC"
       ? []
       : [...settings.global_searches],
-    provider_options: indeedOptions,
+    provider_options: indeedOptions ?? (fantasticQueries ? fantasticOptions(fantasticQueries) : undefined),
     linkedInMatrix: settings.job_source === "LINKEDIN"
       ? toLinkedInMatrix(settings.search_queries)
       : undefined,
     diceMatrix,
     indeedMatrix,
+    fantasticQueries,
   };
 }
 
@@ -940,6 +1031,186 @@ function IndeedSearchEditor({
   );
 }
 
+function StringListEditor({
+  label,
+  items,
+  onChange,
+}: {
+  label: string;
+  items: string[];
+  onChange: (items: string[]) => void;
+}) {
+  return (
+    <div className="mt-2 space-y-1.5">
+      <p className="text-sm font-medium">{label}</p>
+      {items.length === 0 ? (
+        <p className="text-xs text-muted-foreground">No values yet.</p>
+      ) : (
+        items.map((item, index) => (
+          <div className="flex gap-2" key={index}>
+            <input
+              aria-label={`${label} ${index + 1}`}
+              className="field-sm min-w-0 flex-1"
+              value={item}
+              onChange={(event) => {
+                onChange(items.map((value, itemIndex) =>
+                  itemIndex === index ? event.target.value : value
+                ));
+              }}
+            />
+            <RemoveButton
+              label={`Remove ${label} ${index + 1}`}
+              onClick={() => onChange(items.filter((_, itemIndex) => itemIndex !== index))}
+            />
+          </div>
+        ))
+      )}
+      <Button
+        size="sm"
+        variant="ghost"
+        onClick={() => onChange([...items, ""])}
+      >
+        <Plus className="h-4 w-4" aria-hidden="true" />
+        Add {label}
+      </Button>
+    </div>
+  );
+}
+
+function toggleListValue(values: string[], value: string, checked: boolean) {
+  if (checked) {
+    return values.includes(value) ? values : [...values, value];
+  }
+  return values.filter((item) => item !== value);
+}
+
+function FantasticSearchEditor({
+  queries,
+  onChange,
+}: {
+  queries: FantasticQuery[];
+  onChange: (queries: FantasticQuery[]) => void;
+}) {
+  const patchQuery = (index: number, next: FantasticQuery) => {
+    onChange(queries.map((query, itemIndex) => itemIndex === index ? next : query));
+  };
+  return (
+    <SettingsGroup
+      title="Queries"
+      hint="Each query is one actor run. Add a second query when you need a different title or location set."
+      count={`${queries.length} queries`}
+    >
+      <div className="mt-2 space-y-4">
+        {queries.map((query, index) => (
+          <section className="rounded-md border border-border/60 p-3" key={index}>
+            <div className="flex flex-wrap items-center gap-2">
+              <h5 className="text-sm font-semibold">Query {index + 1}</h5>
+              {queries.length > 1 && (
+                <RemoveButton
+                  label={`Remove Fantastic query ${index + 1}`}
+                  onClick={() => onChange(queries.filter((_, itemIndex) => itemIndex !== index))}
+                />
+              )}
+            </div>
+            <StringListEditor
+              label={`Fantastic query ${index + 1} title search`}
+              items={query.titleSearch}
+              onChange={(titleSearch) => patchQuery(index, { ...query, titleSearch })}
+            />
+            <StringListEditor
+              label={`Fantastic query ${index + 1} title exclusion`}
+              items={query.titleExclusionSearch}
+              onChange={(titleExclusionSearch) => patchQuery(index, { ...query, titleExclusionSearch })}
+            />
+            <StringListEditor
+              label={`Fantastic query ${index + 1} location search`}
+              items={query.locationSearch}
+              onChange={(locationSearch) => patchQuery(index, { ...query, locationSearch })}
+            />
+            <StringListEditor
+              label={`Fantastic query ${index + 1} location exclusion`}
+              items={query.locationExclusionSearch}
+              onChange={(locationExclusionSearch) => patchQuery(index, { ...query, locationExclusionSearch })}
+            />
+            <fieldset className="mt-3">
+              <legend className="text-sm font-medium">Work arrangement</legend>
+              <p className="text-xs text-muted-foreground">
+                Remote OK includes an office. Remote Solely has no office.
+              </p>
+              <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1">
+                {fantasticWorkArrangements.map((value) => (
+                  <label className="flex items-center gap-1.5 text-sm" key={value}>
+                    <input
+                      type="checkbox"
+                      aria-label={`Fantastic query ${index + 1} work arrangement ${value}`}
+                      checked={query.aiWorkArrangementFilter.includes(value)}
+                      onChange={(event) => patchQuery(index, {
+                        ...query,
+                        aiWorkArrangementFilter: toggleListValue(
+                          query.aiWorkArrangementFilter,
+                          value,
+                          event.target.checked,
+                        ),
+                      })}
+                    />
+                    {value}
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+            <fieldset className="mt-3">
+              <legend className="text-sm font-medium">Employment type</legend>
+              <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1">
+                {fantasticEmploymentTypes.map((value) => (
+                  <label className="flex items-center gap-1.5 text-sm" key={value}>
+                    <input
+                      type="checkbox"
+                      aria-label={`Fantastic query ${index + 1} employment type ${value}`}
+                      checked={query.aiEmploymentTypeFilter.includes(value)}
+                      onChange={(event) => patchQuery(index, {
+                        ...query,
+                        aiEmploymentTypeFilter: toggleListValue(
+                          query.aiEmploymentTypeFilter,
+                          value,
+                          event.target.checked,
+                        ),
+                      })}
+                    />
+                    {value}
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+            <SettingRow label="Limit" hint="Jobs to return for this query. Minimum 200, maximum 10,000.">
+              <input
+                type="number"
+                min={fantasticMinLimit}
+                max={fantasticMaxLimit}
+                aria-label={`Fantastic query ${index + 1} limit`}
+                className="field-sm w-24 shrink-0 tabular-nums"
+                value={query.limit}
+                onChange={(event) => patchQuery(index, {
+                  ...query,
+                  limit: Number(event.target.value),
+                })}
+              />
+            </SettingRow>
+          </section>
+        ))}
+      </div>
+      <Button
+        size="sm"
+        variant="ghost"
+        className="mt-2"
+        onClick={() => onChange([...queries, defaultFantasticQuery()])}
+      >
+        <Plus className="h-4 w-4" aria-hidden="true" />
+        Add Fantastic query
+      </Button>
+    </SettingsGroup>
+  );
+}
+
 function GlobalSearchesEditor({
   source,
   searches,
@@ -1074,6 +1345,16 @@ function ProviderSection({
       global_searches: [],
     }));
   };
+  const patchFantastic = (queries: FantasticQuery[]) => {
+    setDraft((current) => ({
+      ...current,
+      fantasticQueries: queries,
+      search_queries: fromFantasticQueries(queries),
+      provider_options: fantasticOptions(queries),
+      timespan_code: "all",
+      global_searches: [],
+    }));
+  };
 
   return (
     <article className="surface mt-3 overflow-hidden">
@@ -1153,7 +1434,7 @@ function ProviderSection({
             onChange={(event) => patch({ scrape_interval_seconds: Number(event.target.value) })}
           />
         </SettingRow>
-        {source !== "INDEED" && (
+        {source !== "INDEED" && source !== "FANTASTIC" && (
           <SettingRow label="Timespan code" hint="Provider code for posting age, such as r86400 for one day.">
             {source === "DICE" ? (
               <select
@@ -1176,7 +1457,7 @@ function ProviderSection({
             )}
           </SettingRow>
         )}
-        {source !== "INDEED" && (
+        {source !== "INDEED" && source !== "FANTASTIC" && (
           <SettingRow label="Pages to scrape" hint="Max result pages per search. Next start follows cards already returned; stops when a later page is shorter.">
             <input
               type="number"
@@ -1212,6 +1493,8 @@ function ProviderSection({
           onMatrixChange={patchIndeedMatrix}
           onOptionsChange={patchIndeedOptions}
         />
+      ) : source === "FANTASTIC" && draft.fantasticQueries ? (
+        <FantasticSearchEditor queries={draft.fantasticQueries} onChange={patchFantastic} />
       ) : (
         <SettingsGroup title="Search queries" count={`${draft.search_queries.length} queries`}>
           <table className="mt-2 max-w-xl text-left text-sm">
@@ -1282,7 +1565,7 @@ function ProviderSection({
         </SettingsGroup>
       )}
 
-      {source !== "DICE" && source !== "INDEED" && (
+      {source !== "DICE" && source !== "INDEED" && source !== "FANTASTIC" && (
         <GlobalSearchesEditor
           source={source}
           searches={draft.global_searches}

@@ -159,6 +159,50 @@ func TestMigrateAndSeed_LinkedInEnabledIndeedDisabled(t *testing.T) {
 	if _, ok := dice.SearchQueries[0]["f_WT"]; ok {
 		t.Errorf("Dice seed must not persist f_WT: %#v", dice.SearchQueries[0])
 	}
+
+	if !containsSource(sources, "FANTASTIC") {
+		t.Errorf("AllJobSources = %v, want FANTASTIC", sources)
+	}
+	parsedFantastic, err := ParseJobSource("fantastic")
+	if err != nil {
+		t.Fatalf("ParseJobSource FANTASTIC: %v", err)
+	}
+	if parsedFantastic != "FANTASTIC" {
+		t.Errorf("ParseJobSource fantastic = %q, want FANTASTIC", parsedFantastic)
+	}
+	fantastic, err := GetScraperSettings(ctx, pool, SourceFantastic)
+	if err != nil {
+		t.Fatalf("GetScraperSettings Fantastic: %v", err)
+	}
+	if fantastic == nil {
+		t.Fatal("Fantastic scraper_settings missing after seed")
+	}
+	if !fantastic.Enabled {
+		t.Error("Fantastic enabled = false, want true in seed JSON")
+	}
+	if fantastic.ScrapeIntervalSeconds != 43200 {
+		t.Errorf("Fantastic scrape_interval_seconds = %d, want 43200", fantastic.ScrapeIntervalSeconds)
+	}
+	if fantastic.TimespanCode != "all" || fantastic.PagesToScrape != 1 || fantastic.Rounds != 1 {
+		t.Errorf("Fantastic seed timespan/pages/rounds = %#v", fantastic)
+	}
+	if !reflect.DeepEqual(fantastic.GlobalSearches, []string{}) {
+		t.Errorf("Fantastic global_searches = %#v, want empty list", fantastic.GlobalSearches)
+	}
+	opts, err := ParseFantasticOptions(fantastic.ProviderOptions)
+	if err != nil {
+		t.Fatalf("parse Fantastic options: %v", err)
+	}
+	if len(opts.Queries) != 1 {
+		t.Fatalf("Fantastic queries len = %d, want 1", len(opts.Queries))
+	}
+	query := opts.Queries[0]
+	if !reflect.DeepEqual(query.TitleSearch, []string{"Desktop Support", "Application Support"}) ||
+		!reflect.DeepEqual(query.LocationSearch, []string{"United States"}) ||
+		!reflect.DeepEqual(query.AIWorkArrangementFilter, []string{"Remote Solely"}) ||
+		query.Limit != 200 {
+		t.Errorf("Fantastic seed query = %#v", query)
+	}
 }
 
 func TestScraperSeedJSON_KeepsHelpDeskQueries(t *testing.T) {
@@ -548,12 +592,12 @@ func TestNormalizeSearchQueries_KeepsIncludeRemoteAndWorkType(t *testing.T) {
 		PagesToScrape:         1,
 		Rounds:                1,
 		SearchQueries: []map[string]string{{
-			"keywords":        "Desktop",
-			"location":        "Port Orange, FL",
-			"include_remote":  "true",
-			"include_hybrid":  "false",
-			"radius":          "15",
-			"f_WT":            "2",
+			"keywords":       "Desktop",
+			"location":       "Port Orange, FL",
+			"include_remote": "true",
+			"include_hybrid": "false",
+			"radius":         "15",
+			"f_WT":           "2",
 		}},
 		GlobalSearches:  []string{},
 		ProviderOptions: IndeedOptionsMap(DefaultIndeedOptions()),
@@ -642,4 +686,130 @@ func hasScraperColumn(t *testing.T, pool *sql.DB, name string) bool {
 		t.Fatalf("column %s lookup: %v", name, err)
 	}
 	return n > 0
+}
+
+func TestScraperSeedJSON_FantasticDefaults(t *testing.T) {
+	raw, err := seedFS.ReadFile("seed/scraper_settings.json")
+	if err != nil {
+		t.Fatalf("read seed: %v", err)
+	}
+	var seeds []ScraperSettings
+	if err := json.Unmarshal(raw, &seeds); err != nil {
+		t.Fatalf("parse seed: %v", err)
+	}
+	var fantastic *ScraperSettings
+	for i := range seeds {
+		if seeds[i].JobSource == SourceFantastic {
+			fantastic = &seeds[i]
+			break
+		}
+	}
+	if fantastic == nil {
+		t.Fatal("Fantastic seed missing")
+	}
+	if !fantastic.Enabled {
+		t.Error("Fantastic seed enabled = false, want true")
+	}
+	if fantastic.ScrapeIntervalSeconds != 43200 {
+		t.Errorf("Fantastic seed scrape_interval_seconds = %d, want 43200", fantastic.ScrapeIntervalSeconds)
+	}
+	if fantastic.TimespanCode != "all" || fantastic.PagesToScrape != 1 || fantastic.Rounds != 1 {
+		t.Errorf("Fantastic seed timespan/pages/rounds = %#v", fantastic)
+	}
+	opts, err := ParseFantasticOptions(fantastic.ProviderOptions)
+	if err != nil {
+		t.Fatalf("parse Fantastic seed options: %v", err)
+	}
+	want := DefaultFantasticOptions()
+	if !reflect.DeepEqual(opts, want) {
+		t.Errorf("Fantastic provider_options = %#v, want %#v", opts, want)
+	}
+}
+
+func TestMigrate_AddsFantasticEnumWithoutInsertingScraperRow(t *testing.T) {
+	entries, err := fs.ReadDir(migrationFS, "migrations")
+	if err != nil {
+		t.Fatalf("read migrations: %v", err)
+	}
+	found := 0
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		body, err := migrationFS.ReadFile("migrations/" + entry.Name())
+		if err != nil {
+			t.Fatalf("read %s: %v", entry.Name(), err)
+		}
+		text := string(body)
+		if !strings.Contains(text, "ADD VALUE 'FANTASTIC'") {
+			continue
+		}
+		found++
+		if strings.Contains(strings.ToUpper(text), "INSERT") {
+			t.Errorf("%s must not insert scraper rows", entry.Name())
+		}
+		executable := stripSQLComments(text)
+		collapsed := strings.Join(strings.Fields(executable), " ")
+		collapsed = strings.TrimSuffix(collapsed, ";")
+		if collapsed != "ALTER TYPE jobsource ADD VALUE 'FANTASTIC'" {
+			t.Errorf("%s must execute ALTER TYPE jobsource ADD VALUE 'FANTASTIC' only, got %q", entry.Name(), executable)
+		}
+	}
+	if found != 1 {
+		t.Fatalf("want exactly one Fantastic enum migration, found %d", found)
+	}
+
+	pool := pgtest.Open(t)
+	for _, migration := range []string{
+		"0001_init.sql", "0002_job_url_state.sql", "0003_scraper_cadence.sql",
+		"0004_singleton_settings_indexes.sql", "0005_job_search_context.sql",
+		"0006_global_searches.sql", "0007_drop_non_remote_phrases.sql",
+		"0008_ready_review.sql", "0009_needs_detail.sql",
+		"0010_notifications_enabled.sql",
+	} {
+		applyNamedMigration(t, pool, migration)
+	}
+	if _, err := pool.Exec(`
+		INSERT INTO scraper_settings (job_source, search_queries, global_searches, timespan_code, pages_to_scrape, rounds)
+		VALUES
+			('LINKEDIN', '[]', '[]', 'r86400', 1, 1),
+			('INDEED', '[]', '[]', 'r86400', 1, 1)
+	`); err != nil {
+		t.Fatalf("insert pre-fantastic scraper_settings: %v", err)
+	}
+	if err := Migrate(pool); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	var labels []string
+	rows, err := pool.Query(`
+		SELECT e.enumlabel
+		FROM pg_enum e
+		JOIN pg_type t ON e.enumtypid = t.oid
+		WHERE t.typname = 'jobsource'
+		ORDER BY e.enumlabel
+	`)
+	if err != nil {
+		t.Fatalf("list jobsource enum: %v", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var label string
+		if err := rows.Scan(&label); err != nil {
+			t.Fatalf("scan enum label: %v", err)
+		}
+		labels = append(labels, label)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("enum rows: %v", err)
+	}
+	if !containsString(labels, "FANTASTIC") {
+		t.Errorf("jobsource enum = %v, want FANTASTIC", labels)
+	}
+	var n int
+	if err := pool.QueryRow(`SELECT COUNT(*) FROM scraper_settings`).Scan(&n); err != nil {
+		t.Fatalf("count scraper_settings: %v", err)
+	}
+	if n != 2 {
+		t.Errorf("scraper_settings rows = %d, want 2 (migration must not insert FANTASTIC)", n)
+	}
 }

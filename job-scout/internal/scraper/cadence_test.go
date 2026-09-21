@@ -432,7 +432,7 @@ func TestRunTick_CombinesDueProviderResults(t *testing.T) {
 			t.Fatalf("configure LinkedIn: %v", err)
 		}
 		if _, err := pool.Exec(`
-			UPDATE scraper_settings SET enabled = false WHERE job_source IN ('INDEED', 'DICE')
+			UPDATE scraper_settings SET enabled = false WHERE job_source IN ('INDEED', 'DICE', 'FANTASTIC')
 		`); err != nil {
 			t.Fatalf("keep Apify providers off for LinkedIn-only combine test: %v", err)
 		}
@@ -793,7 +793,7 @@ func cadencePool(t *testing.T) *sql.DB {
 		t.Fatalf("shrink LinkedIn queries for tests: %v", err)
 	}
 	if _, err := pool.Exec(`
-		UPDATE scraper_settings SET enabled = false WHERE job_source IN ('DICE', 'INDEED')
+		UPDATE scraper_settings SET enabled = false WHERE job_source IN ('DICE', 'INDEED', 'FANTASTIC')
 	`); err != nil {
 		t.Fatalf("disable Apify providers so LinkedIn cadence tests stay isolated: %v", err)
 	}

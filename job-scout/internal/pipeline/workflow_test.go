@@ -33,6 +33,7 @@ func TestScrapeProviderTaskQueue(t *testing.T) {
 		{"LINKEDIN", config.LinkedInScrapeTaskQueue},
 		{"DICE", config.ApifyScrapeTaskQueue},
 		{"INDEED", config.ApifyScrapeTaskQueue},
+		{"FANTASTIC", config.ApifyScrapeTaskQueue},
 		{"", config.TaskQueue},
 	}
 	for _, tc := range cases {
@@ -50,6 +51,7 @@ func TestScrapeProviderActivityName(t *testing.T) {
 		{"LINKEDIN", ActivityScrapeProviderLinkedIn},
 		{"DICE", ActivityScrapeProviderDice},
 		{"INDEED", ActivityScrapeProviderIndeed},
+		{"FANTASTIC", ActivityScrapeProviderFantastic},
 	}
 	for _, tc := range cases {
 		if got := ScrapeProviderActivityName(tc.source); got != tc.want {
@@ -68,6 +70,7 @@ func TestRegisterMain_OmitsScrapeProviderActivity(t *testing.T) {
 		ActivityScrapeProviderLinkedIn,
 		ActivityScrapeProviderDice,
 		ActivityScrapeProviderIndeed,
+		ActivityScrapeProviderFantastic,
 	} {
 		if rec.hasActivity(name) {
 			t.Errorf("main worker must not own %s; registered %v", name, rec.activities)
@@ -84,8 +87,9 @@ func TestRegisterMain_OmitsScrapeProviderActivity(t *testing.T) {
 func TestRegisterApifyScrapeActivities(t *testing.T) {
 	rec := &registryRecorder{}
 	RegisterApifyScrapeActivities(rec, &Activities{})
-	if !rec.hasActivity(ActivityScrapeProviderDice) || !rec.hasActivity(ActivityScrapeProviderIndeed) {
-		t.Errorf("apify queue must register dice and indeed; registered %v", rec.activities)
+	if !rec.hasActivity(ActivityScrapeProviderDice) || !rec.hasActivity(ActivityScrapeProviderIndeed) ||
+		!rec.hasActivity(ActivityScrapeProviderFantastic) {
+		t.Errorf("apify queue must register dice, indeed, and fantastic; registered %v", rec.activities)
 	}
 	if rec.hasActivity(ActivityScrapeProviderLinkedIn) {
 		t.Errorf("apify queue must not register linkedin; registered %v", rec.activities)
@@ -135,6 +139,7 @@ func TestRegister_ScrapeAndNotifyAreProductionPath(t *testing.T) {
 		ActivityScrapeProviderLinkedIn,
 		ActivityScrapeProviderDice,
 		ActivityScrapeProviderIndeed,
+		ActivityScrapeProviderFantastic,
 	} {
 		if !rec.hasActivity(name) {
 			t.Errorf("worker must register %s; registered %v", name, rec.activities)
@@ -906,6 +911,7 @@ func registerProbeActivities(env *testsuite.TestWorkflowEnvironment, probe *acti
 	env.RegisterActivityWithOptions(probe.ScrapeProvider, activity.RegisterOptions{Name: ActivityScrapeProviderLinkedIn})
 	env.RegisterActivityWithOptions(probe.ScrapeProvider, activity.RegisterOptions{Name: ActivityScrapeProviderDice})
 	env.RegisterActivityWithOptions(probe.ScrapeProvider, activity.RegisterOptions{Name: ActivityScrapeProviderIndeed})
+	env.RegisterActivityWithOptions(probe.ScrapeProvider, activity.RegisterOptions{Name: ActivityScrapeProviderFantastic})
 	env.RegisterActivityWithOptions(probe.LoadNotifySnapshot, activity.RegisterOptions{Name: "load_jobs_for_filtering"})
 	env.RegisterActivityWithOptions(probe.LoadProcessJob, activity.RegisterOptions{Name: ActivityLoadProcessJob})
 	env.RegisterActivityWithOptions(probe.LoadFilterLists, activity.RegisterOptions{Name: ActivityLoadFilterLists})

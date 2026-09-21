@@ -23,6 +23,7 @@ const (
 	ApifyDefaultBaseURL     = "https://api.apify.com"
 	ApifyDiceActorID        = "shahidirfan~Dice-Job-Scraper"
 	ApifyIndeedActorID      = "borderline~indeed-scraper"
+	ApifyFantasticActorID   = "fantastic-jobs~career-site-job-listing-feed"
 	ApifyPollInterval       = 2 * time.Second
 	ApifyPollTimeout        = 12 * time.Minute
 	ApifyUsageWait          = 15 * time.Second

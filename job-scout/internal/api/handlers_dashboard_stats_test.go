@@ -176,6 +176,14 @@ func TestDashboardStats_AggregatesProvidersAndDailySeries(t *testing.T) {
 	if !dice.Implemented {
 		t.Error("DICE implemented = false, want true")
 	}
+
+	fantastic, ok := providers["FANTASTIC"]
+	if !ok {
+		t.Fatal("providers must include FANTASTIC from scraper_settings")
+	}
+	if !fantastic.Implemented {
+		t.Error("FANTASTIC implemented = false, want true")
+	}
 	if indeed.Enabled {
 		t.Error("INDEED enabled = true, want false")
 	}
@@ -436,6 +444,14 @@ func TestDashboardStats_ApifyBudgetTokenMissingNoHTTP(t *testing.T) {
 
 	budget := requireApifyBudget(t, providers["DICE"])
 	assertApifyBudget(t, budget, budgetExpect{
+		reason:  "token_missing",
+		blocked: true,
+		start:   "2026-09-21T00:00:00Z",
+		end:     "2026-10-21T00:00:00Z",
+		limit:   "1.00",
+	})
+	fantasticBudget := requireApifyBudget(t, providers["FANTASTIC"])
+	assertApifyBudget(t, fantasticBudget, budgetExpect{
 		reason:  "token_missing",
 		blocked: true,
 		start:   "2026-09-21T00:00:00Z",

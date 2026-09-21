@@ -14,7 +14,7 @@ func TestRunTick_EmptyApifyTokenSkipsDiceWithoutErrorBackoff(t *testing.T) {
 	pool := cadencePool(t)
 	ctx := t.Context()
 	if _, err := pool.Exec(`
-		UPDATE scraper_settings SET enabled = false WHERE job_source IN ('LINKEDIN', 'INDEED');
+		UPDATE scraper_settings SET enabled = false WHERE job_source IN ('LINKEDIN', 'INDEED', 'FANTASTIC');
 		UPDATE scraper_settings SET enabled = true, last_scraped_at = NULL, next_eligible_at = NULL,
 		       global_searches = '["stale global"]'::json
 		WHERE job_source = 'DICE'

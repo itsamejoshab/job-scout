@@ -50,13 +50,28 @@ func TestDeriveSearchIntention_IndeedFilter(t *testing.T) {
 	}
 }
 
-func TestDeriveSearchIntention_Dice(t *testing.T) {
-	remote := DeriveSearchIntention(db.SourceDice, map[string]string{"include_remote": "true"}, "")
-	if remote != db.SearchIntentionRemote {
-		t.Errorf("include_remote true = %q, want remote", remote)
+func TestDeriveSearchIntention_Fantastic(t *testing.T) {
+	cases := []struct {
+		name string
+		work string
+		want string
+	}{
+		{"empty", "", db.SearchIntentionOnsite},
+		{"onsite", "On-site", db.SearchIntentionOnsite},
+		{"remote solely", "Remote Solely", db.SearchIntentionRemote},
+		{"remote ok", "Remote OK", db.SearchIntentionRemote},
+		{"hybrid", "Hybrid", db.SearchIntentionHybrid},
+		{"remote and hybrid", "Remote Solely,Hybrid", db.SearchIntentionRemoteHybrid},
+		{"onsite wins", "On-site,Remote Solely", db.SearchIntentionOnsite},
 	}
-	onsite := DeriveSearchIntention(db.SourceDice, map[string]string{"include_remote": "false"}, "")
-	if onsite != db.SearchIntentionOnsite {
-		t.Errorf("include_remote false = %q, want onsite", onsite)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := DeriveSearchIntention(db.SourceFantastic, map[string]string{
+				"aiWorkArrangementFilter": tc.work,
+			}, "")
+			if got != tc.want {
+				t.Errorf("work=%q got %q want %q", tc.work, got, tc.want)
+			}
+		})
 	}
 }
