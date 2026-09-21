@@ -109,8 +109,11 @@ func TestMigrateAndSeed_LinkedInEnabledIndeedDisabled(t *testing.T) {
 	if indeed == nil {
 		t.Fatal("Indeed scraper_settings missing after seed")
 	}
-	if indeed.Enabled {
-		t.Error("Indeed enabled = true, want false")
+	if !indeed.Enabled {
+		t.Error("Indeed enabled = false, want true in seed JSON")
+	}
+	if indeed.ScrapeIntervalSeconds != 43200 {
+		t.Errorf("Indeed scrape_interval_seconds = %d, want 43200", indeed.ScrapeIntervalSeconds)
 	}
 
 	var sources []JobSource
@@ -138,8 +141,8 @@ func TestMigrateAndSeed_LinkedInEnabledIndeedDisabled(t *testing.T) {
 	if !dice.Enabled {
 		t.Error("Dice enabled = false, want true in seed JSON")
 	}
-	if dice.ScrapeIntervalSeconds != 10800 {
-		t.Errorf("Dice scrape_interval_seconds = %d, want 10800", dice.ScrapeIntervalSeconds)
+	if dice.ScrapeIntervalSeconds != 43200 {
+		t.Errorf("Dice scrape_interval_seconds = %d, want 43200", dice.ScrapeIntervalSeconds)
 	}
 	if dice.TimespanCode != "24h" || dice.PagesToScrape != 1 || dice.Rounds != 1 {
 		t.Errorf("Dice seed timespan/pages/rounds = %#v", dice)
@@ -217,6 +220,56 @@ func TestScraperSeedJSON_KeepsHelpDeskQueries(t *testing.T) {
 	}
 }
 
+func TestScraperSeedJSON_IndeedDefaults(t *testing.T) {
+	raw, err := seedFS.ReadFile("seed/scraper_settings.json")
+	if err != nil {
+		t.Fatalf("read seed: %v", err)
+	}
+	var seeds []ScraperSettings
+	if err := json.Unmarshal(raw, &seeds); err != nil {
+		t.Fatalf("parse seed: %v", err)
+	}
+
+	var indeed *ScraperSettings
+	for i := range seeds {
+		if seeds[i].JobSource == SourceIndeed {
+			indeed = &seeds[i]
+			break
+		}
+	}
+	if indeed == nil {
+		t.Fatal("Indeed seed missing")
+	}
+	if !indeed.Enabled {
+		t.Error("Indeed seed enabled = false, want true")
+	}
+	if indeed.ScrapeIntervalSeconds != 43200 {
+		t.Errorf("Indeed seed scrape_interval_seconds = %d, want 43200", indeed.ScrapeIntervalSeconds)
+	}
+	if indeed.TimespanCode != "1" || indeed.PagesToScrape != 1 || indeed.Rounds != 1 {
+		t.Errorf("Indeed seed timespan/pages/rounds = %#v", indeed)
+	}
+	if len(indeed.SearchQueries) != 1 {
+		t.Fatalf("Indeed seed search_queries len = %d, want 1", len(indeed.SearchQueries))
+	}
+	query := indeed.SearchQueries[0]
+	if query["keywords"] != "Desktop or Endpoint or Application Support" ||
+		query["location"] != "Port Orange, FL" ||
+		query["include_remote"] != "false" ||
+		query["include_hybrid"] != "false" ||
+		query["radius"] != "15" {
+		t.Errorf("Indeed seed query = %#v", query)
+	}
+	opts, err := ParseIndeedOptions(indeed.ProviderOptions)
+	if err != nil {
+		t.Fatalf("parse Indeed options: %v", err)
+	}
+	want := DefaultIndeedOptions()
+	if opts != want {
+		t.Errorf("Indeed provider_options = %#v, want %#v", opts, want)
+	}
+}
+
 func TestScraperSeedJSON_DiceDefaults(t *testing.T) {
 	raw, err := seedFS.ReadFile("seed/scraper_settings.json")
 	if err != nil {
@@ -240,8 +293,8 @@ func TestScraperSeedJSON_DiceDefaults(t *testing.T) {
 	if !dice.Enabled {
 		t.Error("Dice seed enabled = false, want true")
 	}
-	if dice.ScrapeIntervalSeconds != 10800 {
-		t.Errorf("Dice seed scrape_interval_seconds = %d, want 10800", dice.ScrapeIntervalSeconds)
+	if dice.ScrapeIntervalSeconds != 43200 {
+		t.Errorf("Dice seed scrape_interval_seconds = %d, want 43200", dice.ScrapeIntervalSeconds)
 	}
 	if dice.TimespanCode != "24h" || dice.PagesToScrape != 1 || dice.Rounds != 1 {
 		t.Errorf("Dice seed timespan/pages/rounds = %#v", dice)
@@ -403,7 +456,7 @@ func TestSeedSettings_InsertsMissingDiceWithoutChangingExistingRows(t *testing.T
 		if all[i].JobSource == "DICE" {
 			found = true
 			dice := all[i]
-			if !dice.Enabled || dice.ScrapeIntervalSeconds != 10800 || dice.TimespanCode != "24h" ||
+			if !dice.Enabled || dice.ScrapeIntervalSeconds != 43200 || dice.TimespanCode != "24h" ||
 				dice.PagesToScrape != 1 || dice.Rounds != 1 {
 				t.Errorf("seeded Dice cadence fields: %#v", dice)
 			}
@@ -451,9 +504,11 @@ func TestNormalizeSearchQueries_KeepsIncludeRemoteAndWorkType(t *testing.T) {
 		t.Fatalf("replace LinkedIn: %v %#v", err, stored)
 	}
 	got := stored.SearchQueries[0]
-	if got["keywords"] != "Support" || got["location"] != "101076143" ||
-		got["f_WT"] != "2" || got["include_remote"] != "true" {
-		t.Fatalf("normalize must keep keywords, location, f_WT, include_remote: %#v", got)
+	if got["keywords"] != "Support" || got["location"] != "101076143" || got["f_WT"] != "2" {
+		t.Fatalf("normalize must keep keywords, location, f_WT: %#v", got)
+	}
+	if _, ok := got["include_remote"]; ok {
+		t.Errorf("LinkedIn normalize must drop include_remote: %#v", got)
 	}
 	if _, ok := got["dropped"]; ok {
 		t.Errorf("normalize must drop unknown keys: %#v", got)
@@ -461,7 +516,7 @@ func TestNormalizeSearchQueries_KeepsIncludeRemoteAndWorkType(t *testing.T) {
 
 	dice, err := ReplaceScraperSettings(t.Context(), pool, "DICE", ScraperSettings{
 		Enabled:               true,
-		ScrapeIntervalSeconds: 10800,
+		ScrapeIntervalSeconds: 43200,
 		TimespanCode:          "24h",
 		PagesToScrape:         1,
 		Rounds:                1,
@@ -483,7 +538,35 @@ func TestNormalizeSearchQueries_KeepsIncludeRemoteAndWorkType(t *testing.T) {
 		t.Errorf("Dice include_remote=%q, want false", dice.SearchQueries[0]["include_remote"])
 	}
 	if _, ok := dice.SearchQueries[0]["f_WT"]; ok {
-		t.Errorf("Dice must not persist f_WT: %#v", dice.SearchQueries[0])
+		t.Errorf("Dice normalize must drop f_WT: %#v", dice.SearchQueries[0])
+	}
+
+	indeed, err := ReplaceScraperSettings(t.Context(), pool, SourceIndeed, ScraperSettings{
+		Enabled:               true,
+		ScrapeIntervalSeconds: 43200,
+		TimespanCode:          "1",
+		PagesToScrape:         1,
+		Rounds:                1,
+		SearchQueries: []map[string]string{{
+			"keywords":        "Desktop",
+			"location":        "Port Orange, FL",
+			"include_remote":  "true",
+			"include_hybrid":  "false",
+			"radius":          "15",
+			"f_WT":            "2",
+		}},
+		GlobalSearches:  []string{},
+		ProviderOptions: IndeedOptionsMap(DefaultIndeedOptions()),
+	})
+	if err != nil || indeed == nil {
+		t.Fatalf("replace Indeed: %v %#v", err, indeed)
+	}
+	if indeed.SearchQueries[0]["include_remote"] != "true" ||
+		indeed.SearchQueries[0]["include_hybrid"] != "false" {
+		t.Errorf("Indeed flags = %#v", indeed.SearchQueries[0])
+	}
+	if _, ok := indeed.SearchQueries[0]["f_WT"]; ok {
+		t.Errorf("Indeed normalize must drop f_WT: %#v", indeed.SearchQueries[0])
 	}
 }
 

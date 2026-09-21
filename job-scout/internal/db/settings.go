@@ -179,17 +179,17 @@ func loadSearchSettingsSeed() (SearchSettings, error) {
 // GetScraperSettings returns the scraper-specific row for a source, or nil.
 func GetScraperSettings(ctx context.Context, db *sql.DB, source JobSource) (*ScraperSettings, error) {
 	var (
-		s               ScraperSettings
-		queries, global []byte
-		last, next      sql.NullTime
+		s                        ScraperSettings
+		queries, global, options []byte
+		last, next               sql.NullTime
 	)
 	err := db.QueryRowContext(ctx, `
 		SELECT id, job_source, search_queries, global_searches, timespan_code,
 		       pages_to_scrape, rounds, enabled, scrape_interval_seconds,
-		       last_scraped_at, next_eligible_at, created_at, updated_at
+		       provider_options, last_scraped_at, next_eligible_at, created_at, updated_at
 		FROM scraper_settings WHERE job_source = $1 LIMIT 1
 	`, source).Scan(&s.ID, &s.JobSource, &queries, &global, &s.TimespanCode,
-		&s.PagesToScrape, &s.Rounds, &s.Enabled, &s.ScrapeIntervalSeconds,
+		&s.PagesToScrape, &s.Rounds, &s.Enabled, &s.ScrapeIntervalSeconds, &options,
 		&last, &next, &s.CreatedAt, &s.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -216,6 +216,7 @@ func GetScraperSettings(ctx context.Context, db *sql.DB, source JobSource) (*Scr
 	if s.GlobalSearches == nil {
 		s.GlobalSearches = []string{}
 	}
+	s.ProviderOptions = normalizeProviderOptions(options)
 	s.SearchQueries = normalizeSearchQueries(s.JobSource, s.SearchQueries)
 	return &s, nil
 }
@@ -251,10 +252,12 @@ func ReplaceScraperSettings(
 		    rounds = $5,
 		    enabled = $6,
 		    scrape_interval_seconds = $7,
+		    provider_options = $8::json,
 		    updated_at = now()
-		WHERE job_source = $8
+		WHERE job_source = $9
 	`, mustJSON(normalizeSearchQueries(source, in.SearchQueries)), mustJSON(normalizeGlobalSearches(in.GlobalSearches)), in.TimespanCode,
-		in.PagesToScrape, in.Rounds, in.Enabled, in.ScrapeIntervalSeconds, source); err != nil {
+		in.PagesToScrape, in.Rounds, in.Enabled, in.ScrapeIntervalSeconds,
+		mustJSON(normalizeProviderOptionsMap(in.ProviderOptions)), source); err != nil {
 		return nil, err
 	}
 	return GetScraperSettings(ctx, db, source)
@@ -332,10 +335,11 @@ func seedScraperSettings(ctx context.Context, db *sql.DB) error {
 		_, err = db.ExecContext(ctx, `
 			INSERT INTO scraper_settings (job_source, search_queries, global_searches,
 			                              timespan_code, pages_to_scrape, rounds,
-			                              enabled, scrape_interval_seconds)
-			VALUES ($1, $2::json, $3::json, $4, $5, $6, $7, $8)
+			                              enabled, scrape_interval_seconds, provider_options)
+			VALUES ($1, $2::json, $3::json, $4, $5, $6, $7, $8, $9::json)
 		`, s.JobSource, mustJSON(normalizeSearchQueries(s.JobSource, s.SearchQueries)), mustJSON(normalizeGlobalSearches(s.GlobalSearches)),
-			s.TimespanCode, s.PagesToScrape, s.Rounds, s.Enabled, intervalOrDefault(s))
+			s.TimespanCode, s.PagesToScrape, s.Rounds, s.Enabled, intervalOrDefault(s),
+			mustJSON(normalizeProviderOptionsMap(s.ProviderOptions)))
 		if err != nil {
 			return err
 		}
@@ -383,17 +387,84 @@ func normalizeSearchQueries(source JobSource, in []map[string]string) []map[stri
 			"keywords": query["keywords"],
 			"location": query["location"],
 		}
-		if source != SourceDice {
+		switch source {
+		case SourceDice:
+			if _, ok := query["include_remote"]; ok {
+				item["include_remote"] = query["include_remote"]
+			}
+		case SourceIndeed:
+			if _, ok := query["include_remote"]; ok {
+				item["include_remote"] = query["include_remote"]
+			}
+			if _, ok := query["include_hybrid"]; ok {
+				item["include_hybrid"] = query["include_hybrid"]
+			}
+			if _, ok := query["radius"]; ok {
+				item["radius"] = query["radius"]
+			}
+		default:
 			if _, ok := query["f_WT"]; ok {
 				item["f_WT"] = query["f_WT"]
 			}
 		}
-		if _, ok := query["include_remote"]; ok {
-			item["include_remote"] = query["include_remote"]
-		}
 		out = append(out, item)
 	}
 	return out
+}
+
+func normalizeProviderOptions(raw []byte) map[string]any {
+	if len(raw) == 0 || string(raw) == "null" {
+		return map[string]any{}
+	}
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil || out == nil {
+		return map[string]any{}
+	}
+	return out
+}
+
+func normalizeProviderOptionsMap(in map[string]any) map[string]any {
+	if in == nil {
+		return map[string]any{}
+	}
+	return in
+}
+
+// ParseIndeedOptions maps provider_options onto the typed Indeed struct.
+func ParseIndeedOptions(in map[string]any) (IndeedProviderOptions, error) {
+	raw, err := json.Marshal(normalizeProviderOptionsMap(in))
+	if err != nil {
+		return IndeedProviderOptions{}, err
+	}
+	var out IndeedProviderOptions
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return IndeedProviderOptions{}, err
+	}
+	return out, nil
+}
+
+// DefaultIndeedOptions returns the seed defaults for Indeed actor options.
+func DefaultIndeedOptions() IndeedProviderOptions {
+	return IndeedProviderOptions{
+		Country:            "us",
+		JobType:            "fulltime",
+		FromDays:           "1",
+		MaxRows:            100,
+		EnableUniqueJobs:   true,
+		IncludeSimilarJobs: false,
+	}
+}
+
+// IndeedOptionsMap converts typed Indeed options to a JSON object map.
+func IndeedOptionsMap(in IndeedProviderOptions) map[string]any {
+	return map[string]any{
+		"country":            in.Country,
+		"jobType":            in.JobType,
+		"fromDays":           in.FromDays,
+		"maxRows":            in.MaxRows,
+		"enableUniqueJobs":   in.EnableUniqueJobs,
+		"includeSimilarJobs": in.IncludeSimilarJobs,
+	}
 }
 
 func normalizeGlobalSearches(in []string) []string {

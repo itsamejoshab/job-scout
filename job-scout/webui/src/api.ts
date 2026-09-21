@@ -154,8 +154,21 @@ export interface ProviderSearchQuery {
   location: string;
   /** Work-type codes for LinkedIn settings UI (1 on-site, 2 remote, 3 hybrid). Not sent as a LinkedIn URL filter. */
   f_WT?: string;
-  /** Dice remote-inclusion flag. PUT sends a boolean; GET stores canonical "true"/"false" strings. */
+  /** Dice/Indeed remote-inclusion flag. PUT sends a boolean; GET stores canonical "true"/"false" strings. */
   include_remote?: boolean | string;
+  /** Indeed hybrid-inclusion flag. PUT sends a boolean; GET stores canonical "true"/"false" strings. */
+  include_hybrid?: boolean | string;
+  /** Indeed search radius in miles for this location. */
+  radius?: string;
+}
+
+export interface IndeedProviderOptions {
+  country: string;
+  jobType: string;
+  fromDays: string;
+  maxRows: number;
+  enableUniqueJobs: boolean;
+  includeSimilarJobs: boolean;
 }
 
 export interface ProviderSettings {
@@ -168,6 +181,7 @@ export interface ProviderSettings {
   rounds: number;
   enabled: boolean;
   scrape_interval_seconds: number;
+  provider_options?: IndeedProviderOptions | Record<string, unknown>;
   last_scraped_at: string | null;
   next_eligible_at: string | null;
   created_at: string;
@@ -184,6 +198,7 @@ export type ProviderSettingsInput = Pick<
   | "rounds"
   | "enabled"
   | "scrape_interval_seconds"
+  | "provider_options"
 >;
 
 async function requestJSON<T>(path: string, init?: RequestInit): Promise<T> {

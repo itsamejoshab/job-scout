@@ -43,12 +43,15 @@ const dashboardStats = {
     },
     {
       job_source: "INDEED",
-      implemented: false,
+      implemented: true,
+      configured: false,
+      configuration_message:
+        "Create an Apify account and set APIFY_API_TOKEN in job-scout/.env to enable this provider.",
       enabled: false,
-      scrape_interval_seconds: 900,
+      scrape_interval_seconds: 43200,
       last_scraped_at: null,
       next_eligible_at: null,
-      status: "disabled",
+      status: "setup_required",
       total_jobs: 0,
       by_state: {
         pending: 0,
@@ -65,6 +68,15 @@ const dashboardStats = {
         detail_failed: 0,
         unsupported_source: 0,
       },
+      apify_budget: {
+        period_start: "2026-09-21T00:00:00Z",
+        period_end: "2026-10-21T00:00:00Z",
+        limit_usd: 1,
+        used_usd: null,
+        remaining_usd: null,
+        blocked: true,
+        reason: "token_missing" as const,
+      },
     },
     {
       job_source: "DICE",
@@ -73,7 +85,7 @@ const dashboardStats = {
       configuration_message:
         "Create an Apify account and set APIFY_API_TOKEN in job-scout/.env to enable this provider.",
       enabled: false,
-      scrape_interval_seconds: 10800,
+      scrape_interval_seconds: 43200,
       last_scraped_at: null,
       next_eligible_at: null,
       status: "setup_required",
@@ -168,14 +180,28 @@ const providerSeed: Record<"LINKEDIN" | "INDEED" | "DICE", ProviderSettings> = {
     id: 2,
     job_source: "INDEED",
     search_queries: [
-      { keywords: "Support", location: "United States" },
+      {
+        keywords: "Desktop or Endpoint or Application Support",
+        location: "Port Orange, FL",
+        include_remote: "false",
+        include_hybrid: "false",
+        radius: "15",
+      } as ProviderSettings["search_queries"][number],
     ],
     global_searches: [],
-    timespan_code: "r86400",
+    timespan_code: "1",
     pages_to_scrape: 1,
     rounds: 1,
-    enabled: false,
-    scrape_interval_seconds: 900,
+    enabled: true,
+    scrape_interval_seconds: 43200,
+    provider_options: {
+      country: "us",
+      jobType: "fulltime",
+      fromDays: "1",
+      maxRows: 100,
+      enableUniqueJobs: true,
+      includeSimilarJobs: false,
+    },
     last_scraped_at: null,
     next_eligible_at: null,
     created_at: "2026-09-18T20:00:00Z",
@@ -196,7 +222,7 @@ const providerSeed: Record<"LINKEDIN" | "INDEED" | "DICE", ProviderSettings> = {
     pages_to_scrape: 1,
     rounds: 1,
     enabled: true,
-    scrape_interval_seconds: 10800,
+    scrape_interval_seconds: 43200,
     last_scraped_at: null,
     next_eligible_at: null,
     created_at: "2026-09-18T20:00:00Z",
@@ -399,8 +425,19 @@ function renderPath(path: string, options: RenderOptions = {}) {
                     : "false",
               }
             : {}),
+          ...(query.include_hybrid !== undefined
+            ? {
+                include_hybrid:
+                  query.include_hybrid === true || query.include_hybrid === "true"
+                    ? "true"
+                    : "false",
+              }
+            : {}),
         })),
         global_searches: (payload.global_searches as string[]).map((item) => item.trim()),
+        ...(payload.provider_options !== undefined
+          ? { provider_options: payload.provider_options }
+          : {}),
         updated_at: "2026-09-18T20:05:00Z",
       };
       return new Response(JSON.stringify(currentProviders[source]), {
@@ -495,8 +532,7 @@ describe("operator shell", () => {
     expect(screen.getByText("INDEED")).toBeInTheDocument();
     expect(screen.getByText("DICE")).toBeInTheDocument();
     expect(screen.getByText("Status: on cooldown")).toBeInTheDocument();
-    expect(screen.getByText("Status: disabled")).toBeInTheDocument();
-    expect(screen.getByText("Status: setup required")).toBeInTheDocument();
+    expect(screen.getAllByText("Status: setup required")).toHaveLength(2);
     const linkedInCard = screen.getByText("LINKEDIN").closest("article");
     expect(linkedInCard).not.toBeNull();
     expect(linkedInCard).toHaveTextContent("Pending");
@@ -885,20 +921,117 @@ describe("operator shell", () => {
     });
   });
 
-  it("renders provider editors and locks a provider without a scraper", async () => {
+  it("renders provider editors and locks Apify providers without a token", async () => {
     renderPath("/settings");
 
     expect(await screen.findByRole("heading", { name: "LINKEDIN provider" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "INDEED provider" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "DICE provider" })).toBeInTheDocument();
-    expect(screen.getAllByText("Not implemented")).toHaveLength(1);
+    expect(screen.queryByText("Not implemented")).not.toBeInTheDocument();
+    expect(screen.getAllByText(/setup required/i)).toHaveLength(2);
     expect(screen.getByRole("checkbox", { name: "Enable INDEED" })).toBeDisabled();
-    expect(screen.getByText(/setup required/i)).toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: "Enable DICE" })).toBeDisabled();
-    expect(screen.getByText(/set APIFY_API_TOKEN/)).toBeInTheDocument();
+    expect(screen.getAllByText(/set APIFY_API_TOKEN/).length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText(/^Last scraped: (?!never)/)).toBeInTheDocument();
     expect(screen.getAllByText("Next eligible: never")).toHaveLength(3);
     expect(screen.getByRole("button", { name: "Save LINKEDIN settings" })).toBeDisabled();
+  });
+
+  it("edits Indeed queries, locations, run options, and hides globals", async () => {
+    const user = userEvent.setup();
+    renderPath("/settings");
+
+    const save = await screen.findByRole("button", { name: "Save INDEED settings" });
+    expect(save).toBeDisabled();
+    expect(screen.getByRole("checkbox", { name: "Enable INDEED" })).toBeDisabled();
+    expect(screen.getByLabelText("Indeed query 1")).toHaveValue(
+      "Desktop or Endpoint or Application Support",
+    );
+    expect(screen.getByLabelText("Indeed location 1")).toHaveValue("Port Orange, FL");
+    expect(screen.getByLabelText("Indeed location 1 radius")).toHaveValue("15");
+    expect(screen.getByLabelText("Indeed location 1 remote")).not.toBeChecked();
+    expect(screen.getByLabelText("Indeed location 1 hybrid")).not.toBeChecked();
+    expect(screen.getByLabelText("Indeed country")).toHaveValue("us");
+    expect(screen.getByLabelText("Indeed job type")).toHaveValue("fulltime");
+    expect(screen.getByLabelText("Indeed from days")).toHaveValue("1");
+    expect(screen.getByLabelText("Indeed max rows")).toHaveValue(100);
+    expect(screen.getByLabelText("Indeed enable unique jobs")).toBeChecked();
+    expect(screen.getByLabelText("Indeed include similar jobs")).not.toBeChecked();
+    expect(screen.queryByLabelText("INDEED global search 1")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Add INDEED global search" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Add Indeed query" }));
+    await user.type(screen.getByLabelText("Indeed query 2"), "Endpoint");
+    await user.click(screen.getByRole("button", { name: "Add Indeed location" }));
+    await user.type(screen.getByLabelText("Indeed location 2"), "Daytona Beach, FL");
+    await user.click(screen.getByLabelText("Indeed location 2 remote"));
+    await user.click(screen.getByLabelText("Indeed location 1 hybrid"));
+    await user.selectOptions(screen.getByLabelText("Indeed job type"), "contract");
+    await user.selectOptions(screen.getByLabelText("Indeed from days"), "3");
+    await user.selectOptions(screen.getByLabelText("Indeed location 1 radius"), "25");
+    expect(save).toBeEnabled();
+
+    await user.click(save);
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/v0/scraper-settings/INDEED",
+        expect.objectContaining({ method: "PUT" }),
+      );
+      expect(save).toBeDisabled();
+    });
+    const putCall = (fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls.find(
+      ([input, init]) =>
+        String(input) === "/api/v0/scraper-settings/INDEED" &&
+        (init as RequestInit | undefined)?.method === "PUT",
+    );
+    const payload = JSON.parse(String((putCall?.[1] as RequestInit | undefined)?.body));
+    expect(payload.enabled).toBe(true);
+    expect(payload.timespan_code).toBe("3");
+    expect(payload.global_searches).toEqual([]);
+    expect(payload.provider_options).toEqual({
+      country: "us",
+      jobType: "contract",
+      fromDays: "3",
+      maxRows: 100,
+      enableUniqueJobs: true,
+      includeSimilarJobs: false,
+    });
+    expect(payload.search_queries).toEqual([
+      {
+        keywords: "Desktop or Endpoint or Application Support",
+        location: "Port Orange, FL",
+        radius: "25",
+        include_remote: false,
+        include_hybrid: true,
+      },
+      {
+        keywords: "Desktop or Endpoint or Application Support",
+        location: "Daytona Beach, FL",
+        radius: "15",
+        include_remote: true,
+        include_hybrid: false,
+      },
+      {
+        keywords: "Endpoint",
+        location: "Port Orange, FL",
+        radius: "25",
+        include_remote: false,
+        include_hybrid: true,
+      },
+      {
+        keywords: "Endpoint",
+        location: "Daytona Beach, FL",
+        radius: "15",
+        include_remote: true,
+        include_hybrid: false,
+      },
+    ]);
+    for (const query of payload.search_queries as Array<Record<string, unknown>>) {
+      expect(query).not.toHaveProperty("f_WT");
+      expect(typeof query.include_remote).toBe("boolean");
+      expect(typeof query.include_hybrid).toBe("boolean");
+      expect(typeof query.radius).toBe("string");
+    }
   });
 
   it("edits LinkedIn queries, location work types, and global searches", async () => {

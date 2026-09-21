@@ -104,9 +104,9 @@ Open [http://localhost:5173](http://localhost:5173) after `make up`. That is the
 
 Job Scout starts without Apify or Pipedream credentials. A provider or notification service that needs an external account stays disabled until you add its values to `job-scout/.env` and restart the stack.
 
-### Dice jobs through Apify
+### Dice and Indeed jobs through Apify
 
-The Dice provider uses the paid [Apify](https://apify.com/) actor service. LinkedIn does not need Apify.
+The Dice and Indeed providers use the paid [Apify](https://apify.com/) actor service. LinkedIn does not need Apify. Indeed defaults to about two runs per day (`scrape_interval_seconds` = 43200). The global Temporal tick still checks every 10 minutes.
 
 1. Create an Apify account.
 2. Copy your API token from the Apify Console.
@@ -119,9 +119,9 @@ APIFY_MONTHLY_BUDGET_USD=1.00
 
 4. Restart the API and worker with `make restart`.
 
-If `APIFY_API_TOKEN` is empty, Job Scout does not start Dice actor runs. The dashboard and provider settings show that Apify setup is required. The token is sent only in the Apify authorization header.
+If `APIFY_API_TOKEN` is empty, Job Scout does not start Dice or Indeed actor runs. The dashboard and provider settings show that Apify setup is required. The token is sent only in the Apify authorization header.
 
-`APIFY_MONTHLY_BUDGET_USD` is a Job Scout spend limit. The default is `$1.00`. Job Scout counts all actor runs in the Apify account from the 21st of one month to the next 21st. It blocks new Dice runs when the budget is used. It also blocks a new run while another account run has an unknown final cost.
+`APIFY_MONTHLY_BUDGET_USD` is a Job Scout spend limit. The default is `$1.00`. Job Scout counts all actor runs in the Apify account from the 21st of one month to the next 21st. It blocks new Dice and Indeed runs when the budget is used. It also blocks a new run while another account run has an unknown final cost.
 
 ### Notifications through Pipedream
 

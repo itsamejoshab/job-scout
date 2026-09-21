@@ -105,17 +105,15 @@ func (h *Handler) Run(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		if source != db.SourceIndeed {
-			if isApifyProvider(source) && strings.TrimSpace(h.Cfg.ApifyAPIToken) == "" {
-				writeJSON(w, http.StatusOK, map[string]any{
-					"status":     "provider_disabled",
-					"reason":     scraper.ApifySetupMessage,
-					"configured": false,
-				})
-				return
-			}
-			in.JobSource = string(source)
+		if isApifyProvider(source) && strings.TrimSpace(h.Cfg.ApifyAPIToken) == "" {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"status":     "provider_disabled",
+				"reason":     scraper.ApifySetupMessage,
+				"configured": false,
+			})
+			return
 		}
+		in.JobSource = string(source)
 	}
 
 	opts := client.StartWorkflowOptions{
@@ -444,8 +442,11 @@ type providerSearchQuery struct {
 	Keywords      string
 	Location      string
 	Remote        string
+	Radius        string
 	IncludeRemote *bool
+	IncludeHybrid *bool
 	hasWorkType   bool
+	hasRadius     bool
 }
 
 func (q *providerSearchQuery) UnmarshalJSON(data []byte) error {
@@ -465,12 +466,25 @@ func (q *providerSearchQuery) UnmarshalJSON(data []byte) error {
 			return err
 		}
 	}
+	if _, ok := raw["radius"]; ok {
+		q.hasRadius = true
+		if err := unmarshalJSONString(raw["radius"], &q.Radius); err != nil {
+			return err
+		}
+	}
 	if rawRemote, ok := raw["include_remote"]; ok && string(rawRemote) != "null" {
 		var flag bool
 		if err := json.Unmarshal(rawRemote, &flag); err != nil {
 			return fmt.Errorf("include_remote must be a JSON boolean")
 		}
 		q.IncludeRemote = &flag
+	}
+	if rawHybrid, ok := raw["include_hybrid"]; ok && string(rawHybrid) != "null" {
+		var flag bool
+		if err := json.Unmarshal(rawHybrid, &flag); err != nil {
+			return fmt.Errorf("include_hybrid must be a JSON boolean")
+		}
+		q.IncludeHybrid = &flag
 	}
 	return nil
 }
@@ -491,6 +505,7 @@ type replaceScraperSettingsRequest struct {
 	Rounds                *int                   `json:"rounds"`
 	SearchQueries         *[]providerSearchQuery `json:"search_queries"`
 	GlobalSearches        *[]string              `json:"global_searches"`
+	ProviderOptions       *map[string]any        `json:"provider_options"`
 }
 
 func (in replaceScraperSettingsRequest) validate(source db.JobSource) error {
@@ -518,8 +533,11 @@ func (in replaceScraperSettingsRequest) validate(source db.JobSource) error {
 	case in.GlobalSearches == nil:
 		return errors.New("missing required field: global_searches")
 	}
-	if source == db.SourceDice {
+	switch source {
+	case db.SourceDice:
 		return in.validateDice()
+	case db.SourceIndeed:
+		return in.validateIndeed()
 	}
 	for i, query := range *in.SearchQueries {
 		if strings.TrimSpace(query.Keywords) == "" {
@@ -583,6 +601,87 @@ func (in replaceScraperSettingsRequest) validateDice() error {
 	return nil
 }
 
+func (in replaceScraperSettingsRequest) validateIndeed() error {
+	if in.ProviderOptions == nil {
+		return errors.New("missing required field: provider_options")
+	}
+	opts, err := db.ParseIndeedOptions(*in.ProviderOptions)
+	if err != nil {
+		return errors.New("provider_options must be a valid Indeed options object")
+	}
+	allowedCountry := map[string]struct{}{
+		"ar": {}, "au": {}, "at": {}, "bh": {}, "be": {}, "br": {}, "ca": {}, "cl": {}, "cn": {}, "co": {},
+		"cz": {}, "dk": {}, "fi": {}, "fr": {}, "de": {}, "gr": {}, "hk": {}, "hu": {}, "in": {}, "id": {},
+		"ie": {}, "il": {}, "it": {}, "jp": {}, "kw": {}, "lu": {}, "my": {}, "mx": {}, "ma": {}, "nl": {},
+		"nz": {}, "no": {}, "om": {}, "pe": {}, "ph": {}, "pl": {}, "pt": {}, "qa": {}, "ro": {}, "sa": {},
+		"sg": {}, "za": {}, "kr": {}, "es": {}, "se": {}, "ch": {}, "tw": {}, "tr": {}, "ua": {}, "ae": {},
+		"uk": {}, "us": {}, "ve": {}, "vn": {}, "cr": {}, "ec": {}, "eg": {}, "ng": {}, "pk": {}, "pa": {},
+		"th": {}, "uy": {},
+	}
+	if _, ok := allowedCountry[strings.ToLower(strings.TrimSpace(opts.Country))]; !ok {
+		return errors.New("provider_options.country must be a supported Indeed country code")
+	}
+	allowedJobType := map[string]struct{}{
+		"fulltime": {}, "parttime": {}, "contract": {}, "internship": {},
+		"temporary": {}, "permanent": {}, "seasonal": {}, "freelance": {},
+	}
+	if _, ok := allowedJobType[strings.TrimSpace(opts.JobType)]; !ok {
+		return errors.New("provider_options.jobType must be one of fulltime, parttime, contract, internship, temporary, permanent, seasonal, freelance")
+	}
+	allowedFromDays := map[string]struct{}{"1": {}, "3": {}, "7": {}, "14": {}}
+	if _, ok := allowedFromDays[strings.TrimSpace(opts.FromDays)]; !ok {
+		return errors.New("provider_options.fromDays must be one of 1, 3, 7, 14")
+	}
+	if opts.MaxRows < 1 || opts.MaxRows > 1000 {
+		return errors.New("provider_options.maxRows must be between 1 and 1000")
+	}
+	if strings.TrimSpace(*in.TimespanCode) != strings.TrimSpace(opts.FromDays) {
+		return errors.New("timespan_code must match provider_options.fromDays")
+	}
+	for _, keywords := range *in.GlobalSearches {
+		if strings.TrimSpace(keywords) != "" {
+			return errors.New("Indeed global_searches must be empty")
+		}
+	}
+	queries := map[string]struct{}{}
+	locations := map[string]struct{}{}
+	for i, query := range *in.SearchQueries {
+		if query.hasWorkType {
+			return errors.New("Indeed search_queries must not include f_WT")
+		}
+		if query.IncludeRemote == nil {
+			return fmt.Errorf("search_queries[%d].include_remote must be a JSON boolean", i)
+		}
+		if query.IncludeHybrid == nil {
+			return fmt.Errorf("search_queries[%d].include_hybrid must be a JSON boolean", i)
+		}
+		if !query.hasRadius || strings.TrimSpace(query.Radius) == "" {
+			return fmt.Errorf("search_queries[%d].radius must be one of 0, 5, 10, 15, 25, 35, 50, 100", i)
+		}
+		if !db.ValidIndeedRadius(query.Radius) {
+			return fmt.Errorf("search_queries[%d].radius must be one of 0, 5, 10, 15, 25, 35, 50, 100", i)
+		}
+		if strings.TrimSpace(query.Keywords) == "" {
+			return fmt.Errorf("search_queries[%d].keywords must not be empty", i)
+		}
+		if strings.TrimSpace(query.Location) == "" {
+			return fmt.Errorf("search_queries[%d].location must not be empty", i)
+		}
+		queries[strings.TrimSpace(query.Keywords)] = struct{}{}
+		locations[strings.TrimSpace(query.Location)] = struct{}{}
+	}
+	if len(queries) > 10 {
+		return errors.New("Indeed search queries must not exceed 10")
+	}
+	if len(locations) > 10 {
+		return errors.New("Indeed locations must not exceed 10")
+	}
+	if len(*in.SearchQueries) > 20 {
+		return errors.New("Indeed expanded search pairs must not exceed 20")
+	}
+	return nil
+}
+
 func (in replaceScraperSettingsRequest) settings(source db.JobSource) db.ScraperSettings {
 	queries := make([]map[string]string, 0, len(*in.SearchQueries))
 	for _, query := range *in.SearchQueries {
@@ -590,9 +689,14 @@ func (in replaceScraperSettingsRequest) settings(source db.JobSource) db.Scraper
 			"keywords": strings.TrimSpace(query.Keywords),
 			"location": strings.TrimSpace(query.Location),
 		}
-		if source == db.SourceDice {
+		switch source {
+		case db.SourceDice:
 			item["include_remote"] = strconv.FormatBool(query.IncludeRemote != nil && *query.IncludeRemote)
-		} else {
+		case db.SourceIndeed:
+			item["include_remote"] = strconv.FormatBool(query.IncludeRemote != nil && *query.IncludeRemote)
+			item["include_hybrid"] = strconv.FormatBool(query.IncludeHybrid != nil && *query.IncludeHybrid)
+			item["radius"] = strings.TrimSpace(query.Radius)
+		default:
 			item["f_WT"] = strings.TrimSpace(query.Remote)
 		}
 		queries = append(queries, item)
@@ -601,8 +705,20 @@ func (in replaceScraperSettingsRequest) settings(source db.JobSource) db.Scraper
 	for _, keywords := range *in.GlobalSearches {
 		global = append(global, strings.TrimSpace(keywords))
 	}
-	if source == db.SourceDice {
+	options := map[string]any{}
+	switch source {
+	case db.SourceDice:
 		global = []string{}
+	case db.SourceIndeed:
+		global = []string{}
+		if in.ProviderOptions != nil {
+			if parsed, err := db.ParseIndeedOptions(*in.ProviderOptions); err == nil {
+				parsed.Country = strings.ToLower(strings.TrimSpace(parsed.Country))
+				parsed.JobType = strings.TrimSpace(parsed.JobType)
+				parsed.FromDays = strings.TrimSpace(parsed.FromDays)
+				options = db.IndeedOptionsMap(parsed)
+			}
+		}
 	}
 	return db.ScraperSettings{
 		Enabled:               *in.Enabled,
@@ -612,6 +728,7 @@ func (in replaceScraperSettingsRequest) settings(source db.JobSource) db.Scraper
 		Rounds:                *in.Rounds,
 		SearchQueries:         queries,
 		GlobalSearches:        global,
+		ProviderOptions:       options,
 	}
 }
 
@@ -1053,17 +1170,15 @@ func (h *Handler) DashboardStats(w http.ResponseWriter, r *http.Request) {
 
 func isProviderImplemented(source db.JobSource) bool {
 	switch source {
-	case db.SourceLinkedIn, db.SourceDice:
+	case db.SourceLinkedIn, db.SourceDice, db.SourceIndeed:
 		return true
-	case db.SourceIndeed:
-		return false
 	default:
 		return false
 	}
 }
 
 func isApifyProvider(source db.JobSource) bool {
-	return source == db.SourceDice
+	return source == db.SourceDice || source == db.SourceIndeed
 }
 
 func (h *Handler) cachedApifyBudget(ctx context.Context) scraper.ApifyBudgetView {

@@ -29,15 +29,28 @@
   {
     "job_source": "INDEED",
     "search_queries": [
-      {"keywords": "IT Help Desk", "location": "United States"},
-      {"keywords": "Application Support", "location": "United States"}
+      {
+        "keywords": "Desktop or Endpoint or Application Support",
+        "location": "Port Orange, FL",
+        "include_remote": "false",
+        "include_hybrid": "false",
+        "radius": "15"
+      }
     ],
     "global_searches": [],
-    "timespan_code": "r86400",
+    "timespan_code": "1",
     "pages_to_scrape": 1,
     "rounds": 1,
-    "enabled": false,
-    "scrape_interval_seconds": 900
+    "enabled": true,
+    "scrape_interval_seconds": 43200,
+    "provider_options": {
+      "country": "us",
+      "jobType": "fulltime",
+      "fromDays": "1",
+      "maxRows": 100,
+      "enableUniqueJobs": true,
+      "includeSimilarJobs": false
+    }
   },
   {
     "job_source": "DICE",
@@ -53,6 +66,6 @@
     "pages_to_scrape": 1,
     "rounds": 1,
     "enabled": true,
-    "scrape_interval_seconds": 10800
+    "scrape_interval_seconds": 43200
   }
 ]

@@ -165,8 +165,8 @@ func TestDashboardStats_AggregatesProvidersAndDailySeries(t *testing.T) {
 	if !ok {
 		t.Fatal("providers must include INDEED from scraper_settings")
 	}
-	if indeed.Implemented {
-		t.Error("INDEED implemented = true, want false")
+	if !indeed.Implemented {
+		t.Error("INDEED implemented = false, want true")
 	}
 
 	dice, ok := providers["DICE"]
@@ -179,8 +179,8 @@ func TestDashboardStats_AggregatesProvidersAndDailySeries(t *testing.T) {
 	if indeed.Enabled {
 		t.Error("INDEED enabled = true, want false")
 	}
-	if indeed.Status != "disabled" {
-		t.Errorf("INDEED status = %q, want disabled", indeed.Status)
+	if indeed.Status != "setup_required" {
+		t.Errorf("INDEED status = %q, want setup_required without Apify token", indeed.Status)
 	}
 	if indeed.TotalJobs != 0 {
 		t.Errorf("INDEED total_jobs = %d, want 0", indeed.TotalJobs)
@@ -425,9 +425,14 @@ func TestDashboardStats_ApifyBudgetTokenMissingNoHTTP(t *testing.T) {
 	if _, hasBudget := linked["apify_budget"]; hasBudget {
 		t.Fatalf("LINKEDIN must omit apify_budget, got %#v", linked["apify_budget"])
 	}
-	if _, hasBudget := providers["INDEED"]["apify_budget"]; hasBudget {
-		t.Fatalf("INDEED must omit apify_budget, got %#v", providers["INDEED"]["apify_budget"])
-	}
+	indeedBudget := requireApifyBudget(t, providers["INDEED"])
+	assertApifyBudget(t, indeedBudget, budgetExpect{
+		reason:  "token_missing",
+		blocked: true,
+		start:   "2026-09-21T00:00:00Z",
+		end:     "2026-10-21T00:00:00Z",
+		limit:   "1.00",
+	})
 
 	budget := requireApifyBudget(t, providers["DICE"])
 	assertApifyBudget(t, budget, budgetExpect{
@@ -437,6 +442,13 @@ func TestDashboardStats_ApifyBudgetTokenMissingNoHTTP(t *testing.T) {
 		end:     "2026-10-21T00:00:00Z",
 		limit:   "1.00",
 	})
+	indeed := providers["INDEED"]
+	if configured, _ := indeed["configured"].(bool); configured {
+		t.Fatal("INDEED configured = true with empty APIFY_API_TOKEN, want false")
+	}
+	if indeed["status"] != "setup_required" {
+		t.Fatalf("INDEED status = %v, want setup_required", indeed["status"])
+	}
 	dice := providers["DICE"]
 	if configured, _ := dice["configured"].(bool); configured {
 		t.Fatal("DICE configured = true with empty APIFY_API_TOKEN, want false")

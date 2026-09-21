@@ -88,8 +88,33 @@ type ScraperSettings struct {
 	Rounds                int                 `json:"rounds"`
 	Enabled               bool                `json:"enabled"`
 	ScrapeIntervalSeconds int                 `json:"scrape_interval_seconds"`
+	ProviderOptions       map[string]any      `json:"provider_options"`
 	LastScrapedAt         *time.Time          `json:"last_scraped_at"`
 	NextEligibleAt        *time.Time          `json:"next_eligible_at"`
 	CreatedAt             time.Time           `json:"created_at"`
 	UpdatedAt             time.Time           `json:"updated_at"`
+}
+
+// IndeedProviderOptions is the typed view of Indeed provider_options JSON.
+type IndeedProviderOptions struct {
+	Country            string `json:"country"`
+	JobType            string `json:"jobType"`
+	FromDays           string `json:"fromDays"`
+	MaxRows            int    `json:"maxRows"`
+	EnableUniqueJobs   bool   `json:"enableUniqueJobs"`
+	IncludeSimilarJobs bool   `json:"includeSimilarJobs"`
+}
+
+// IndeedAllowedRadii is the actor radius whitelist in miles.
+var IndeedAllowedRadii = []string{"0", "5", "10", "15", "25", "35", "50", "100"}
+
+// ValidIndeedRadius reports whether radius is an allowed Indeed mile value.
+func ValidIndeedRadius(radius string) bool {
+	radius = strings.TrimSpace(radius)
+	for _, allowed := range IndeedAllowedRadii {
+		if radius == allowed {
+			return true
+		}
+	}
+	return false
 }
