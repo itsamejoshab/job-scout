@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jobscout/jobscout/internal/config"
@@ -38,6 +39,9 @@ type Handler struct {
 	Schedules pipeline.ScheduleStore
 	Scraper   *scraper.Service
 	Cfg       config.Config
+
+	apifyBudgetOnce  sync.Once
+	apifyBudgetCache *scraper.BudgetViewCache
 }
 
 // InstallSchedules creates or updates scrape and notify Temporal schedules.
@@ -101,9 +105,15 @@ func (h *Handler) Run(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		if source != db.SourceIndeed {
-			in.JobSource = string(source)
+		if isApifyProvider(source) && strings.TrimSpace(h.Cfg.ApifyAPIToken) == "" {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"status":     "provider_disabled",
+				"reason":     scraper.ApifySetupMessage,
+				"configured": false,
+			})
+			return
 		}
+		in.JobSource = string(source)
 	}
 
 	opts := client.StartWorkflowOptions{
@@ -399,7 +409,15 @@ func (h *Handler) ScraperSettings(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"message": fmt.Sprintf("No scraper settings found for %s", source)})
 		return
 	}
-	writeJSON(w, http.StatusOK, settings)
+	if !isApifyProvider(source) {
+		writeJSON(w, http.StatusOK, settings)
+		return
+	}
+	budget := h.cachedApifyBudget(r.Context())
+	writeJSON(w, http.StatusOK, scraperSettingsView{
+		ScraperSettings: *settings,
+		ApifyBudget:     &budget,
+	})
 }
 
 // GET /api/v0/scraper-settings/all
@@ -421,9 +439,62 @@ func (h *Handler) AllScraperSettings(w http.ResponseWriter, r *http.Request) {
 }
 
 type providerSearchQuery struct {
-	Keywords string `json:"keywords"`
-	Location string `json:"location"`
-	Remote   string `json:"f_WT"`
+	Keywords      string
+	Location      string
+	Remote        string
+	Radius        string
+	IncludeRemote *bool
+	IncludeHybrid *bool
+	hasWorkType   bool
+	hasRadius     bool
+}
+
+func (q *providerSearchQuery) UnmarshalJSON(data []byte) error {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	if err := unmarshalJSONString(raw["keywords"], &q.Keywords); err != nil {
+		return err
+	}
+	if err := unmarshalJSONString(raw["location"], &q.Location); err != nil {
+		return err
+	}
+	if _, ok := raw["f_WT"]; ok {
+		q.hasWorkType = true
+		if err := unmarshalJSONString(raw["f_WT"], &q.Remote); err != nil {
+			return err
+		}
+	}
+	if _, ok := raw["radius"]; ok {
+		q.hasRadius = true
+		if err := unmarshalJSONString(raw["radius"], &q.Radius); err != nil {
+			return err
+		}
+	}
+	if rawRemote, ok := raw["include_remote"]; ok && string(rawRemote) != "null" {
+		var flag bool
+		if err := json.Unmarshal(rawRemote, &flag); err != nil {
+			return fmt.Errorf("include_remote must be a JSON boolean")
+		}
+		q.IncludeRemote = &flag
+	}
+	if rawHybrid, ok := raw["include_hybrid"]; ok && string(rawHybrid) != "null" {
+		var flag bool
+		if err := json.Unmarshal(rawHybrid, &flag); err != nil {
+			return fmt.Errorf("include_hybrid must be a JSON boolean")
+		}
+		q.IncludeHybrid = &flag
+	}
+	return nil
+}
+
+func unmarshalJSONString(raw json.RawMessage, dest *string) error {
+	if len(raw) == 0 || string(raw) == "null" {
+		*dest = ""
+		return nil
+	}
+	return json.Unmarshal(raw, dest)
 }
 
 type replaceScraperSettingsRequest struct {
@@ -434,9 +505,10 @@ type replaceScraperSettingsRequest struct {
 	Rounds                *int                   `json:"rounds"`
 	SearchQueries         *[]providerSearchQuery `json:"search_queries"`
 	GlobalSearches        *[]string              `json:"global_searches"`
+	ProviderOptions       *map[string]any        `json:"provider_options"`
 }
 
-func (in replaceScraperSettingsRequest) validate() error {
+func (in replaceScraperSettingsRequest) validate(source db.JobSource) error {
 	switch {
 	case in.Enabled == nil:
 		return errors.New("missing required field: enabled")
@@ -461,6 +533,12 @@ func (in replaceScraperSettingsRequest) validate() error {
 	case in.GlobalSearches == nil:
 		return errors.New("missing required field: global_searches")
 	}
+	switch source {
+	case db.SourceDice:
+		return in.validateDice()
+	case db.SourceIndeed:
+		return in.validateIndeed()
+	}
 	for i, query := range *in.SearchQueries {
 		if strings.TrimSpace(query.Keywords) == "" {
 			return fmt.Errorf("search_queries[%d].keywords must not be empty", i)
@@ -477,18 +555,170 @@ func (in replaceScraperSettingsRequest) validate() error {
 	return nil
 }
 
-func (in replaceScraperSettingsRequest) settings() db.ScraperSettings {
+func (in replaceScraperSettingsRequest) validateDice() error {
+	timespan := strings.TrimSpace(*in.TimespanCode)
+	allowedTimespan := map[string]struct{}{
+		"all": {}, "24h": {}, "3d": {}, "7d": {}, "30d": {},
+	}
+	if _, ok := allowedTimespan[timespan]; !ok {
+		return errors.New("timespan_code must be one of all, 24h, 3d, 7d, 30d")
+	}
+	if *in.PagesToScrape > 5 {
+		return errors.New("pages_to_scrape must not be greater than 5")
+	}
+	for _, keywords := range *in.GlobalSearches {
+		if strings.TrimSpace(keywords) != "" {
+			return errors.New("Dice global_searches must be empty")
+		}
+	}
+	queries := map[string]struct{}{}
+	locations := map[string]struct{}{}
+	for i, query := range *in.SearchQueries {
+		if query.hasWorkType {
+			return errors.New("Dice search_queries must not include f_WT")
+		}
+		if query.IncludeRemote == nil {
+			return fmt.Errorf("search_queries[%d].include_remote must be a JSON boolean", i)
+		}
+		if strings.TrimSpace(query.Keywords) == "" {
+			return fmt.Errorf("search_queries[%d].keywords must not be empty", i)
+		}
+		if strings.TrimSpace(query.Location) == "" {
+			return fmt.Errorf("search_queries[%d].location must not be empty", i)
+		}
+		queries[strings.TrimSpace(query.Keywords)] = struct{}{}
+		locations[strings.TrimSpace(query.Location)] = struct{}{}
+	}
+	if len(queries) > 10 {
+		return errors.New("Dice search queries must not exceed 10")
+	}
+	if len(locations) > 10 {
+		return errors.New("Dice locations must not exceed 10")
+	}
+	if len(*in.SearchQueries) > 20 {
+		return errors.New("Dice expanded search pairs must not exceed 20")
+	}
+	return nil
+}
+
+func (in replaceScraperSettingsRequest) validateIndeed() error {
+	if in.ProviderOptions == nil {
+		return errors.New("missing required field: provider_options")
+	}
+	opts, err := db.ParseIndeedOptions(*in.ProviderOptions)
+	if err != nil {
+		return errors.New("provider_options must be a valid Indeed options object")
+	}
+	allowedCountry := map[string]struct{}{
+		"ar": {}, "au": {}, "at": {}, "bh": {}, "be": {}, "br": {}, "ca": {}, "cl": {}, "cn": {}, "co": {},
+		"cz": {}, "dk": {}, "fi": {}, "fr": {}, "de": {}, "gr": {}, "hk": {}, "hu": {}, "in": {}, "id": {},
+		"ie": {}, "il": {}, "it": {}, "jp": {}, "kw": {}, "lu": {}, "my": {}, "mx": {}, "ma": {}, "nl": {},
+		"nz": {}, "no": {}, "om": {}, "pe": {}, "ph": {}, "pl": {}, "pt": {}, "qa": {}, "ro": {}, "sa": {},
+		"sg": {}, "za": {}, "kr": {}, "es": {}, "se": {}, "ch": {}, "tw": {}, "tr": {}, "ua": {}, "ae": {},
+		"uk": {}, "us": {}, "ve": {}, "vn": {}, "cr": {}, "ec": {}, "eg": {}, "ng": {}, "pk": {}, "pa": {},
+		"th": {}, "uy": {},
+	}
+	if _, ok := allowedCountry[strings.ToLower(strings.TrimSpace(opts.Country))]; !ok {
+		return errors.New("provider_options.country must be a supported Indeed country code")
+	}
+	allowedJobType := map[string]struct{}{
+		"fulltime": {}, "parttime": {}, "contract": {}, "internship": {},
+		"temporary": {}, "permanent": {}, "seasonal": {}, "freelance": {},
+	}
+	if _, ok := allowedJobType[strings.TrimSpace(opts.JobType)]; !ok {
+		return errors.New("provider_options.jobType must be one of fulltime, parttime, contract, internship, temporary, permanent, seasonal, freelance")
+	}
+	allowedFromDays := map[string]struct{}{"1": {}, "3": {}, "7": {}, "14": {}}
+	if _, ok := allowedFromDays[strings.TrimSpace(opts.FromDays)]; !ok {
+		return errors.New("provider_options.fromDays must be one of 1, 3, 7, 14")
+	}
+	if opts.MaxRows < 1 || opts.MaxRows > 1000 {
+		return errors.New("provider_options.maxRows must be between 1 and 1000")
+	}
+	if strings.TrimSpace(*in.TimespanCode) != strings.TrimSpace(opts.FromDays) {
+		return errors.New("timespan_code must match provider_options.fromDays")
+	}
+	for _, keywords := range *in.GlobalSearches {
+		if strings.TrimSpace(keywords) != "" {
+			return errors.New("Indeed global_searches must be empty")
+		}
+	}
+	queries := map[string]struct{}{}
+	locations := map[string]struct{}{}
+	for i, query := range *in.SearchQueries {
+		if query.hasWorkType {
+			return errors.New("Indeed search_queries must not include f_WT")
+		}
+		if query.IncludeRemote == nil {
+			return fmt.Errorf("search_queries[%d].include_remote must be a JSON boolean", i)
+		}
+		if query.IncludeHybrid == nil {
+			return fmt.Errorf("search_queries[%d].include_hybrid must be a JSON boolean", i)
+		}
+		if !query.hasRadius || strings.TrimSpace(query.Radius) == "" {
+			return fmt.Errorf("search_queries[%d].radius must be one of 0, 5, 10, 15, 25, 35, 50, 100", i)
+		}
+		if !db.ValidIndeedRadius(query.Radius) {
+			return fmt.Errorf("search_queries[%d].radius must be one of 0, 5, 10, 15, 25, 35, 50, 100", i)
+		}
+		if strings.TrimSpace(query.Keywords) == "" {
+			return fmt.Errorf("search_queries[%d].keywords must not be empty", i)
+		}
+		if strings.TrimSpace(query.Location) == "" {
+			return fmt.Errorf("search_queries[%d].location must not be empty", i)
+		}
+		queries[strings.TrimSpace(query.Keywords)] = struct{}{}
+		locations[strings.TrimSpace(query.Location)] = struct{}{}
+	}
+	if len(queries) > 10 {
+		return errors.New("Indeed search queries must not exceed 10")
+	}
+	if len(locations) > 10 {
+		return errors.New("Indeed locations must not exceed 10")
+	}
+	if len(*in.SearchQueries) > 20 {
+		return errors.New("Indeed expanded search pairs must not exceed 20")
+	}
+	return nil
+}
+
+func (in replaceScraperSettingsRequest) settings(source db.JobSource) db.ScraperSettings {
 	queries := make([]map[string]string, 0, len(*in.SearchQueries))
 	for _, query := range *in.SearchQueries {
-		queries = append(queries, map[string]string{
+		item := map[string]string{
 			"keywords": strings.TrimSpace(query.Keywords),
 			"location": strings.TrimSpace(query.Location),
-			"f_WT":     strings.TrimSpace(query.Remote),
-		})
+		}
+		switch source {
+		case db.SourceDice:
+			item["include_remote"] = strconv.FormatBool(query.IncludeRemote != nil && *query.IncludeRemote)
+		case db.SourceIndeed:
+			item["include_remote"] = strconv.FormatBool(query.IncludeRemote != nil && *query.IncludeRemote)
+			item["include_hybrid"] = strconv.FormatBool(query.IncludeHybrid != nil && *query.IncludeHybrid)
+			item["radius"] = strings.TrimSpace(query.Radius)
+		default:
+			item["f_WT"] = strings.TrimSpace(query.Remote)
+		}
+		queries = append(queries, item)
 	}
 	global := make([]string, 0, len(*in.GlobalSearches))
 	for _, keywords := range *in.GlobalSearches {
 		global = append(global, strings.TrimSpace(keywords))
+	}
+	options := map[string]any{}
+	switch source {
+	case db.SourceDice:
+		global = []string{}
+	case db.SourceIndeed:
+		global = []string{}
+		if in.ProviderOptions != nil {
+			if parsed, err := db.ParseIndeedOptions(*in.ProviderOptions); err == nil {
+				parsed.Country = strings.ToLower(strings.TrimSpace(parsed.Country))
+				parsed.JobType = strings.TrimSpace(parsed.JobType)
+				parsed.FromDays = strings.TrimSpace(parsed.FromDays)
+				options = db.IndeedOptionsMap(parsed)
+			}
+		}
 	}
 	return db.ScraperSettings{
 		Enabled:               *in.Enabled,
@@ -498,6 +728,7 @@ func (in replaceScraperSettingsRequest) settings() db.ScraperSettings {
 		Rounds:                *in.Rounds,
 		SearchQueries:         queries,
 		GlobalSearches:        global,
+		ProviderOptions:       options,
 	}
 }
 
@@ -531,7 +762,7 @@ func (h *Handler) ReplaceScraperSettings(w http.ResponseWriter, r *http.Request)
 		writeErr(w, http.StatusBadRequest, "invalid scraper-settings body: "+err.Error())
 		return
 	}
-	if err := in.validate(); err != nil {
+	if err := in.validate(source); err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -539,7 +770,7 @@ func (h *Handler) ReplaceScraperSettings(w http.ResponseWriter, r *http.Request)
 		writeErr(w, http.StatusBadRequest, "provider scraper is not implemented")
 		return
 	}
-	stored, err := db.ReplaceScraperSettings(r.Context(), h.DB, source, in.settings())
+	stored, err := db.ReplaceScraperSettings(r.Context(), h.DB, source, in.settings(source))
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -825,17 +1056,25 @@ func (h *Handler) JobStats(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+type scraperSettingsView struct {
+	db.ScraperSettings
+	ApifyBudget *scraper.ApifyBudgetView `json:"apify_budget,omitempty"`
+}
+
 type dashboardProviderView struct {
-	JobSource             string         `json:"job_source"`
-	Implemented           bool           `json:"implemented"`
-	Enabled               bool           `json:"enabled"`
-	ScrapeIntervalSeconds int            `json:"scrape_interval_seconds"`
-	LastScrapedAt         *time.Time     `json:"last_scraped_at"`
-	NextEligibleAt        *time.Time     `json:"next_eligible_at"`
-	Status                string         `json:"status"`
-	TotalJobs             int            `json:"total_jobs"`
-	ByState               map[string]int `json:"by_state"`
-	ByRejectReason        map[string]int `json:"by_reject_reason"`
+	JobSource             string                   `json:"job_source"`
+	Implemented           bool                     `json:"implemented"`
+	Configured            bool                     `json:"configured"`
+	ConfigurationMessage  string                   `json:"configuration_message,omitempty"`
+	Enabled               bool                     `json:"enabled"`
+	ScrapeIntervalSeconds int                      `json:"scrape_interval_seconds"`
+	LastScrapedAt         *time.Time               `json:"last_scraped_at"`
+	NextEligibleAt        *time.Time               `json:"next_eligible_at"`
+	Status                string                   `json:"status"`
+	TotalJobs             int                      `json:"total_jobs"`
+	ByState               map[string]int           `json:"by_state"`
+	ByRejectReason        map[string]int           `json:"by_reject_reason"`
+	ApifyBudget           *scraper.ApifyBudgetView `json:"apify_budget,omitempty"`
 }
 
 type dashboardDailyView struct {
@@ -856,10 +1095,22 @@ func (h *Handler) DashboardStats(w http.ResponseWriter, r *http.Request) {
 	}
 
 	nowTime := time.Now()
+	var apifyBudget *scraper.ApifyBudgetView
+	for _, provider := range stats.Providers {
+		if isApifyProvider(provider.JobSource) {
+			view := h.cachedApifyBudget(r.Context())
+			apifyBudget = &view
+			break
+		}
+	}
 	providers := make([]dashboardProviderView, 0, len(stats.Providers))
 	for _, provider := range stats.Providers {
+		configured := !isApifyProvider(provider.JobSource) || strings.TrimSpace(h.Cfg.ApifyAPIToken) != ""
+		effectiveEnabled := provider.Enabled && configured
 		status := "disabled"
-		if provider.Enabled {
+		if !configured {
+			status = "setup_required"
+		} else if provider.Enabled {
 			cadence := domain.ProviderCadence{
 				Source:                string(provider.JobSource),
 				Enabled:               provider.Enabled,
@@ -874,10 +1125,11 @@ func (h *Handler) DashboardStats(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		providers = append(providers, dashboardProviderView{
+		item := dashboardProviderView{
 			JobSource:             string(provider.JobSource),
 			Implemented:           isProviderImplemented(provider.JobSource),
-			Enabled:               provider.Enabled,
+			Configured:            configured,
+			Enabled:               effectiveEnabled,
 			ScrapeIntervalSeconds: provider.ScrapeIntervalSeconds,
 			LastScrapedAt:         provider.LastScrapedAt,
 			NextEligibleAt:        provider.NextEligibleAt,
@@ -885,7 +1137,14 @@ func (h *Handler) DashboardStats(w http.ResponseWriter, r *http.Request) {
 			TotalJobs:             provider.TotalJobs,
 			ByState:               provider.ByState,
 			ByRejectReason:        provider.ByRejectReason,
-		})
+		}
+		if isApifyProvider(provider.JobSource) {
+			item.ApifyBudget = apifyBudget
+			if !configured {
+				item.ConfigurationMessage = scraper.ApifySetupMessage
+			}
+		}
+		providers = append(providers, item)
 	}
 
 	daily := make([]dashboardDailyView, 0, len(stats.Daily))
@@ -911,13 +1170,42 @@ func (h *Handler) DashboardStats(w http.ResponseWriter, r *http.Request) {
 
 func isProviderImplemented(source db.JobSource) bool {
 	switch source {
-	case db.SourceLinkedIn:
+	case db.SourceLinkedIn, db.SourceDice, db.SourceIndeed:
 		return true
-	case db.SourceIndeed:
-		return false
 	default:
 		return false
 	}
+}
+
+func isApifyProvider(source db.JobSource) bool {
+	return source == db.SourceDice || source == db.SourceIndeed
+}
+
+func (h *Handler) cachedApifyBudget(ctx context.Context) scraper.ApifyBudgetView {
+	h.apifyBudgetOnce.Do(func() {
+		h.apifyBudgetCache = &scraper.BudgetViewCache{}
+	})
+	return h.apifyBudgetCache.Get(h.apifyBudgetNow(), func() scraper.ApifyBudgetView {
+		return scraper.DisplayBudget(ctx, h.apifyDisplayClient(), strings.TrimSpace(h.Cfg.ApifyAPIToken), h.Cfg.ApifyMonthlyBudgetCents)
+	})
+}
+
+func (h *Handler) apifyBudgetNow() time.Time {
+	if h.Scraper != nil && h.Scraper.Now != nil {
+		return h.Scraper.Now()
+	}
+	return time.Now().UTC()
+}
+
+func (h *Handler) apifyDisplayClient() *scraper.ApifyClient {
+	client := &scraper.ApifyClient{Token: strings.TrimSpace(h.Cfg.ApifyAPIToken)}
+	if h.Scraper != nil {
+		client.BaseURL = h.Scraper.ApifyBaseURL
+		client.HTTP = h.Scraper.HTTPClient
+		client.Now = h.Scraper.Now
+		client.Sleep = h.Scraper.Sleep
+	}
+	return client
 }
 
 // GET /api/v0/temporal-test

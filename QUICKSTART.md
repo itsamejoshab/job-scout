@@ -321,7 +321,7 @@ make notify
 
 Confirm the downstream notify automation after the POST.
 
-Scheduled scrape (default every 10 minutes) and notify (default 07:39, 17:39, and 20:39 in `America/New_York`) also run after the API starts.
+Scheduled scrape (default every 10 minutes) and notify (default 07:39, 17:39, and 20:39 in `America/New_York`) also run after the API starts. Each provider still uses its own `scrape_interval_seconds`. Dice and Indeed default to every 12 hours (about twice per day). Both need `APIFY_API_TOKEN`.
 
 ## Operator API
 

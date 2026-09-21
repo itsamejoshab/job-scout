@@ -43,12 +43,15 @@ const dashboardStats = {
     },
     {
       job_source: "INDEED",
-      implemented: false,
+      implemented: true,
+      configured: false,
+      configuration_message:
+        "Create an Apify account and set APIFY_API_TOKEN in job-scout/.env to enable this provider.",
       enabled: false,
-      scrape_interval_seconds: 900,
+      scrape_interval_seconds: 43200,
       last_scraped_at: null,
       next_eligible_at: null,
-      status: "disabled",
+      status: "setup_required",
       total_jobs: 0,
       by_state: {
         pending: 0,
@@ -64,6 +67,52 @@ const dashboardStats = {
         description: 0,
         detail_failed: 0,
         unsupported_source: 0,
+      },
+      apify_budget: {
+        period_start: "2026-09-21T00:00:00Z",
+        period_end: "2026-10-21T00:00:00Z",
+        limit_usd: 1,
+        used_usd: null,
+        remaining_usd: null,
+        blocked: true,
+        reason: "token_missing" as const,
+      },
+    },
+    {
+      job_source: "DICE",
+      implemented: true,
+      configured: false,
+      configuration_message:
+        "Create an Apify account and set APIFY_API_TOKEN in job-scout/.env to enable this provider.",
+      enabled: false,
+      scrape_interval_seconds: 43200,
+      last_scraped_at: null,
+      next_eligible_at: null,
+      status: "setup_required",
+      total_jobs: 0,
+      by_state: {
+        pending: 0,
+        rejected: 0,
+        needs_detail: 0,
+        ready: 0,
+        applied: 0,
+        dismissed: 0,
+      },
+      by_reject_reason: {
+        duplicate: 0,
+        title_company: 0,
+        description: 0,
+        detail_failed: 0,
+        unsupported_source: 0,
+      },
+      apify_budget: {
+        period_start: "2026-09-21T00:00:00Z",
+        period_end: "2026-10-21T00:00:00Z",
+        limit_usd: 1,
+        used_usd: null,
+        remaining_usd: null,
+        blocked: true,
+        reason: "token_missing" as const,
       },
     },
   ],
@@ -106,7 +155,7 @@ const filterSeed = {
   updated_at: "2026-09-18T20:00:00Z",
 };
 
-const providerSeed: Record<"LINKEDIN" | "INDEED", ProviderSettings> = {
+const providerSeed: Record<"LINKEDIN" | "INDEED" | "DICE", ProviderSettings> = {
   LINKEDIN: {
     id: 1,
     job_source: "LINKEDIN",
@@ -131,14 +180,49 @@ const providerSeed: Record<"LINKEDIN" | "INDEED", ProviderSettings> = {
     id: 2,
     job_source: "INDEED",
     search_queries: [
-      { keywords: "Support", location: "United States" },
+      {
+        keywords: "Desktop or Endpoint or Application Support",
+        location: "Port Orange, FL",
+        include_remote: "false",
+        include_hybrid: "false",
+        radius: "15",
+      } as ProviderSettings["search_queries"][number],
     ],
     global_searches: [],
-    timespan_code: "r86400",
+    timespan_code: "1",
     pages_to_scrape: 1,
     rounds: 1,
-    enabled: false,
-    scrape_interval_seconds: 900,
+    enabled: true,
+    scrape_interval_seconds: 43200,
+    provider_options: {
+      country: "us",
+      jobType: "fulltime",
+      fromDays: "1",
+      maxRows: 100,
+      enableUniqueJobs: true,
+      includeSimilarJobs: false,
+    },
+    last_scraped_at: null,
+    next_eligible_at: null,
+    created_at: "2026-09-18T20:00:00Z",
+    updated_at: "2026-09-18T20:00:00Z",
+  },
+  DICE: {
+    id: 3,
+    job_source: "DICE",
+    search_queries: [
+      {
+        keywords: "Desktop or Endpoint or Application Support",
+        location: "Port Orange, FL",
+        include_remote: "true",
+      } as ProviderSettings["search_queries"][number],
+    ],
+    global_searches: [],
+    timespan_code: "24h",
+    pages_to_scrape: 1,
+    rounds: 1,
+    enabled: true,
+    scrape_interval_seconds: 43200,
     last_scraped_at: null,
     next_eligible_at: null,
     created_at: "2026-09-18T20:00:00Z",
@@ -321,7 +405,7 @@ function renderPath(path: string, options: RenderOptions = {}) {
         headers: { "Content-Type": "application/json" },
       });
     }
-    const providerMatch = url.match(/^\/api\/v0\/scraper-settings\/(LINKEDIN|INDEED)(\/reset)?$/);
+    const providerMatch = url.match(/^\/api\/v0\/scraper-settings\/(LINKEDIN|INDEED|DICE)(\/reset)?$/);
     if (providerMatch && method === "PUT") {
       const source = providerMatch[1] as keyof typeof currentProviders;
       const payload = JSON.parse(String(init?.body ?? "{}"));
@@ -329,12 +413,31 @@ function renderPath(path: string, options: RenderOptions = {}) {
         ...currentProviders[source],
         ...payload,
         timespan_code: String(payload.timespan_code).trim(),
-        search_queries: payload.search_queries.map((query: Record<string, string>) => ({
-          keywords: query.keywords.trim(),
-          location: query.location.trim(),
-          f_WT: query.f_WT ?? "",
+        search_queries: payload.search_queries.map((query: Record<string, unknown>) => ({
+          keywords: String(query.keywords).trim(),
+          location: String(query.location).trim(),
+          ...(query.f_WT !== undefined ? { f_WT: String(query.f_WT) } : {}),
+          ...(query.include_remote !== undefined
+            ? {
+                include_remote:
+                  query.include_remote === true || query.include_remote === "true"
+                    ? "true"
+                    : "false",
+              }
+            : {}),
+          ...(query.include_hybrid !== undefined
+            ? {
+                include_hybrid:
+                  query.include_hybrid === true || query.include_hybrid === "true"
+                    ? "true"
+                    : "false",
+              }
+            : {}),
         })),
         global_searches: (payload.global_searches as string[]).map((item) => item.trim()),
+        ...(payload.provider_options !== undefined
+          ? { provider_options: payload.provider_options }
+          : {}),
         updated_at: "2026-09-18T20:05:00Z",
       };
       return new Response(JSON.stringify(currentProviders[source]), {
@@ -427,13 +530,20 @@ describe("operator shell", () => {
 
     expect(await screen.findByText("LINKEDIN")).toBeInTheDocument();
     expect(screen.getByText("INDEED")).toBeInTheDocument();
+    expect(screen.getByText("DICE")).toBeInTheDocument();
     expect(screen.getByText("Status: on cooldown")).toBeInTheDocument();
-    expect(screen.getByText("Status: disabled")).toBeInTheDocument();
+    expect(screen.getAllByText("Status: setup required")).toHaveLength(2);
     const linkedInCard = screen.getByText("LINKEDIN").closest("article");
     expect(linkedInCard).not.toBeNull();
     expect(linkedInCard).toHaveTextContent("Pending");
     expect(linkedInCard).toHaveTextContent("Processing");
     expect(linkedInCard).toHaveTextContent("Title or company");
+    expect(linkedInCard).not.toHaveTextContent("Apify token is missing");
+    const diceCard = screen.getByText("DICE").closest("article");
+    expect(diceCard).not.toBeNull();
+    expect(diceCard).toHaveTextContent("Apify token is missing");
+    expect(diceCard).toHaveTextContent("(blocked)");
+    expect(diceCard).toHaveTextContent("Create an Apify account");
     expect(screen.getAllByText("Processing").length).toBeGreaterThanOrEqual(2);
     expect(screen.getByText("Jobs over time (America/New_York)")).toBeInTheDocument();
     expect(screen.queryByText(/Jobs emailed/i)).not.toBeInTheDocument();
@@ -601,6 +711,8 @@ describe("operator shell", () => {
     expect(screen.queryByText(/posting date/i)).not.toBeInTheDocument();
     expect(screen.getByLabelText("State")).toHaveValue("ready");
     expect(screen.getByLabelText("Created")).toHaveValue("24h");
+    expect(screen.getByLabelText("Job source")).toHaveValue("");
+    expect(screen.getByRole("option", { name: "Dice" })).toHaveValue("DICE");
     expect(screen.queryByLabelText("Created from")).not.toBeInTheDocument();
 
     const titleLink = screen.getByRole("link", { name: /platform engineer/i });
@@ -644,6 +756,13 @@ describe("operator shell", () => {
       expect(calls.some((url) =>
         url.includes("state=rejected") && url.includes("q=platform"),
       )).toBe(true);
+    });
+
+    await user.selectOptions(screen.getByLabelText("Job source"), "DICE");
+    await waitFor(() => {
+      const calls = (fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls
+        .map(([input]) => String(input));
+      expect(calls.some((url) => url.includes("job_source=DICE"))).toBe(true);
     });
 
     await user.selectOptions(screen.getByLabelText("Created"), "custom");
@@ -802,16 +921,117 @@ describe("operator shell", () => {
     });
   });
 
-  it("renders provider editors and locks a provider without a scraper", async () => {
+  it("renders provider editors and locks Apify providers without a token", async () => {
     renderPath("/settings");
 
     expect(await screen.findByRole("heading", { name: "LINKEDIN provider" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "INDEED provider" })).toBeInTheDocument();
-    expect(screen.getByText("Not implemented")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "DICE provider" })).toBeInTheDocument();
+    expect(screen.queryByText("Not implemented")).not.toBeInTheDocument();
+    expect(screen.getAllByText(/setup required/i)).toHaveLength(2);
     expect(screen.getByRole("checkbox", { name: "Enable INDEED" })).toBeDisabled();
+    expect(screen.getByRole("checkbox", { name: "Enable DICE" })).toBeDisabled();
+    expect(screen.getAllByText(/set APIFY_API_TOKEN/).length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText(/^Last scraped: (?!never)/)).toBeInTheDocument();
-    expect(screen.getAllByText("Next eligible: never")).toHaveLength(2);
+    expect(screen.getAllByText("Next eligible: never")).toHaveLength(3);
     expect(screen.getByRole("button", { name: "Save LINKEDIN settings" })).toBeDisabled();
+  });
+
+  it("edits Indeed queries, locations, run options, and hides globals", async () => {
+    const user = userEvent.setup();
+    renderPath("/settings");
+
+    const save = await screen.findByRole("button", { name: "Save INDEED settings" });
+    expect(save).toBeDisabled();
+    expect(screen.getByRole("checkbox", { name: "Enable INDEED" })).toBeDisabled();
+    expect(screen.getByLabelText("Indeed query 1")).toHaveValue(
+      "Desktop or Endpoint or Application Support",
+    );
+    expect(screen.getByLabelText("Indeed location 1")).toHaveValue("Port Orange, FL");
+    expect(screen.getByLabelText("Indeed location 1 radius")).toHaveValue("15");
+    expect(screen.getByLabelText("Indeed location 1 remote")).not.toBeChecked();
+    expect(screen.getByLabelText("Indeed location 1 hybrid")).not.toBeChecked();
+    expect(screen.getByLabelText("Indeed country")).toHaveValue("us");
+    expect(screen.getByLabelText("Indeed job type")).toHaveValue("fulltime");
+    expect(screen.getByLabelText("Indeed from days")).toHaveValue("1");
+    expect(screen.getByLabelText("Indeed max rows")).toHaveValue(100);
+    expect(screen.getByLabelText("Indeed enable unique jobs")).toBeChecked();
+    expect(screen.getByLabelText("Indeed include similar jobs")).not.toBeChecked();
+    expect(screen.queryByLabelText("INDEED global search 1")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Add INDEED global search" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Add Indeed query" }));
+    await user.type(screen.getByLabelText("Indeed query 2"), "Endpoint");
+    await user.click(screen.getByRole("button", { name: "Add Indeed location" }));
+    await user.type(screen.getByLabelText("Indeed location 2"), "Daytona Beach, FL");
+    await user.click(screen.getByLabelText("Indeed location 2 remote"));
+    await user.click(screen.getByLabelText("Indeed location 1 hybrid"));
+    await user.selectOptions(screen.getByLabelText("Indeed job type"), "contract");
+    await user.selectOptions(screen.getByLabelText("Indeed from days"), "3");
+    await user.selectOptions(screen.getByLabelText("Indeed location 1 radius"), "25");
+    expect(save).toBeEnabled();
+
+    await user.click(save);
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/v0/scraper-settings/INDEED",
+        expect.objectContaining({ method: "PUT" }),
+      );
+      expect(save).toBeDisabled();
+    });
+    const putCall = (fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls.find(
+      ([input, init]) =>
+        String(input) === "/api/v0/scraper-settings/INDEED" &&
+        (init as RequestInit | undefined)?.method === "PUT",
+    );
+    const payload = JSON.parse(String((putCall?.[1] as RequestInit | undefined)?.body));
+    expect(payload.enabled).toBe(true);
+    expect(payload.timespan_code).toBe("3");
+    expect(payload.global_searches).toEqual([]);
+    expect(payload.provider_options).toEqual({
+      country: "us",
+      jobType: "contract",
+      fromDays: "3",
+      maxRows: 100,
+      enableUniqueJobs: true,
+      includeSimilarJobs: false,
+    });
+    expect(payload.search_queries).toEqual([
+      {
+        keywords: "Desktop or Endpoint or Application Support",
+        location: "Port Orange, FL",
+        radius: "25",
+        include_remote: false,
+        include_hybrid: true,
+      },
+      {
+        keywords: "Desktop or Endpoint or Application Support",
+        location: "Daytona Beach, FL",
+        radius: "15",
+        include_remote: true,
+        include_hybrid: false,
+      },
+      {
+        keywords: "Endpoint",
+        location: "Port Orange, FL",
+        radius: "25",
+        include_remote: false,
+        include_hybrid: true,
+      },
+      {
+        keywords: "Endpoint",
+        location: "Daytona Beach, FL",
+        radius: "15",
+        include_remote: true,
+        include_hybrid: false,
+      },
+    ]);
+    for (const query of payload.search_queries as Array<Record<string, unknown>>) {
+      expect(query).not.toHaveProperty("f_WT");
+      expect(typeof query.include_remote).toBe("boolean");
+      expect(typeof query.include_hybrid).toBe("boolean");
+      expect(typeof query.radius).toBe("string");
+    }
   });
 
   it("edits LinkedIn queries, location work types, and global searches", async () => {
@@ -826,7 +1046,8 @@ describe("operator shell", () => {
     expect(screen.getByLabelText("LinkedIn location 1 On-Site")).toBeChecked();
     expect(screen.getByLabelText("LinkedIn location 1 Hybrid")).not.toBeChecked();
     expect(screen.getByLabelText("LinkedIn location 1 Remote")).toBeChecked();
-    expect(screen.getByText("1 locations")).toBeInTheDocument();
+    const linkedInCard = screen.getByRole("heading", { name: "LINKEDIN provider" }).closest("article");
+    expect(linkedInCard).toHaveTextContent("1 locations");
     expect(screen.getByLabelText("LINKEDIN global search 1")).toHaveValue(
       "Remote IT Help Desk near Port Orange FL",
     );
@@ -843,8 +1064,8 @@ describe("operator shell", () => {
       "Hybrid help desk within 10 miles of Daytona Beach",
     );
     expect(save).toBeEnabled();
-    expect(screen.getByText("2 locations")).toBeInTheDocument();
-    expect(screen.getByText("2 searches")).toBeInTheDocument();
+    expect(linkedInCard).toHaveTextContent("2 locations");
+    expect(linkedInCard).toHaveTextContent("2 searches");
 
     await user.click(save);
     await waitFor(() => {
@@ -874,6 +1095,109 @@ describe("operator shell", () => {
     ]);
     expect(payload).not.toHaveProperty("hardcoded_urls");
     expect(save).toBeDisabled();
+  });
+
+  it("edits Dice queries, locations, posted date, and hides globals", async () => {
+    const user = userEvent.setup();
+    renderPath("/settings");
+
+    const save = await screen.findByRole("button", { name: "Save DICE settings" });
+    expect(save).toBeDisabled();
+    expect(screen.getByRole("checkbox", { name: "Enable DICE" })).toBeDisabled();
+    expect(screen.getByLabelText("Dice query 1")).toHaveValue(
+      "Desktop or Endpoint or Application Support",
+    );
+    expect(screen.getByLabelText("Dice location 1")).toHaveValue("Port Orange, FL");
+    expect(screen.getByLabelText("Dice location 1 include remote")).toBeChecked();
+    const postedDate = screen.getByLabelText("DICE posted date");
+    expect(postedDate.tagName).toBe("SELECT");
+    expect(postedDate).toHaveValue("24h");
+    expect(screen.getByRole("option", { name: "all" })).toHaveValue("all");
+    expect(screen.getByRole("option", { name: "24h" })).toHaveValue("24h");
+    expect(screen.getByRole("option", { name: "3d" })).toHaveValue("3d");
+    expect(screen.getByRole("option", { name: "7d" })).toHaveValue("7d");
+    expect(screen.getByRole("option", { name: "30d" })).toHaveValue("30d");
+    expect(screen.queryByLabelText("DICE timespan code")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("DICE global search 1")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Add DICE global search" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Add Dice query" }));
+    await user.type(screen.getByLabelText("Dice query 2"), "Endpoint");
+    await user.click(screen.getByRole("button", { name: "Add Dice location" }));
+    await user.type(screen.getByLabelText("Dice location 2"), "Daytona Beach, FL");
+    expect(screen.getByLabelText("Dice location 2 include remote")).toBeChecked();
+    await user.click(screen.getByLabelText("Dice location 2 include remote"));
+    await user.selectOptions(postedDate, "7d");
+    expect(save).toBeEnabled();
+
+    await user.click(save);
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/v0/scraper-settings/DICE",
+        expect.objectContaining({ method: "PUT" }),
+      );
+      expect(save).toBeDisabled();
+    });
+    const putCall = (fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls.find(
+      ([input, init]) =>
+        String(input) === "/api/v0/scraper-settings/DICE" &&
+        (init as RequestInit | undefined)?.method === "PUT",
+    );
+    const payload = JSON.parse(String((putCall?.[1] as RequestInit | undefined)?.body));
+    expect(payload.enabled).toBe(true);
+    expect(payload.timespan_code).toBe("7d");
+    expect(payload.global_searches).toEqual([]);
+    expect(payload.search_queries).toEqual([
+      {
+        keywords: "Desktop or Endpoint or Application Support",
+        location: "Port Orange, FL",
+        include_remote: true,
+      },
+      {
+        keywords: "Desktop or Endpoint or Application Support",
+        location: "Daytona Beach, FL",
+        include_remote: false,
+      },
+      { keywords: "Endpoint", location: "Port Orange, FL", include_remote: true },
+      { keywords: "Endpoint", location: "Daytona Beach, FL", include_remote: false },
+    ]);
+    for (const query of payload.search_queries as Array<Record<string, unknown>>) {
+      expect(query).not.toHaveProperty("f_WT");
+      expect(typeof query.include_remote).toBe("boolean");
+    }
+    expect(screen.getByLabelText("Dice location 1 include remote")).toBeChecked();
+    expect(screen.getByLabelText("Dice location 2 include remote")).not.toBeChecked();
+  });
+
+  it("collapses duplicate Dice locations to the last remote checkbox", async () => {
+    const user = userEvent.setup();
+    renderPath("/settings");
+
+    const save = await screen.findByRole("button", { name: "Save DICE settings" });
+    await user.click(screen.getByRole("button", { name: "Add Dice location" }));
+    await user.clear(screen.getByLabelText("Dice location 2"));
+    await user.type(screen.getByLabelText("Dice location 2"), "Port Orange, FL");
+    await user.click(screen.getByLabelText("Dice location 2 include remote"));
+    await user.click(save);
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/v0/scraper-settings/DICE",
+        expect.objectContaining({ method: "PUT" }),
+      );
+    });
+    const putCall = (fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls.find(
+      ([input, init]) =>
+        String(input) === "/api/v0/scraper-settings/DICE" &&
+        (init as RequestInit | undefined)?.method === "PUT",
+    );
+    const payload = JSON.parse(String((putCall?.[1] as RequestInit | undefined)?.body));
+    expect(payload.search_queries).toEqual([
+      {
+        keywords: "Desktop or Endpoint or Application Support",
+        location: "Port Orange, FL",
+        include_remote: false,
+      },
+    ]);
   });
 
   it.each([

@@ -123,7 +123,11 @@ func runWorker(cfg config.Config) {
 		NotificationsConfigured:   cfg.NotificationsConfigured(),
 	}
 
-	slog.Info("starting temporal worker", "taskQueue", config.TaskQueue)
+	slog.Info("starting temporal workers",
+		"main", config.TaskQueue,
+		"apify", config.ApifyScrapeTaskQueue,
+		"linkedin", config.LinkedInScrapeTaskQueue,
+	)
 	if err := pipeline.RunWorker(temporalClient, acts); err != nil {
 		fatal("run worker", err)
 	}

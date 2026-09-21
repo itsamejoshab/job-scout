@@ -87,3 +87,61 @@ func TestSaveJobs_UsesSameUniquenessAndRemoteOR(t *testing.T) {
 		t.Errorf("POST /api/v0/scrape persist path changed state to %q, want applied", state)
 	}
 }
+
+func TestSaveJobs_DiceURLUniquenessAndRemoteOR(t *testing.T) {
+	pool := pgtest.Open(t)
+	if err := db.Migrate(pool); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	s := NewService(pool)
+	url := "https://www.dice.com/job-detail/persist-dice"
+	ctx := t.Context()
+
+	saved, err := s.saveJobs(ctx, []JobData{{
+		Title: "Desktop Support", Company: "Acme", Location: "Port Orange, FL", JobURL: url,
+		Source: db.SourceDice, IsRemote: false,
+		SearchContext: `query keywords="Desktop Support" location="Port Orange, FL" include_remote="true"`,
+	}})
+	if err != nil {
+		t.Fatalf("save onsite: %v", err)
+	}
+	if saved != 1 {
+		t.Errorf("saved = %d, want 1", saved)
+	}
+
+	saved, err = s.saveJobs(ctx, []JobData{{
+		Title: "Other", Company: "Acme", Location: "Remote", JobURL: url,
+		Source: db.SourceDice, IsRemote: true,
+		SearchContext: `query keywords="other" location="Remote" include_remote="false"`,
+	}})
+	if err != nil {
+		t.Fatalf("save remote resight: %v", err)
+	}
+	if saved != 0 {
+		t.Errorf("duplicate Dice scrape saved = %d, want 0", saved)
+	}
+
+	var (
+		n             int
+		remote        bool
+		searchContext string
+		source        string
+	)
+	if err := pool.QueryRow(`SELECT COUNT(*), BOOL_OR(is_remote), MIN(search_context), MIN(job_source::text) FROM jobs WHERE job_url = $1`, url).
+		Scan(&n, &remote, &searchContext, &source); err != nil {
+		t.Fatalf("load Dice persist row: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("rows = %d, want 1", n)
+	}
+	if !remote {
+		t.Error("Dice persist path must apply is_remote OR")
+	}
+	if source != "DICE" {
+		t.Errorf("job_source = %q, want DICE", source)
+	}
+	wantContext := `query keywords="Desktop Support" location="Port Orange, FL" include_remote="true"`
+	if searchContext != wantContext {
+		t.Errorf("search_context = %q, want first source query %q", searchContext, wantContext)
+	}
+}

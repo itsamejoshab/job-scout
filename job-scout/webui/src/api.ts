@@ -26,17 +26,37 @@ export interface NotificationSettingsInput {
   enabled: boolean;
 }
 
+export type ApifyBudgetReason =
+  | "ok"
+  | "token_missing"
+  | "budget_exhausted"
+  | "usage_unknown"
+  | "apify_unavailable";
+
+export interface ApifyBudget {
+  period_start: string;
+  period_end: string;
+  limit_usd: number;
+  used_usd: number | null;
+  remaining_usd: number | null;
+  blocked: boolean;
+  reason: ApifyBudgetReason;
+}
+
 export interface DashboardProviderStats {
   job_source: string;
   implemented: boolean;
+  configured?: boolean;
+  configuration_message?: string;
   enabled: boolean;
   scrape_interval_seconds: number;
   last_scraped_at: string | null;
   next_eligible_at: string | null;
-  status: "disabled" | "due" | "waiting";
+  status: "disabled" | "setup_required" | "due" | "waiting";
   total_jobs: number;
   by_state: Record<string, number>;
   by_reject_reason: Record<string, number>;
+  apify_budget?: ApifyBudget;
 }
 
 export interface DashboardDailyPoint {
@@ -134,6 +154,21 @@ export interface ProviderSearchQuery {
   location: string;
   /** Work-type codes for LinkedIn settings UI (1 on-site, 2 remote, 3 hybrid). Not sent as a LinkedIn URL filter. */
   f_WT?: string;
+  /** Dice/Indeed remote-inclusion flag. PUT sends a boolean; GET stores canonical "true"/"false" strings. */
+  include_remote?: boolean | string;
+  /** Indeed hybrid-inclusion flag. PUT sends a boolean; GET stores canonical "true"/"false" strings. */
+  include_hybrid?: boolean | string;
+  /** Indeed search radius in miles for this location. */
+  radius?: string;
+}
+
+export interface IndeedProviderOptions {
+  country: string;
+  jobType: string;
+  fromDays: string;
+  maxRows: number;
+  enableUniqueJobs: boolean;
+  includeSimilarJobs: boolean;
 }
 
 export interface ProviderSettings {
@@ -146,10 +181,12 @@ export interface ProviderSettings {
   rounds: number;
   enabled: boolean;
   scrape_interval_seconds: number;
+  provider_options?: IndeedProviderOptions | Record<string, unknown>;
   last_scraped_at: string | null;
   next_eligible_at: string | null;
   created_at: string;
   updated_at: string;
+  apify_budget?: ApifyBudget;
 }
 
 export type ProviderSettingsInput = Pick<
@@ -161,6 +198,7 @@ export type ProviderSettingsInput = Pick<
   | "rounds"
   | "enabled"
   | "scrape_interval_seconds"
+  | "provider_options"
 >;
 
 async function requestJSON<T>(path: string, init?: RequestInit): Promise<T> {

@@ -121,3 +121,106 @@ func TestFilterPendingJob_UnsupportedSourceRejectsWithoutGET(t *testing.T) {
 		t.Errorf("row state=%q reason=%v, want rejected unsupported_source", row.State, row.RejectReason)
 	}
 }
+
+func TestFilterPendingJob_DiceEmptyDescriptionIsUnsupportedSource(t *testing.T) {
+	pool := pgtest.Open(t)
+	ctx := context.Background()
+	if err := db.Migrate(pool); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	if err := db.SeedSettings(ctx, pool); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if _, err := pool.Exec(`
+		UPDATE search_settings SET
+			title_include = '["help desk"]'::json,
+			title_exclude = '[]'::json,
+			company_exclude = '[]'::json,
+			desc_include_words = '[]'::json,
+			desc_exclude_words = '[]'::json
+	`); err != nil {
+		t.Fatalf("configure lists: %v", err)
+	}
+
+	ok, err := db.InsertJobIfNew(ctx, pool, db.Job{
+		JobSource: db.SourceDice, Title: "IT Help Desk", Company: "Acme",
+		Location: "Remote", JobURL: "https://www.dice.com/job-detail/filter-dice",
+	})
+	if err != nil || !ok {
+		t.Fatalf("insert job: ok=%v err=%v", ok, err)
+	}
+	var jobID int64
+	if err := pool.QueryRow(`SELECT id FROM jobs WHERE job_url LIKE '%filter-dice'`).Scan(&jobID); err != nil {
+		t.Fatalf("load id: %v", err)
+	}
+
+	acts := &Activities{DB: pool, Scraper: scraper.NewService(pool)}
+	result, err := acts.filter_pending_job(ctx, jobID)
+	if err != nil {
+		t.Fatalf("filter_pending_job: %v", err)
+	}
+	if result.WroteNeedsDetail {
+		t.Error("Dice has no enricher; empty description must not write needs_detail")
+	}
+	row, err := db.GetJob(ctx, pool, jobID)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if row.State != db.JobStateRejected || row.RejectReason == nil || *row.RejectReason != domain.ReasonUnsupportedSource {
+		t.Errorf("Dice empty description state=%q reason=%v, want rejected unsupported_source", row.State, row.RejectReason)
+	}
+}
+
+func TestFilterPendingJob_IndeedWithDescriptionPassesTitleFilter(t *testing.T) {
+	pool := pgtest.Open(t)
+	ctx := context.Background()
+	if err := db.Migrate(pool); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	if err := db.SeedSettings(ctx, pool); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if _, err := pool.Exec(`
+		UPDATE search_settings SET
+			title_include = '["help desk"]'::json,
+			title_exclude = '[]'::json,
+			company_exclude = '[]'::json,
+			desc_include_words = '[]'::json,
+			desc_exclude_words = '[]'::json
+	`); err != nil {
+		t.Fatalf("configure lists: %v", err)
+	}
+
+	desc := "Provide desktop and application support for end users."
+	ok, err := db.InsertJobIfNew(ctx, pool, db.Job{
+		JobSource: db.SourceIndeed, Title: "IT Help Desk", Company: "Acme",
+		Location: "Port Orange, FL", JobURL: "https://www.indeed.com/viewjob?jk=filter-indeed-desc",
+		Description: &desc,
+	})
+	if err != nil || !ok {
+		t.Fatalf("insert job: ok=%v err=%v", ok, err)
+	}
+	var jobID int64
+	if err := pool.QueryRow(`SELECT id FROM jobs WHERE job_url LIKE '%filter-indeed-desc'`).Scan(&jobID); err != nil {
+		t.Fatalf("load id: %v", err)
+	}
+
+	acts := &Activities{DB: pool, Scraper: scraper.NewService(pool)}
+	result, err := acts.filter_pending_job(ctx, jobID)
+	if err != nil {
+		t.Fatalf("filter_pending_job: %v", err)
+	}
+	if result.WroteNeedsDetail {
+		t.Error("Indeed with description must not write needs_detail")
+	}
+	row, err := db.GetJob(ctx, pool, jobID)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if row.State == db.JobStateRejected && row.RejectReason != nil && *row.RejectReason == domain.ReasonUnsupportedSource {
+		t.Fatal("Indeed with description must not reject as unsupported_source")
+	}
+	if row.State != db.JobStateReady && row.State != db.JobStateRejected {
+		t.Errorf("state=%q, want ready or rejected for title/desc filters", row.State)
+	}
+}

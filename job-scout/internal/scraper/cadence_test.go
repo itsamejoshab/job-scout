@@ -365,9 +365,125 @@ func TestRunTick_ForceDoesNotFetchIndeed(t *testing.T) {
 	}
 }
 
-func TestRunFullScrape_IndeedStubDoesNotUpdateLastScrapedAt(t *testing.T) {
+func TestRunTick_CombinesDueProviderResults(t *testing.T) {
+	t.Run("two_due_runs_second_after_error", func(t *testing.T) {
+		pool := cadencePool(t)
+		ctx := t.Context()
+		queries, err := json.Marshal([]map[string]string{
+			{"keywords": "IT Help Desk", "location": "101076143"},
+			{"keywords": "Application Support", "location": "101076143"},
+		})
+		if err != nil {
+			t.Fatalf("marshal queries: %v", err)
+		}
+		if _, err := pool.Exec(`
+			UPDATE scraper_settings
+			SET enabled = true, search_queries = $1::json, global_searches = '[]',
+			    last_scraped_at = NULL, next_eligible_at = NULL
+			WHERE job_source = 'LINKEDIN'
+		`, queries); err != nil {
+			t.Fatalf("configure LinkedIn: %v", err)
+		}
+		if _, err := pool.Exec(`
+			UPDATE scraper_settings SET enabled = false WHERE job_source IN ('INDEED', 'DICE')
+		`); err != nil {
+			t.Fatalf("keep Apify providers off for LinkedIn-only combine test: %v", err)
+		}
+		if _, err := pool.Exec(`
+			INSERT INTO jobs (job_source, title, company, location, job_url)
+			VALUES ('LINKEDIN', 'IT Help Desk', 'Acme Corp', 'New York, United States',
+			        'https://www.linkedin.com/jobs/view/4123456789/')
+		`); err != nil {
+			t.Fatalf("seed duplicate job: %v", err)
+		}
+
+		okHandler := linkedInFixtureHandler(t, http.StatusOK)
+		calls := 0
+		client, hits, restore := interceptLinkedIn(t, func(w http.ResponseWriter, r *http.Request) {
+			calls++
+			if calls == 1 {
+				okHandler(w, r)
+				return
+			}
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = io.WriteString(w, "nope")
+		})
+		defer restore()
+
+		s := NewService(pool)
+		s.HTTPClient = client
+		s.ErrorBackoff = 5 * time.Minute
+		result, err := s.RunTick(ctx, TickInput{})
+		if err != nil {
+			t.Fatalf("RunTick: %v", err)
+		}
+		if *hits < 2 {
+			t.Errorf("LinkedIn must continue after an earlier query failure, hits=%d", *hits)
+		}
+		if result.Status != "error" {
+			t.Errorf("combined status = %q, want error when any provider failed", result.Status)
+		}
+		if result.JobSource != "LINKEDIN" {
+			t.Errorf("job_source = %q, want LINKEDIN for single due provider with query errors", result.JobSource)
+		}
+		wantErr := "linkedin returned status 500"
+		if result.Error != wantErr {
+			t.Errorf("error = %q, want %q", result.Error, wantErr)
+		}
+		if result.ScrapedCount != 2 {
+			t.Errorf("scraped_count = %d, want 2", result.ScrapedCount)
+		}
+		if result.SavedCount != 1 {
+			t.Errorf("saved_count = %d, want 1", result.SavedCount)
+		}
+		if result.DuplicateCount != 1 {
+			t.Errorf("duplicate_count = %d, want 1", result.DuplicateCount)
+		}
+	})
+
+	t.Run("single_due_keeps_job_source", func(t *testing.T) {
+		pool := cadencePool(t)
+		ctx := t.Context()
+		if _, err := pool.Exec(`
+			UPDATE scraper_settings
+			SET enabled = true, last_scraped_at = NULL, next_eligible_at = NULL
+			WHERE job_source = 'LINKEDIN'
+		`); err != nil {
+			t.Fatalf("configure LinkedIn: %v", err)
+		}
+		if _, err := pool.Exec(`
+			UPDATE scraper_settings SET enabled = false WHERE job_source = 'INDEED'
+		`); err != nil {
+			t.Fatalf("disable Indeed: %v", err)
+		}
+
+		okHandler := linkedInFixtureHandler(t, http.StatusOK)
+		client, _, restore := interceptLinkedIn(t, okHandler)
+		defer restore()
+
+		s := NewService(pool)
+		s.HTTPClient = client
+		result, err := s.RunTick(ctx, TickInput{})
+		if err != nil {
+			t.Fatalf("RunTick: %v", err)
+		}
+		if result.Status != "success" {
+			t.Errorf("single LinkedIn tick status = %q (%s), want success", result.Status, result.Error)
+		}
+		if result.JobSource != "LINKEDIN" {
+			t.Errorf("single due provider job_source = %q, want LINKEDIN", result.JobSource)
+		}
+	})
+}
+
+func TestRunFullScrape_IndeedWithoutTokenDoesNotUpdateLastScrapedAt(t *testing.T) {
 	pool := cadencePool(t)
 	ctx := t.Context()
+	if _, err := pool.Exec(`
+		UPDATE scraper_settings SET enabled = true WHERE job_source = 'INDEED'
+	`); err != nil {
+		t.Fatalf("enable Indeed: %v", err)
+	}
 
 	s := NewService(pool)
 	var lastBefore, nextBefore sql.NullTime
@@ -382,8 +498,11 @@ func TestRunFullScrape_IndeedStubDoesNotUpdateLastScrapedAt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunFullScrape Indeed: %v", err)
 	}
-	if result.Status == "success" {
-		t.Error("empty Indeed stub must not look like a successful scrape that can update last_scraped_at")
+	if result.Status != "skipped" {
+		t.Errorf("status = %q, want skipped without Apify token", result.Status)
+	}
+	if !strings.Contains(result.Error, "Apify") {
+		t.Errorf("error = %q, want Apify setup message", result.Error)
 	}
 
 	var last, next sql.NullTime
@@ -394,7 +513,7 @@ func TestRunFullScrape_IndeedStubDoesNotUpdateLastScrapedAt(t *testing.T) {
 		return
 	}
 	if last.Valid != lastBefore.Valid || next.Valid != nextBefore.Valid {
-		t.Error("empty Indeed stub must not change last_scraped_at or next_eligible_at")
+		t.Error("Indeed without token must not change last_scraped_at or next_eligible_at")
 	}
 }
 
@@ -585,7 +704,10 @@ func TestRunFullScrape_DebugForceStillSkipsDisabledAndTakesLock(t *testing.T) {
 		t.Fatalf("debug scrape Indeed: %v", err)
 	}
 	if indeed.Status == "success" {
-		t.Error("debug scrape must not treat the empty Indeed stub as success")
+		t.Error("debug scrape must not succeed for disabled Indeed")
+	}
+	if indeed.Status != "skipped" {
+		t.Errorf("disabled Indeed status = %q, want skipped", indeed.Status)
 	}
 }
 
@@ -619,6 +741,11 @@ func cadencePool(t *testing.T) *sql.DB {
 		WHERE job_source = 'LINKEDIN'
 	`, queries); err != nil {
 		t.Fatalf("shrink LinkedIn queries for tests: %v", err)
+	}
+	if _, err := pool.Exec(`
+		UPDATE scraper_settings SET enabled = false WHERE job_source IN ('DICE', 'INDEED')
+	`); err != nil {
+		t.Fatalf("disable Apify providers so LinkedIn cadence tests stay isolated: %v", err)
 	}
 	return pool
 }

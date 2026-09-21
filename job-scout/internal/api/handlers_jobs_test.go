@@ -443,6 +443,67 @@ func TestJobStats_NewJobsIsPendingAndCountsByState(t *testing.T) {
 	}
 }
 
+func TestJobs_AcceptsDiceSourceFilter(t *testing.T) {
+	pool := pgtest.Open(t)
+	if err := db.Migrate(pool); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	if err := db.SeedSettings(t.Context(), pool); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v0/jobs?job_source=DICE", nil)
+	rec := httptest.NewRecorder()
+	NewServer("", &Handler{DB: pool}).Handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v0/jobs?job_source=DICE status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	if _, err := db.InsertJobIfNew(t.Context(), pool, db.Job{
+		JobSource: db.SourceLinkedIn,
+		Title:     "LinkedIn Keep",
+		Company:   "Acme",
+		Location:  "Remote",
+		JobURL:    "https://example.test/jobs/linkedin-keep",
+	}); err != nil {
+		t.Fatalf("insert LinkedIn job: %v", err)
+	}
+	if _, err := db.InsertJobIfNew(t.Context(), pool, db.Job{
+		JobSource: "DICE",
+		Title:     "Dice Keep",
+		Company:   "Acme",
+		Location:  "Port Orange, FL",
+		JobURL:    "https://example.test/jobs/dice-keep",
+	}); err != nil {
+		t.Fatalf("insert Dice job: %v", err)
+	}
+
+	filtered := httptest.NewRecorder()
+	NewServer("", &Handler{DB: pool}).Handler.ServeHTTP(
+		filtered,
+		httptest.NewRequest(http.MethodGet, "/api/v0/jobs?job_source=DICE", nil),
+	)
+	if filtered.Code != http.StatusOK {
+		t.Fatalf("filtered Dice jobs status=%d body=%s", filtered.Code, filtered.Body.String())
+	}
+	var page struct {
+		Items []map[string]any `json:"items"`
+		Total int              `json:"total"`
+	}
+	if err := json.Unmarshal(filtered.Body.Bytes(), &page); err != nil {
+		t.Fatalf("jobs JSON: %v", err)
+	}
+	if page.Total != 1 || len(page.Items) != 1 {
+		t.Fatalf("Dice filter page=%#v, want one Dice job", page)
+	}
+	if page.Items[0]["job_url"] != "https://example.test/jobs/dice-keep" {
+		t.Errorf("Dice filter job_url=%v, want dice-keep", page.Items[0]["job_url"])
+	}
+	if page.Items[0]["job_source"] != "DICE" {
+		t.Errorf("Dice filter job_source=%v, want DICE", page.Items[0]["job_source"])
+	}
+}
+
 func TestREADME_DocumentsNewJobsAsPending(t *testing.T) {
 	_, thisFile, _, ok := runtime.Caller(0)
 	if !ok {

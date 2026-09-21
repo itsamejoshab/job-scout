@@ -191,6 +191,16 @@ func (s *LinkedInScraper) ScrapeJobs(ctx context.Context, query map[string]strin
 
 	var jobs []JobData
 	for page := 0; page < s.pagesToScrape; page++ {
+		ReportProgress(ctx, Progress{
+			Phase:         "page",
+			Source:        string(db.SourceLinkedIn),
+			Page:          page + 1,
+			Pages:         s.pagesToScrape,
+			Keywords:      query["keywords"],
+			Location:      query["location"],
+			JobsCollected: len(jobs),
+			Message:       fmt.Sprintf("linkedin page %d/%d", page+1, s.pagesToScrape),
+		})
 		slog.Info("scraping linkedin page", "page", page+1, "of", s.pagesToScrape)
 		pageURL := strings.Replace(s.buildSearchURL(query), "start=0", fmt.Sprintf("start=%d", 25*page), 1)
 

@@ -7,6 +7,7 @@ import {
   getProviderSettings,
   replaceProviderSettings,
   resetProviderSettings,
+  type IndeedProviderOptions,
   type ProviderSettings,
   type ProviderSettingsInput,
 } from "./api";
@@ -18,6 +19,20 @@ const linkedInWorkTypes = [
   { code: "3", label: "Hybrid" },
   { code: "2", label: "Remote" },
 ] as const;
+
+const indeedJobTypes = [
+  "fulltime",
+  "parttime",
+  "contract",
+  "internship",
+  "temporary",
+  "permanent",
+  "seasonal",
+  "freelance",
+] as const;
+
+const indeedFromDays = ["1", "3", "7", "14"] as const;
+const indeedRadii = ["0", "5", "10", "15", "25", "35", "50", "100"] as const;
 
 type LinkedInWorkType = (typeof linkedInWorkTypes)[number]["code"];
 
@@ -31,8 +46,73 @@ interface LinkedInMatrix {
   locations: LinkedInLocation[];
 }
 
+interface DiceLocation {
+  location: string;
+  includeRemote: boolean;
+}
+
+interface DiceMatrix {
+  queries: string[];
+  locations: DiceLocation[];
+}
+
+interface IndeedLocation {
+  location: string;
+  radius: string;
+  includeRemote: boolean;
+  includeHybrid: boolean;
+}
+
+interface IndeedMatrix {
+  queries: string[];
+  locations: IndeedLocation[];
+}
+
 interface ProviderDraft extends ProviderSettingsInput {
   linkedInMatrix?: LinkedInMatrix;
+  diceMatrix?: DiceMatrix;
+  indeedMatrix?: IndeedMatrix;
+}
+
+const defaultIndeedRadius = "15";
+
+function defaultIndeedOptions(): IndeedProviderOptions {
+  return {
+    country: "us",
+    jobType: "fulltime",
+    fromDays: "1",
+    maxRows: 100,
+    enableUniqueJobs: true,
+    includeSimilarJobs: false,
+  };
+}
+
+function toIndeedOptions(raw: ProviderSettings["provider_options"]): IndeedProviderOptions {
+  const defaults = defaultIndeedOptions();
+  if (!raw || typeof raw !== "object") {
+    return defaults;
+  }
+  const options = raw as Partial<IndeedProviderOptions>;
+  return {
+    country: typeof options.country === "string" && options.country ? options.country : defaults.country,
+    jobType: typeof options.jobType === "string" && options.jobType ? options.jobType : defaults.jobType,
+    fromDays: typeof options.fromDays === "string" && options.fromDays ? options.fromDays : defaults.fromDays,
+    maxRows: typeof options.maxRows === "number" && options.maxRows > 0 ? options.maxRows : defaults.maxRows,
+    enableUniqueJobs: typeof options.enableUniqueJobs === "boolean"
+      ? options.enableUniqueJobs
+      : defaults.enableUniqueJobs,
+    includeSimilarJobs: typeof options.includeSimilarJobs === "boolean"
+      ? options.includeSimilarJobs
+      : defaults.includeSimilarJobs,
+  };
+}
+
+function legacyIndeedRadius(raw: ProviderSettings["provider_options"]): string {
+  if (!raw || typeof raw !== "object") {
+    return defaultIndeedRadius;
+  }
+  const radius = (raw as { radius?: unknown }).radius;
+  return typeof radius === "string" && radius ? radius : defaultIndeedRadius;
 }
 
 function toLinkedInMatrix(searchQueries: ProviderSettings["search_queries"]): LinkedInMatrix {
@@ -85,27 +165,172 @@ function fromLinkedInMatrix(matrix: LinkedInMatrix): ProviderSettings["search_qu
   );
 }
 
+function remoteFlag(value: ProviderSettings["search_queries"][number]["include_remote"]) {
+  return value === true || value === "true";
+}
+
+function toDiceMatrix(searchQueries: ProviderSettings["search_queries"]): DiceMatrix {
+  const queries: string[] = [];
+  const locations: DiceLocation[] = [];
+  const seen = new Map<string, number>();
+
+  for (const query of searchQueries) {
+    if (!queries.includes(query.keywords)) {
+      queries.push(query.keywords);
+    }
+    const key = query.location;
+    const includeRemote = remoteFlag(query.include_remote);
+    const existing = seen.get(key);
+    if (existing === undefined) {
+      seen.set(key, locations.length);
+      locations.push({ location: query.location, includeRemote });
+      continue;
+    }
+    locations[existing] = { location: query.location, includeRemote };
+  }
+
+  return { queries, locations };
+}
+
+function fromDiceMatrix(matrix: DiceMatrix): ProviderSettingsInput["search_queries"] {
+  const locations: DiceLocation[] = [];
+  const seen = new Map<string, number>();
+  for (const location of matrix.locations) {
+    const key = location.location.trim();
+    if (key === "") {
+      locations.push(location);
+      continue;
+    }
+    const existing = seen.get(key);
+    if (existing === undefined) {
+      seen.set(key, locations.length);
+      locations.push({ location: location.location, includeRemote: location.includeRemote });
+      continue;
+    }
+    locations[existing] = { location: location.location, includeRemote: location.includeRemote };
+  }
+  return matrix.queries.flatMap((keywords) =>
+    locations.map((location) => ({
+      keywords,
+      location: location.location,
+      include_remote: location.includeRemote,
+    })),
+  );
+}
+
+function flagValue(value: ProviderSettings["search_queries"][number]["include_remote"]) {
+  return value === true || value === "true";
+}
+
+function toIndeedMatrix(
+  searchQueries: ProviderSettings["search_queries"],
+  fallbackRadius = defaultIndeedRadius,
+): IndeedMatrix {
+  const queries: string[] = [];
+  const locations: IndeedLocation[] = [];
+  const seen = new Map<string, number>();
+
+  for (const query of searchQueries) {
+    if (!queries.includes(query.keywords)) {
+      queries.push(query.keywords);
+    }
+    const key = query.location;
+    const includeRemote = flagValue(query.include_remote);
+    const includeHybrid = flagValue(query.include_hybrid);
+    const radius = typeof query.radius === "string" && query.radius
+      ? query.radius
+      : fallbackRadius;
+    const existing = seen.get(key);
+    if (existing === undefined) {
+      seen.set(key, locations.length);
+      locations.push({ location: query.location, radius, includeRemote, includeHybrid });
+      continue;
+    }
+    locations[existing] = { location: query.location, radius, includeRemote, includeHybrid };
+  }
+
+  return { queries, locations };
+}
+
+function fromIndeedMatrix(matrix: IndeedMatrix): ProviderSettingsInput["search_queries"] {
+  const locations: IndeedLocation[] = [];
+  const seen = new Map<string, number>();
+  for (const location of matrix.locations) {
+    const key = location.location.trim();
+    if (key === "") {
+      locations.push(location);
+      continue;
+    }
+    const existing = seen.get(key);
+    if (existing === undefined) {
+      seen.set(key, locations.length);
+      locations.push({
+        location: location.location,
+        radius: location.radius,
+        includeRemote: location.includeRemote,
+        includeHybrid: location.includeHybrid,
+      });
+      continue;
+    }
+    locations[existing] = {
+      location: location.location,
+      radius: location.radius,
+      includeRemote: location.includeRemote,
+      includeHybrid: location.includeHybrid,
+    };
+  }
+  return matrix.queries.flatMap((keywords) =>
+    locations.map((location) => ({
+      keywords,
+      location: location.location,
+      radius: location.radius,
+      include_remote: location.includeRemote,
+      include_hybrid: location.includeHybrid,
+    })),
+  );
+}
+
 function toInput(settings: ProviderSettings): ProviderDraft {
+  const diceMatrix = settings.job_source === "DICE"
+    ? toDiceMatrix(settings.search_queries)
+    : undefined;
+  const indeedMatrix = settings.job_source === "INDEED"
+    ? toIndeedMatrix(settings.search_queries, legacyIndeedRadius(settings.provider_options))
+    : undefined;
+  const indeedOptions = settings.job_source === "INDEED"
+    ? toIndeedOptions(settings.provider_options)
+    : undefined;
   return {
     enabled: settings.enabled,
     scrape_interval_seconds: settings.scrape_interval_seconds,
-    timespan_code: settings.timespan_code,
+    timespan_code: settings.job_source === "INDEED" && indeedOptions
+      ? indeedOptions.fromDays
+      : settings.timespan_code,
     pages_to_scrape: settings.pages_to_scrape,
     rounds: settings.rounds,
-    search_queries: settings.search_queries.map((query) => ({
-      keywords: query.keywords,
-      location: query.location,
-      f_WT: query.f_WT ?? "",
-    })),
-    global_searches: [...settings.global_searches],
+    search_queries: settings.job_source === "DICE" && diceMatrix
+      ? fromDiceMatrix(diceMatrix)
+      : settings.job_source === "INDEED" && indeedMatrix
+        ? fromIndeedMatrix(indeedMatrix)
+        : settings.search_queries.map((query) => ({
+            keywords: query.keywords,
+            location: query.location,
+            f_WT: query.f_WT ?? "",
+          })),
+    global_searches: settings.job_source === "DICE" || settings.job_source === "INDEED"
+      ? []
+      : [...settings.global_searches],
+    provider_options: indeedOptions,
     linkedInMatrix: settings.job_source === "LINKEDIN"
       ? toLinkedInMatrix(settings.search_queries)
       : undefined,
+    diceMatrix,
+    indeedMatrix,
   };
 }
 
 function cloneInput(settings: ProviderDraft): ProviderSettingsInput {
-  return {
+  const body: ProviderSettingsInput = {
     enabled: settings.enabled,
     scrape_interval_seconds: settings.scrape_interval_seconds,
     timespan_code: settings.timespan_code,
@@ -114,6 +339,10 @@ function cloneInput(settings: ProviderDraft): ProviderSettingsInput {
     search_queries: settings.search_queries.map((query) => ({ ...query })),
     global_searches: [...settings.global_searches],
   };
+  if (settings.provider_options) {
+    body.provider_options = { ...settings.provider_options };
+  }
+  return body;
 }
 
 function inputsEqual(left: ProviderDraft, right: ProviderDraft) {
@@ -321,6 +550,387 @@ function LinkedInSearchEditor({
   );
 }
 
+function DiceSearchEditor({
+  matrix,
+  onChange,
+}: {
+  matrix: DiceMatrix;
+  onChange: (matrix: DiceMatrix) => void;
+}) {
+  return (
+    <>
+      <SettingsGroup
+        title="Queries"
+        hint="Combined with every location below."
+        count={`${matrix.queries.length} queries`}
+      >
+        <div className="mt-2 max-w-md space-y-1.5">
+          {matrix.queries.map((query, index) => (
+            <div className="flex gap-2" key={index}>
+              <input
+                aria-label={`Dice query ${index + 1}`}
+                className="field-sm min-w-0 flex-1"
+                value={query}
+                onChange={(event) => {
+                  const queries = matrix.queries.map((item, itemIndex) =>
+                    itemIndex === index ? event.target.value : item
+                  );
+                  onChange({ ...matrix, queries });
+                }}
+              />
+              <RemoveButton
+                label={`Remove Dice query ${index + 1}`}
+                onClick={() => onChange({
+                  ...matrix,
+                  queries: matrix.queries.filter((_, itemIndex) => itemIndex !== index),
+                })}
+              />
+            </div>
+          ))}
+        </div>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="mt-2"
+          onClick={() => onChange({ ...matrix, queries: [...matrix.queries, ""] })}
+        >
+          <Plus className="h-4 w-4" aria-hidden="true" />
+          Add Dice query
+        </Button>
+      </SettingsGroup>
+
+      <SettingsGroup
+        title="Locations"
+        hint="Free-text city and state. Include remote is stored per location."
+        count={`${matrix.locations.length} locations`}
+      >
+        {matrix.locations.length === 0 ? (
+          <p className="mt-2 text-sm text-muted-foreground">
+            No locations yet. Add a city and state to start.
+          </p>
+        ) : (
+          <table className="mt-2 max-w-md text-left text-sm">
+            <thead>
+              <tr className="text-xs font-medium text-muted-foreground">
+                <th className="py-1 pr-3 font-medium">Location</th>
+                <th className="px-2 py-1 text-center font-medium">Include remote</th>
+                <th className="sr-only">Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {matrix.locations.map((location, index) => (
+                <tr key={index}>
+                  <td className="py-1 pr-3">
+                    <input
+                      aria-label={`Dice location ${index + 1}`}
+                      className="field-sm min-w-0 w-56"
+                      value={location.location}
+                      onChange={(event) => {
+                        const locations = matrix.locations.map((item, itemIndex) =>
+                          itemIndex === index ? { ...item, location: event.target.value } : item
+                        );
+                        onChange({ ...matrix, locations });
+                      }}
+                    />
+                  </td>
+                  <td className="px-2 py-1 text-center">
+                    <input
+                      type="checkbox"
+                      aria-label={`Dice location ${index + 1} include remote`}
+                      checked={location.includeRemote}
+                      onChange={(event) => {
+                        const locations = matrix.locations.map((item, itemIndex) =>
+                          itemIndex === index
+                            ? { ...item, includeRemote: event.target.checked }
+                            : item
+                        );
+                        onChange({ ...matrix, locations });
+                      }}
+                    />
+                  </td>
+                  <td className="py-1 pl-2">
+                    <RemoveButton
+                      label={`Remove Dice location ${index + 1}`}
+                      onClick={() => onChange({
+                        ...matrix,
+                        locations: matrix.locations.filter((_, itemIndex) => itemIndex !== index),
+                      })}
+                    />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        <Button
+          size="sm"
+          variant="ghost"
+          className="mt-2"
+          onClick={() => onChange({
+            ...matrix,
+            locations: [
+              ...matrix.locations,
+              { location: "", includeRemote: true },
+            ],
+          })}
+        >
+          <Plus className="h-4 w-4" aria-hidden="true" />
+          Add Dice location
+        </Button>
+      </SettingsGroup>
+    </>
+  );
+}
+
+function IndeedSearchEditor({
+  matrix,
+  options,
+  onMatrixChange,
+  onOptionsChange,
+}: {
+  matrix: IndeedMatrix;
+  options: IndeedProviderOptions;
+  onMatrixChange: (matrix: IndeedMatrix) => void;
+  onOptionsChange: (options: IndeedProviderOptions) => void;
+}) {
+  return (
+    <>
+      <SettingsGroup
+        title="Indeed run options"
+        hint="Shared actor filters for every query and location pair."
+      >
+        <SettingRow label="Country" hint="Indeed country code, such as us.">
+          <input
+            aria-label="Indeed country"
+            className="field-sm w-20 shrink-0"
+            value={options.country}
+            onChange={(event) => onOptionsChange({ ...options, country: event.target.value })}
+          />
+        </SettingRow>
+        <SettingRow label="Job type">
+          <select
+            aria-label="Indeed job type"
+            className="field-sm w-36 shrink-0"
+            value={options.jobType}
+            onChange={(event) => onOptionsChange({ ...options, jobType: event.target.value })}
+          >
+            {indeedJobTypes.map((jobType) => (
+              <option key={jobType} value={jobType}>{jobType}</option>
+            ))}
+          </select>
+        </SettingRow>
+        <SettingRow label="From days" hint="Only jobs posted within this many days.">
+          <select
+            aria-label="Indeed from days"
+            className="field-sm w-24 shrink-0"
+            value={options.fromDays}
+            onChange={(event) => onOptionsChange({ ...options, fromDays: event.target.value })}
+          >
+            {indeedFromDays.map((fromDays) => (
+              <option key={fromDays} value={fromDays}>{fromDays}</option>
+            ))}
+          </select>
+        </SettingRow>
+        <SettingRow label="Max rows" hint="Maximum jobs to scrape per actor run.">
+          <input
+            type="number"
+            min={1}
+            max={1000}
+            aria-label="Indeed max rows"
+            className="field-sm w-24 shrink-0 tabular-nums"
+            value={options.maxRows}
+            onChange={(event) => onOptionsChange({
+              ...options,
+              maxRows: Number(event.target.value),
+            })}
+          />
+        </SettingRow>
+        <SettingRow label="Unique jobs" hint="Ask the actor to skip duplicate jobs.">
+          <input
+            type="checkbox"
+            aria-label="Indeed enable unique jobs"
+            checked={options.enableUniqueJobs}
+            onChange={(event) => onOptionsChange({
+              ...options,
+              enableUniqueJobs: event.target.checked,
+            })}
+          />
+        </SettingRow>
+        <SettingRow label="Similar jobs" hint="Include Indeed similar-job results.">
+          <input
+            type="checkbox"
+            aria-label="Indeed include similar jobs"
+            checked={options.includeSimilarJobs}
+            onChange={(event) => onOptionsChange({
+              ...options,
+              includeSimilarJobs: event.target.checked,
+            })}
+          />
+        </SettingRow>
+      </SettingsGroup>
+
+      <SettingsGroup
+        title="Queries"
+        hint="Combined with every location below."
+        count={`${matrix.queries.length} queries`}
+      >
+        <div className="mt-2 max-w-md space-y-1.5">
+          {matrix.queries.map((query, index) => (
+            <div className="flex gap-2" key={index}>
+              <input
+                aria-label={`Indeed query ${index + 1}`}
+                className="field-sm min-w-0 flex-1"
+                value={query}
+                onChange={(event) => {
+                  const queries = matrix.queries.map((item, itemIndex) =>
+                    itemIndex === index ? event.target.value : item
+                  );
+                  onMatrixChange({ ...matrix, queries });
+                }}
+              />
+              <RemoveButton
+                label={`Remove Indeed query ${index + 1}`}
+                onClick={() => onMatrixChange({
+                  ...matrix,
+                  queries: matrix.queries.filter((_, itemIndex) => itemIndex !== index),
+                })}
+              />
+            </div>
+          ))}
+        </div>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="mt-2"
+          onClick={() => onMatrixChange({ ...matrix, queries: [...matrix.queries, ""] })}
+        >
+          <Plus className="h-4 w-4" aria-hidden="true" />
+          Add Indeed query
+        </Button>
+      </SettingsGroup>
+
+      <SettingsGroup
+        title="Locations"
+        hint="Free-text city and state. Radius, remote, and hybrid are stored per location."
+        count={`${matrix.locations.length} locations`}
+      >
+        {matrix.locations.length === 0 ? (
+          <p className="mt-2 text-sm text-muted-foreground">
+            No locations yet. Add a city and state to start.
+          </p>
+        ) : (
+          <table className="mt-2 max-w-2xl text-left text-sm">
+            <thead>
+              <tr className="text-xs font-medium text-muted-foreground">
+                <th className="py-1 pr-3 font-medium">Location</th>
+                <th className="px-2 py-1 font-medium">Radius</th>
+                <th className="px-2 py-1 text-center font-medium">Remote</th>
+                <th className="px-2 py-1 text-center font-medium">Hybrid</th>
+                <th className="sr-only">Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {matrix.locations.map((location, index) => (
+                <tr key={index}>
+                  <td className="py-1 pr-3">
+                    <input
+                      aria-label={`Indeed location ${index + 1}`}
+                      className="field-sm min-w-0 w-56"
+                      value={location.location}
+                      onChange={(event) => {
+                        const locations = matrix.locations.map((item, itemIndex) =>
+                          itemIndex === index ? { ...item, location: event.target.value } : item
+                        );
+                        onMatrixChange({ ...matrix, locations });
+                      }}
+                    />
+                  </td>
+                  <td className="px-2 py-1">
+                    <select
+                      aria-label={`Indeed location ${index + 1} radius`}
+                      className="field-sm w-20"
+                      value={location.radius}
+                      onChange={(event) => {
+                        const locations = matrix.locations.map((item, itemIndex) =>
+                          itemIndex === index ? { ...item, radius: event.target.value } : item
+                        );
+                        onMatrixChange({ ...matrix, locations });
+                      }}
+                    >
+                      {indeedRadii.map((radius) => (
+                        <option key={radius} value={radius}>{radius}</option>
+                      ))}
+                    </select>
+                  </td>
+                  <td className="px-2 py-1 text-center">
+                    <input
+                      type="checkbox"
+                      aria-label={`Indeed location ${index + 1} remote`}
+                      checked={location.includeRemote}
+                      onChange={(event) => {
+                        const locations = matrix.locations.map((item, itemIndex) =>
+                          itemIndex === index
+                            ? { ...item, includeRemote: event.target.checked }
+                            : item
+                        );
+                        onMatrixChange({ ...matrix, locations });
+                      }}
+                    />
+                  </td>
+                  <td className="px-2 py-1 text-center">
+                    <input
+                      type="checkbox"
+                      aria-label={`Indeed location ${index + 1} hybrid`}
+                      checked={location.includeHybrid}
+                      onChange={(event) => {
+                        const locations = matrix.locations.map((item, itemIndex) =>
+                          itemIndex === index
+                            ? { ...item, includeHybrid: event.target.checked }
+                            : item
+                        );
+                        onMatrixChange({ ...matrix, locations });
+                      }}
+                    />
+                  </td>
+                  <td className="py-1 pl-2">
+                    <RemoveButton
+                      label={`Remove Indeed location ${index + 1}`}
+                      onClick={() => onMatrixChange({
+                        ...matrix,
+                        locations: matrix.locations.filter((_, itemIndex) => itemIndex !== index),
+                      })}
+                    />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        <Button
+          size="sm"
+          variant="ghost"
+          className="mt-2"
+          onClick={() => onMatrixChange({
+            ...matrix,
+            locations: [
+              ...matrix.locations,
+              {
+                location: "",
+                radius: defaultIndeedRadius,
+                includeRemote: false,
+                includeHybrid: false,
+              },
+            ],
+          })}
+        >
+          <Plus className="h-4 w-4" aria-hidden="true" />
+          Add Indeed location
+        </Button>
+      </SettingsGroup>
+    </>
+  );
+}
+
 function GlobalSearchesEditor({
   source,
   searches,
@@ -377,9 +987,13 @@ function GlobalSearchesEditor({
 function ProviderSection({
   settings,
   implemented,
+  configured,
+  configurationMessage,
 }: {
   settings: ProviderSettings;
   implemented: boolean;
+  configured: boolean;
+  configurationMessage?: string;
 }) {
   const queryClient = useQueryClient();
   const initial = toInput(settings);
@@ -418,12 +1032,37 @@ function ProviderSection({
       search_queries: fromLinkedInMatrix(matrix),
     }));
   };
+  const patchDice = (matrix: DiceMatrix) => {
+    setDraft((current) => ({
+      ...current,
+      diceMatrix: matrix,
+      search_queries: fromDiceMatrix(matrix),
+      global_searches: [],
+    }));
+  };
+  const patchIndeedMatrix = (matrix: IndeedMatrix) => {
+    setDraft((current) => ({
+      ...current,
+      indeedMatrix: matrix,
+      search_queries: fromIndeedMatrix(matrix),
+      global_searches: [],
+    }));
+  };
+  const patchIndeedOptions = (options: IndeedProviderOptions) => {
+    setDraft((current) => ({
+      ...current,
+      provider_options: options,
+      timespan_code: options.fromDays,
+      global_searches: [],
+    }));
+  };
 
   return (
     <article className="surface mt-3 overflow-hidden">
       <header className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-border/60 bg-muted/40 px-4 py-3">
         <h3 className="text-sm font-semibold tracking-tight">{source} provider</h3>
         {!implemented && <Badge variant="secondary">Not implemented</Badge>}
+        {implemented && !configured && <Badge variant="secondary">Setup required</Badge>}
         <div className="ml-auto flex items-center gap-2">
           {dirty && (
             <span className="text-xs font-medium text-accent-foreground">Unsaved changes</span>
@@ -453,13 +1092,19 @@ function ProviderSection({
         </div>
       </header>
 
+      {configurationMessage && (
+        <p className="border-b border-border/60 bg-muted/20 px-4 py-3 text-sm text-muted-foreground">
+          {configurationMessage}
+        </p>
+      )}
+
       <SettingsGroup title="Schedule">
         <SettingRow label="Enabled" hint="Include this provider in scheduled scrape runs.">
           <input
             type="checkbox"
             aria-label={`Enable ${source}`}
-            checked={implemented && draft.enabled}
-            disabled={!implemented}
+            checked={implemented && configured && draft.enabled}
+            disabled={!implemented || !configured}
             onChange={(event) => patch({ enabled: event.target.checked })}
           />
         </SettingRow>
@@ -473,24 +1118,41 @@ function ProviderSection({
             onChange={(event) => patch({ scrape_interval_seconds: Number(event.target.value) })}
           />
         </SettingRow>
-        <SettingRow label="Timespan code" hint="Provider code for posting age, such as r86400 for one day.">
-          <input
-            aria-label={`${source} timespan code`}
-            className="field-sm w-28 shrink-0"
-            value={draft.timespan_code}
-            onChange={(event) => patch({ timespan_code: event.target.value })}
-          />
-        </SettingRow>
-        <SettingRow label="Pages to scrape" hint="Result pages to read for each search.">
-          <input
-            type="number"
-            min={1}
-            aria-label={`${source} pages to scrape`}
-            className="field-sm w-20 shrink-0 tabular-nums"
-            value={draft.pages_to_scrape}
-            onChange={(event) => patch({ pages_to_scrape: Number(event.target.value) })}
-          />
-        </SettingRow>
+        {source !== "INDEED" && (
+          <SettingRow label="Timespan code" hint="Provider code for posting age, such as r86400 for one day.">
+            {source === "DICE" ? (
+              <select
+                aria-label="DICE posted date"
+                className="field-sm w-28 shrink-0"
+                value={draft.timespan_code}
+                onChange={(event) => patch({ timespan_code: event.target.value })}
+              >
+                {["all", "24h", "3d", "7d", "30d"].map((code) => (
+                  <option key={code} value={code}>{code}</option>
+                ))}
+              </select>
+            ) : (
+              <input
+                aria-label={`${source} timespan code`}
+                className="field-sm w-28 shrink-0"
+                value={draft.timespan_code}
+                onChange={(event) => patch({ timespan_code: event.target.value })}
+              />
+            )}
+          </SettingRow>
+        )}
+        {source !== "INDEED" && (
+          <SettingRow label="Pages to scrape" hint="Result pages to read for each search.">
+            <input
+              type="number"
+              min={1}
+              aria-label={`${source} pages to scrape`}
+              className="field-sm w-20 shrink-0 tabular-nums"
+              value={draft.pages_to_scrape}
+              onChange={(event) => patch({ pages_to_scrape: Number(event.target.value) })}
+            />
+          </SettingRow>
+        )}
         <SettingRow label="Rounds" hint="Passes for each run, from 1 to 3.">
           <input
             type="number"
@@ -506,6 +1168,15 @@ function ProviderSection({
 
       {source === "LINKEDIN" && draft.linkedInMatrix ? (
         <LinkedInSearchEditor matrix={draft.linkedInMatrix} onChange={patchLinkedIn} />
+      ) : source === "DICE" && draft.diceMatrix ? (
+        <DiceSearchEditor matrix={draft.diceMatrix} onChange={patchDice} />
+      ) : source === "INDEED" && draft.indeedMatrix ? (
+        <IndeedSearchEditor
+          matrix={draft.indeedMatrix}
+          options={toIndeedOptions(draft.provider_options)}
+          onMatrixChange={patchIndeedMatrix}
+          onOptionsChange={patchIndeedOptions}
+        />
       ) : (
         <SettingsGroup title="Search queries" count={`${draft.search_queries.length} queries`}>
           <table className="mt-2 max-w-xl text-left text-sm">
@@ -576,11 +1247,13 @@ function ProviderSection({
         </SettingsGroup>
       )}
 
-      <GlobalSearchesEditor
-        source={source}
-        searches={draft.global_searches}
-        onChange={(global_searches) => patch({ global_searches })}
-      />
+      {source !== "DICE" && source !== "INDEED" && (
+        <GlobalSearchesEditor
+          source={source}
+          searches={draft.global_searches}
+          onChange={(global_searches) => patch({ global_searches })}
+        />
+      )}
 
       <SettingsGroup title="State">
         <div className="mt-1 space-y-0.5 text-xs text-muted-foreground">
@@ -620,6 +1293,15 @@ export function ProviderSettingsEditor() {
   const implemented = new Map(
     dashboard.data?.providers.map((provider) => [provider.job_source, provider.implemented]) ?? [],
   );
+  const configured = new Map(
+    dashboard.data?.providers.map((provider) => [provider.job_source, provider.configured ?? true]) ?? [],
+  );
+  const configurationMessages = new Map(
+    dashboard.data?.providers.map((provider) => [
+      provider.job_source,
+      provider.configuration_message,
+    ]) ?? [],
+  );
 
   if (providers.isPending) {
     return <p className="mt-2 text-sm text-muted-foreground">Loading provider settings.</p>;
@@ -637,6 +1319,8 @@ export function ProviderSettingsEditor() {
             key={settings.job_source}
             settings={settings}
             implemented={implemented.get(settings.job_source) ?? false}
+            configured={configured.get(settings.job_source) ?? true}
+            configurationMessage={configurationMessages.get(settings.job_source)}
           />
         ))}
     </>

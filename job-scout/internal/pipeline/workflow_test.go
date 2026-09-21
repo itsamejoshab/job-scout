@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jobscout/jobscout/internal/config"
 	"github.com/jobscout/jobscout/internal/domain"
 	"github.com/jobscout/jobscout/internal/scraper"
 	"go.temporal.io/sdk/activity"
@@ -24,6 +25,84 @@ type NotifySnapshot struct {
 	Lists   domain.Lists
 }
 
+func TestScrapeProviderTaskQueue(t *testing.T) {
+	cases := []struct {
+		source string
+		want   string
+	}{
+		{"LINKEDIN", config.LinkedInScrapeTaskQueue},
+		{"DICE", config.ApifyScrapeTaskQueue},
+		{"INDEED", config.ApifyScrapeTaskQueue},
+		{"", config.TaskQueue},
+	}
+	for _, tc := range cases {
+		if got := ScrapeProviderTaskQueue(tc.source); got != tc.want {
+			t.Errorf("ScrapeProviderTaskQueue(%q) = %q, want %q", tc.source, got, tc.want)
+		}
+	}
+}
+
+func TestScrapeProviderActivityName(t *testing.T) {
+	cases := []struct {
+		source string
+		want   string
+	}{
+		{"LINKEDIN", ActivityScrapeProviderLinkedIn},
+		{"DICE", ActivityScrapeProviderDice},
+		{"INDEED", ActivityScrapeProviderIndeed},
+	}
+	for _, tc := range cases {
+		if got := ScrapeProviderActivityName(tc.source); got != tc.want {
+			t.Errorf("ScrapeProviderActivityName(%q) = %q, want %q", tc.source, got, tc.want)
+		}
+	}
+}
+
+func TestRegisterMain_OmitsScrapeProviderActivity(t *testing.T) {
+	rec := &registryRecorder{}
+	RegisterMain(rec, &Activities{})
+	if rec.hasWorkflow("ProviderScrapeWorkflow") {
+		t.Errorf("ProviderScrapeWorkflow must not be registered; registered %v", rec.workflows)
+	}
+	for _, name := range []string{
+		ActivityScrapeProviderLinkedIn,
+		ActivityScrapeProviderDice,
+		ActivityScrapeProviderIndeed,
+	} {
+		if rec.hasActivity(name) {
+			t.Errorf("main worker must not own %s; registered %v", name, rec.activities)
+		}
+	}
+	if !rec.hasWorkflow("ScrapeWorkflow") {
+		t.Errorf("main worker must register ScrapeWorkflow; registered %v", rec.workflows)
+	}
+	if !rec.hasActivity(ActivityListDueProviders) {
+		t.Errorf("main worker must register %s; registered %v", ActivityListDueProviders, rec.activities)
+	}
+}
+
+func TestRegisterApifyScrapeActivities(t *testing.T) {
+	rec := &registryRecorder{}
+	RegisterApifyScrapeActivities(rec, &Activities{})
+	if !rec.hasActivity(ActivityScrapeProviderDice) || !rec.hasActivity(ActivityScrapeProviderIndeed) {
+		t.Errorf("apify queue must register dice and indeed; registered %v", rec.activities)
+	}
+	if rec.hasActivity(ActivityScrapeProviderLinkedIn) {
+		t.Errorf("apify queue must not register linkedin; registered %v", rec.activities)
+	}
+}
+
+func TestRegisterLinkedInScrapeActivities(t *testing.T) {
+	rec := &registryRecorder{}
+	RegisterLinkedInScrapeActivities(rec, &Activities{})
+	if !rec.hasActivity(ActivityScrapeProviderLinkedIn) {
+		t.Errorf("linkedin queue must register linkedin; registered %v", rec.activities)
+	}
+	if rec.hasActivity(ActivityScrapeProviderDice) {
+		t.Errorf("linkedin queue must not register dice; registered %v", rec.activities)
+	}
+}
+
 func TestRegister_ScrapeAndNotifyAreProductionPath(t *testing.T) {
 	rec := &registryRecorder{}
 	Register(rec, &Activities{})
@@ -33,6 +112,9 @@ func TestRegister_ScrapeAndNotifyAreProductionPath(t *testing.T) {
 	}
 	if !rec.hasWorkflow("ScrapeWorkflow") {
 		t.Errorf("worker must register ScrapeWorkflow; registered %v", rec.workflows)
+	}
+	if rec.hasWorkflow("ProviderScrapeWorkflow") {
+		t.Errorf("ProviderScrapeWorkflow must not be registered; registered %v", rec.workflows)
 	}
 	if !rec.hasWorkflow("NotifyWorkflow") {
 		t.Errorf("worker must register NotifyWorkflow; registered %v", rec.workflows)
@@ -46,8 +128,17 @@ func TestRegister_ScrapeAndNotifyAreProductionPath(t *testing.T) {
 	if !rec.hasWorkflow("ProcessJobWorkflow") {
 		t.Errorf("worker must register ProcessJobWorkflow; registered %v", rec.workflows)
 	}
-	if !rec.hasActivity(ActivityScrapeJobs) {
-		t.Errorf("worker must register %s; registered %v", ActivityScrapeJobs, rec.activities)
+	if !rec.hasActivity(ActivityListDueProviders) {
+		t.Errorf("worker must register %s; registered %v", ActivityListDueProviders, rec.activities)
+	}
+	for _, name := range []string{
+		ActivityScrapeProviderLinkedIn,
+		ActivityScrapeProviderDice,
+		ActivityScrapeProviderIndeed,
+	} {
+		if !rec.hasActivity(name) {
+			t.Errorf("worker must register %s; registered %v", name, rec.activities)
+		}
 	}
 	if !rec.hasActivity(ActivityClaimNotificationBatch) {
 		t.Errorf("worker must register %s; registered %v", ActivityClaimNotificationBatch, rec.activities)
@@ -114,7 +205,7 @@ func TestScrapeTick_StoresJobsWithoutSmartFilter(t *testing.T) {
 	if probe.scrape != 1 {
 		t.Errorf("ScrapeTick must fetch and store jobs once, scrape calls=%d", probe.scrape)
 	}
-	assertActivityNames(t, *started, ActivityScrapeJobs, ActivityWakeFilterPending)
+	assertActivityNames(t, *started, ActivityListDueProviders, ActivityScrapeProviderLinkedIn, ActivityWakeFilterPending)
 }
 
 func TestScrapeTick_LinkedInSearchActivityRunsOnce(t *testing.T) {
@@ -140,7 +231,7 @@ func TestScrapeTick_LinkedInSearchActivityRunsOnce(t *testing.T) {
 	if probe.scrape != 1 {
 		t.Errorf("LinkedIn search GET activity retry policy MaximumAttempts must be 1, got %d attempts", probe.scrape)
 	}
-	assertActivityNames(t, *started, ActivityScrapeJobs, ActivityWakeFilterPending)
+	assertActivityNames(t, *started, ActivityListDueProviders, ActivityScrapeProviderLinkedIn, ActivityWakeFilterPending)
 }
 
 func TestScrapeTick_ScrapeActivityAllowsFortyFiveMinutes(t *testing.T) {
@@ -149,9 +240,11 @@ func TestScrapeTick_ScrapeActivityAllowsFortyFiveMinutes(t *testing.T) {
 	probe := &activityProbe{}
 	registerProbeActivities(env, probe)
 	var timeout time.Duration
+	var heartbeat time.Duration
 	env.SetOnActivityStartedListener(func(info *activity.Info, _ context.Context, _ converter.EncodedValues) {
-		if info.ActivityType.Name == ActivityScrapeJobs {
+		if info.ActivityType.Name == ActivityScrapeProviderLinkedIn {
 			timeout = info.StartToCloseTimeout
+			heartbeat = info.HeartbeatTimeout
 		}
 	})
 
@@ -162,6 +255,9 @@ func TestScrapeTick_ScrapeActivityAllowsFortyFiveMinutes(t *testing.T) {
 	}
 	if timeout != 45*time.Minute {
 		t.Errorf("Scrape StartToCloseTimeout = %s, want 45m", timeout)
+	}
+	if heartbeat != 2*time.Minute {
+		t.Errorf("Scrape HeartbeatTimeout = %s, want 2m", heartbeat)
 	}
 }
 
@@ -650,7 +746,8 @@ func TestNotifyTick_PassersBecomeReadyWithoutWebhook(t *testing.T) {
 
 func TestScrapeTick_PassesForceAndCompletesWhenSkipped(t *testing.T) {
 	env, started, probe := newWorkflowEnv()
-	probe.result = scraper.Result{Status: "skipped"}
+	probe.listForced = true
+	probe.listSources = []string{}
 
 	env.ExecuteWorkflow(ScrapeWorkflow, scraper.TickInput{Force: true})
 
@@ -668,12 +765,99 @@ func TestScrapeTick_PassesForceAndCompletesWhenSkipped(t *testing.T) {
 		t.Errorf("empty due-set result status = %q, want skipped", got.Status)
 	}
 	if !probe.lastIn.Force {
-		t.Errorf("ScrapeTick must pass force to the scrape activity, got %+v", probe.lastIn)
+		t.Errorf("ScrapeTick must pass force to list_due_providers, got %+v", probe.lastIn)
 	}
-	if probe.scrape != 1 {
-		t.Errorf("Scrape activity MaximumAttempts must stay 1, got %d", probe.scrape)
+	if probe.scrape != 0 {
+		t.Errorf("empty due-set must not scrape providers, got %d", probe.scrape)
 	}
-	assertActivityNames(t, *started, ActivityScrapeJobs, ActivityWakeFilterPending)
+	assertActivityNames(t, *started, ActivityListDueProviders, ActivityWakeFilterPending)
+}
+
+func TestScrapeTick_OneProviderSuccessCompletesWhenSiblingFails(t *testing.T) {
+	env, started, probe := newWorkflowEnv()
+	probe.listForced = true
+	probe.listSources = []string{"LINKEDIN", "DICE"}
+	probe.scrapeBySource = map[string]scraper.Result{
+		"LINKEDIN": {Status: "ok", JobSource: "LINKEDIN", ScrapedCount: 3, SavedCount: 2},
+	}
+	probe.scrapeErrBySource = map[string]error{
+		"DICE": errors.New("apify actor failed"),
+	}
+
+	env.ExecuteWorkflow(ScrapeWorkflow, scraper.TickInput{Force: true})
+
+	if err := env.GetWorkflowError(); err != nil {
+		t.Fatalf("parent must complete when one child fails: %v", err)
+	}
+	var got scraper.Result
+	if err := env.GetWorkflowResult(&got); err != nil {
+		t.Fatalf("read ScrapeTick result: %v", err)
+	}
+	if got.Status != "error" {
+		t.Errorf("combined status = %q, want error when any provider fails", got.Status)
+	}
+	if got.ScrapedCount != 3 || got.SavedCount != 2 {
+		t.Errorf("successful sibling counts must survive, got scraped=%d saved=%d", got.ScrapedCount, got.SavedCount)
+	}
+	if probe.scrape != 2 {
+		t.Errorf("both providers must scrape as parallel activities, scrape calls=%d", probe.scrape)
+	}
+	if probe.wake != 1 {
+		t.Errorf("wake must run once after all scrapes, wake=%d", probe.wake)
+	}
+	if len(*started) != 4 {
+		t.Errorf("started activities = %v, want 4 entries", *started)
+	}
+	assertActivityContains(t, *started,
+		ActivityListDueProviders,
+		ActivityScrapeProviderLinkedIn,
+		ActivityScrapeProviderDice,
+		ActivityWakeFilterPending,
+	)
+}
+
+func TestScrapeTick_ErrorStatusActivityFailsButParentCompletes(t *testing.T) {
+	env, _, probe := newWorkflowEnv()
+	probe.listForced = true
+	probe.listSources = []string{"INDEED"}
+	probe.scrapeBySource = map[string]scraper.Result{
+		"INDEED": {Status: "error", JobSource: "INDEED", Error: "actor timed out"},
+	}
+
+	env.ExecuteWorkflow(ScrapeWorkflow, scraper.TickInput{Force: true})
+
+	if err := env.GetWorkflowError(); err != nil {
+		t.Fatalf("parent must complete when scrape_provider fails: %v", err)
+	}
+	var got scraper.Result
+	if err := env.GetWorkflowResult(&got); err != nil {
+		t.Fatalf("read result: %v", err)
+	}
+	if got.Status != "error" {
+		t.Errorf("status = %q, want error", got.Status)
+	}
+}
+
+func TestScrapeTick_SkippedActivityCompletesGreen(t *testing.T) {
+	env, _, probe := newWorkflowEnv()
+	probe.listForced = true
+	probe.listSources = []string{"INDEED"}
+	probe.scrapeBySource = map[string]scraper.Result{
+		"INDEED": {Status: "skipped", JobSource: "INDEED", Error: "apify advisory lock busy"},
+	}
+
+	env.ExecuteWorkflow(ScrapeWorkflow, scraper.TickInput{Force: true})
+
+	if err := env.GetWorkflowError(); err != nil {
+		t.Fatalf("skipped must keep parent green: %v", err)
+	}
+	var got scraper.Result
+	if err := env.GetWorkflowResult(&got); err != nil {
+		t.Fatalf("read result: %v", err)
+	}
+	if got.Status != "skipped" {
+		t.Errorf("status = %q, want skipped", got.Status)
+	}
 }
 
 func newWorkflowEnv() (*testsuite.TestWorkflowEnvironment, *[]string, *activityProbe) {
@@ -691,7 +875,10 @@ func newWorkflowEnv() (*testsuite.TestWorkflowEnvironment, *[]string, *activityP
 }
 
 func registerProbeActivities(env *testsuite.TestWorkflowEnvironment, probe *activityProbe) {
-	env.RegisterActivityWithOptions(probe.Scrape, activity.RegisterOptions{Name: ActivityScrapeJobs})
+	env.RegisterActivityWithOptions(probe.ListDueProviders, activity.RegisterOptions{Name: ActivityListDueProviders})
+	env.RegisterActivityWithOptions(probe.ScrapeProvider, activity.RegisterOptions{Name: ActivityScrapeProviderLinkedIn})
+	env.RegisterActivityWithOptions(probe.ScrapeProvider, activity.RegisterOptions{Name: ActivityScrapeProviderDice})
+	env.RegisterActivityWithOptions(probe.ScrapeProvider, activity.RegisterOptions{Name: ActivityScrapeProviderIndeed})
 	env.RegisterActivityWithOptions(probe.LoadNotifySnapshot, activity.RegisterOptions{Name: "load_jobs_for_filtering"})
 	env.RegisterActivityWithOptions(probe.LoadProcessJob, activity.RegisterOptions{Name: ActivityLoadProcessJob})
 	env.RegisterActivityWithOptions(probe.LoadFilterLists, activity.RegisterOptions{Name: ActivityLoadFilterLists})
@@ -750,46 +937,68 @@ func domainJobNeedingDescription() domain.Job {
 }
 
 type activityProbe struct {
-	scrape         int
-	webhook        int
-	detailGet      int
-	apply          int
-	groupLoads     int
-	listLoads      int
-	claimCalls     int
-	finish         int
-	wake           int
-	wakeProcess    int
-	statusCalls    int
-	scrapeErr      error
-	wakeErr        error
-	wakeProcessErr error
-	detailErr      error
-	webhookErr     error
-	result         scraper.Result
-	lastIn         scraper.TickInput
-	lastMessage    string
-	snapshot       NotifySnapshot
-	applied        []ApplyJobDecisionInput
-	claim          ClaimBatch
-	finished       []FinishNotifyBatchInput
-	processJob     ProcessJob
-	duplicateGroup []domain.Job
-	filterLists    domain.Lists
-	detailResults  []DetailFetchResult
-	notifyStatus   NotificationStatus
+	scrape            int
+	webhook           int
+	detailGet         int
+	apply             int
+	groupLoads        int
+	listLoads         int
+	claimCalls        int
+	finish            int
+	wake              int
+	wakeProcess       int
+	statusCalls       int
+	scrapeErr         error
+	scrapeErrBySource map[string]error
+	scrapeBySource    map[string]scraper.Result
+	listSources       []string
+	listForced        bool
+	wakeErr           error
+	wakeProcessErr    error
+	detailErr         error
+	webhookErr        error
+	result            scraper.Result
+	lastIn            scraper.TickInput
+	lastSource        string
+	lastMessage       string
+	snapshot          NotifySnapshot
+	applied           []ApplyJobDecisionInput
+	claim             ClaimBatch
+	finished          []FinishNotifyBatchInput
+	processJob        ProcessJob
+	duplicateGroup    []domain.Job
+	filterLists       domain.Lists
+	detailResults     []DetailFetchResult
+	notifyStatus      NotificationStatus
 }
 
-func (p *activityProbe) Scrape(_ context.Context, in scraper.TickInput) (scraper.Result, error) {
-	p.scrape++
+func (p *activityProbe) ListDueProviders(_ context.Context, in scraper.TickInput) ([]string, error) {
 	p.lastIn = in
+	if p.listForced {
+		return p.listSources, nil
+	}
+	if in.JobSource != "" {
+		return []string{in.JobSource}, nil
+	}
+	return nil, nil
+}
+
+func (p *activityProbe) ScrapeProvider(_ context.Context, source string) (scraper.Result, error) {
+	p.scrape++
+	p.lastSource = source
+	if err, ok := p.scrapeErrBySource[source]; ok && err != nil {
+		return scraper.Result{}, err
+	}
 	if p.scrapeErr != nil {
 		return scraper.Result{}, p.scrapeErr
+	}
+	if res, ok := p.scrapeBySource[source]; ok {
+		return res, nil
 	}
 	if p.result.Status != "" {
 		return p.result, nil
 	}
-	src := in.JobSource
+	src := source
 	if src == "" {
 		src = "LINKEDIN"
 	}

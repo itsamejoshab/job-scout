@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/jobscout/jobscout/internal/config"
@@ -104,6 +105,36 @@ func TestScrape_SyncScrapeWakesFilterPending(t *testing.T) {
 		t.Fatalf("POST /api/v0/scrape status=%d body=%s", rec.Code, rec.Body.String())
 	}
 	assertWakeCalls(t, fake, "filter-pending")
+}
+
+func TestScrape_JobSourceDiceUsesDiceProvider(t *testing.T) {
+	pool := pgtest.Open(t)
+	if err := db.Migrate(pool); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	if err := db.SeedSettings(t.Context(), pool); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	h := &Handler{DB: pool, Scraper: scraper.NewService(pool), Temporal: &wakeTemporalFake{}}
+	rec := httptest.NewRecorder()
+	NewServer("", h).Handler.ServeHTTP(
+		rec, httptest.NewRequest(http.MethodPost, "/api/v0/scrape?job_source=DICE", nil))
+	if rec.Code == http.StatusInternalServerError && strings.Contains(rec.Body.String(), "no scraper available") {
+		t.Fatalf("POST /api/v0/scrape?job_source=DICE must use the Dice provider, body=%s", rec.Body.String())
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST /api/v0/scrape?job_source=DICE status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var body scraper.Result
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode scrape: %v", err)
+	}
+	if body.JobSource != "DICE" {
+		t.Errorf("job_source = %q, want DICE", body.JobSource)
+	}
+	if !strings.Contains(strings.ToLower(body.Error), "token") {
+		t.Errorf("empty token scrape error = %q, want token missing", body.Error)
+	}
 }
 
 func newRejectedJobPool(t *testing.T) *sql.DB {

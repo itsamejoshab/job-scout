@@ -39,6 +39,7 @@ import {
   resetSearchSettings,
   startNotify,
   startScrape,
+  type ApifyBudget,
   type ReviewAction,
   type SearchSettingsInput,
   type WorkflowStart,
@@ -309,6 +310,9 @@ const skippedDonutColors: Record<string, string> = {
 };
 
 function providerStatusLabel(status: string) {
+  if (status === "setup_required") {
+    return "setup required";
+  }
   if (status === "due") {
     return "ready";
   }
@@ -316,6 +320,30 @@ function providerStatusLabel(status: string) {
     return "on cooldown";
   }
   return status;
+}
+
+function apifyBudgetLabel(budget: ApifyBudget) {
+  switch (budget.reason) {
+    case "token_missing":
+      return "Apify token is missing";
+    case "budget_exhausted":
+      return "Apify budget is exhausted";
+    case "usage_unknown":
+      return "Apify usage is unknown";
+    case "apify_unavailable":
+      return "Apify budget is unavailable";
+    case "ok":
+      return `Apify budget ${formatUsd(budget.used_usd)} used, ${formatUsd(budget.remaining_usd)} remaining of ${formatUsd(budget.limit_usd)}`;
+    default:
+      return budget.reason;
+  }
+}
+
+function formatUsd(value: number | null) {
+  if (value === null) {
+    return "unknown";
+  }
+  return `$${value.toFixed(2)}`;
 }
 
 function jobStateLabel(state: string) {
@@ -532,7 +560,18 @@ function DashboardPage() {
                   <p>Last scraped: {formatTimestamp(provider.last_scraped_at)}</p>
                   <p>Failure backoff: {formatTimestamp(provider.next_eligible_at)}</p>
                   <p>Total stored jobs: {provider.total_jobs}</p>
+                  {provider.apify_budget ? (
+                    <p>
+                      Apify: {apifyBudgetLabel(provider.apify_budget)}
+                      {provider.apify_budget.blocked ? " (blocked)" : ""}
+                    </p>
+                  ) : null}
                 </div>
+                {provider.configuration_message ? (
+                  <p className="mt-3 rounded-md border border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+                    {provider.configuration_message}
+                  </p>
+                ) : null}
 
                 <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
                   {stateOrder.map((state) => (
@@ -908,6 +947,7 @@ function JobsPage() {
             <option value="">All sources</option>
             <option value="LINKEDIN">LinkedIn</option>
             <option value="INDEED">Indeed</option>
+            <option value="DICE">Dice</option>
           </select>
         </label>
         <label className="text-sm font-medium">

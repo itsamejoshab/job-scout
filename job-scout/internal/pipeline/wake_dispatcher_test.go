@@ -22,7 +22,7 @@ func TestScrapeWorkflow_WakesFilterPendingAfterScrapeSucceeds(t *testing.T) {
 	if probe.wake != 1 {
 		t.Errorf("wake activity calls = %d, want 1 after a successful scrape", probe.wake)
 	}
-	assertActivityNames(t, *started, ActivityScrapeJobs, ActivityWakeFilterPending)
+	assertActivityNames(t, *started, ActivityListDueProviders, ActivityScrapeProviderLinkedIn, ActivityWakeFilterPending)
 }
 
 func TestScrapeWorkflow_WakesFilterPendingWhenScrapeFails(t *testing.T) {
@@ -44,12 +44,13 @@ func TestScrapeWorkflow_WakesFilterPendingWhenScrapeFails(t *testing.T) {
 	if probe.wake != 1 {
 		t.Errorf("wake activity calls = %d, want 1; pending rows may already exist", probe.wake)
 	}
-	assertActivityNames(t, *started, ActivityScrapeJobs, ActivityWakeFilterPending)
+	assertActivityNames(t, *started, ActivityListDueProviders, ActivityScrapeProviderLinkedIn, ActivityWakeFilterPending)
 }
 
 func TestScrapeWorkflow_WakesFilterPendingWhenScrapeSkipped(t *testing.T) {
 	env, started, probe := newWorkflowEnv()
-	probe.result = scraper.Result{Status: "skipped"}
+	probe.listForced = true
+	probe.listSources = []string{}
 
 	env.ExecuteWorkflow(ScrapeWorkflow, scraper.TickInput{})
 
@@ -59,7 +60,7 @@ func TestScrapeWorkflow_WakesFilterPendingWhenScrapeSkipped(t *testing.T) {
 	if probe.wake != 1 {
 		t.Errorf("wake activity calls = %d, want 1 on a skipped scrape", probe.wake)
 	}
-	assertActivityNames(t, *started, ActivityScrapeJobs, ActivityWakeFilterPending)
+	assertActivityNames(t, *started, ActivityListDueProviders, ActivityWakeFilterPending)
 }
 
 func TestScrapeWorkflow_FailedWakeKeepsScrapeResult(t *testing.T) {
