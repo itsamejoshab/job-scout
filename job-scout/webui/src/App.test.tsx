@@ -576,6 +576,23 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+async function expandProvider(
+  user: ReturnType<typeof userEvent.setup>,
+  source: "LINKEDIN" | "INDEED" | "DICE",
+) {
+  const toggle = await screen.findByRole("button", { name: `${source} provider` });
+  if (toggle.getAttribute("aria-expanded") !== "true") {
+    await user.click(toggle);
+  }
+}
+
+async function expandShare(user: ReturnType<typeof userEvent.setup>) {
+  const toggle = await screen.findByRole("button", { name: /share settings/i });
+  if (toggle.getAttribute("aria-expanded") !== "true") {
+    await user.click(toggle);
+  }
+}
+
 describe("operator shell", () => {
   it("renders configured header chrome and names the down dependency", async () => {
     renderPath("/dashboard", {
@@ -595,6 +612,7 @@ describe("operator shell", () => {
     expect(fetch).toHaveBeenCalledWith("/api/v0/config");
     expect(fetch).toHaveBeenCalledWith("/api/v0/status");
     expect(fetch).toHaveBeenCalledWith("/api/v0/dashboard/stats");
+    expect(screen.queryByRole("button", { name: /re-evaluate rejected jobs/i })).not.toBeInTheDocument();
   });
 
   it.each([
@@ -938,6 +956,10 @@ describe("operator shell", () => {
     await user.click(screen.getByRole("button", { name: "Add title include word" }));
     expect(screen.getByRole("button", { name: /remove Desktop Support/i })).toBeInTheDocument();
     expect(save).toBeEnabled();
+    const banner = screen.getByRole("alert");
+    expect(banner).toHaveTextContent(/unsaved settings/i);
+    expect(banner).toHaveTextContent("Filter word lists");
+    expect(screen.getByRole("button", { name: "Save Filter word lists" })).toBeInTheDocument();
   });
 
   it("toggles notification delivery from settings", async () => {
@@ -979,6 +1001,7 @@ describe("operator shell", () => {
       );
       expect(save).toBeDisabled();
       expect(screen.getAllByRole("button", { name: /remove Cloud Ops/i })).toHaveLength(1);
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     });
   });
 
@@ -1011,24 +1034,35 @@ describe("operator shell", () => {
   });
 
   it("renders provider editors and locks Apify providers without a token", async () => {
+    const user = userEvent.setup();
     renderPath("/settings");
 
     expect(await screen.findByRole("heading", { name: "LINKEDIN provider" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "INDEED provider" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "DICE provider" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "LINKEDIN provider" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    expect(screen.queryByRole("checkbox", { name: "Enable INDEED" })).not.toBeInTheDocument();
     expect(screen.queryByText("Not implemented")).not.toBeInTheDocument();
     expect(screen.getAllByText(/setup required/i)).toHaveLength(2);
+    expect(screen.getByRole("button", { name: "Save LINKEDIN settings" })).toBeDisabled();
+
+    await expandProvider(user, "LINKEDIN");
+    await expandProvider(user, "INDEED");
+    await expandProvider(user, "DICE");
     expect(screen.getByRole("checkbox", { name: "Enable INDEED" })).toBeDisabled();
     expect(screen.getByRole("checkbox", { name: "Enable DICE" })).toBeDisabled();
     expect(screen.getAllByText(/set APIFY_API_TOKEN/).length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText(/^Last scraped: (?!never)/)).toBeInTheDocument();
     expect(screen.getAllByText("Next eligible: never")).toHaveLength(3);
-    expect(screen.getByRole("button", { name: "Save LINKEDIN settings" })).toBeDisabled();
   });
 
   it("edits Indeed queries, locations, run options, and hides globals", async () => {
     const user = userEvent.setup();
     renderPath("/settings");
+    await expandProvider(user, "INDEED");
 
     const save = await screen.findByRole("button", { name: "Save INDEED settings" });
     expect(save).toBeDisabled();
@@ -1126,6 +1160,7 @@ describe("operator shell", () => {
   it("edits LinkedIn queries, location work types, and global searches", async () => {
     const user = userEvent.setup();
     renderPath("/settings");
+    await expandProvider(user, "LINKEDIN");
 
     const save = await screen.findByRole("button", { name: "Save LINKEDIN settings" });
     expect(save).toBeDisabled();
@@ -1189,6 +1224,7 @@ describe("operator shell", () => {
   it("edits Dice queries, locations, posted date, and hides globals", async () => {
     const user = userEvent.setup();
     renderPath("/settings");
+    await expandProvider(user, "DICE");
 
     const save = await screen.findByRole("button", { name: "Save DICE settings" });
     expect(save).toBeDisabled();
@@ -1261,6 +1297,7 @@ describe("operator shell", () => {
   it("collapses duplicate Dice locations to the last remote checkbox", async () => {
     const user = userEvent.setup();
     renderPath("/settings");
+    await expandProvider(user, "DICE");
 
     const save = await screen.findByRole("button", { name: "Save DICE settings" });
     await user.click(screen.getByRole("button", { name: "Add Dice location" }));
@@ -1298,7 +1335,7 @@ describe("operator shell", () => {
       const user = userEvent.setup();
       const confirm = vi.spyOn(window, "confirm");
       confirm.mockClear();
-      renderPath("/dashboard", { stats: statsWithRejected(linkedIn, indeed) });
+      renderPath("/settings", { stats: statsWithRejected(linkedIn, indeed) });
       const reEvaluate = await screen.findByRole("button", {
         name: /re-evaluate rejected jobs/i,
       });
@@ -1324,7 +1361,7 @@ describe("operator shell", () => {
   it("posts an empty re-evaluation request and reports the updated row count", async () => {
     const user = userEvent.setup();
     vi.spyOn(window, "confirm").mockReturnValueOnce(true);
-    renderPath("/jobs", { stats: statsWithRejected(3, 2), reEvaluatedCount: 7 });
+    renderPath("/settings", { stats: statsWithRejected(3, 2), reEvaluatedCount: 7 });
 
     const reEvaluate = await screen.findByRole("button", { name: /re-evaluate rejected jobs/i });
     await waitFor(() => {
@@ -1332,7 +1369,7 @@ describe("operator shell", () => {
     });
     await user.click(reEvaluate);
 
-    const result = await screen.findByRole("status");
+    const result = await screen.findByRole("status", { name: /re-evaluation status/i });
     expect(result).toHaveTextContent(/\b7\b/);
     expect(result).not.toHaveTextContent(/\b5\b/);
     const call = (fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls.find(
@@ -1373,6 +1410,18 @@ describe("operator shell", () => {
     renderPath("/settings");
 
     expect(await screen.findByRole("heading", { name: "Share settings" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /share settings/i })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    expect(screen.queryByLabelText("Share code")).not.toBeInTheDocument();
+    const reEvaluate = screen.getByRole("heading", { name: "Re-evaluate rejected jobs" });
+    const notifications = screen.getByRole("heading", { name: "Notifications" });
+    const providers = screen.getByRole("heading", { name: "Provider settings" });
+    const shareHeading = screen.getByRole("heading", { name: "Share settings" });
+    expect(reEvaluate.compareDocumentPosition(notifications) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(providers.compareDocumentPosition(shareHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await expandShare(user);
     const share = await screen.findByLabelText("Share code");
     expect(share).toHaveValue("!JS:1!abcdefghijklmnopqrstuvwxyz012345");
     const json = screen.getByLabelText("JSON") as HTMLTextAreaElement;

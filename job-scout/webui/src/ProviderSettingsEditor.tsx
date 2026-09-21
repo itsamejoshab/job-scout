@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, RotateCcw, Save, Trash2 } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useId, useState, type ReactNode } from "react";
 
 import {
   getDashboardStats,
@@ -11,8 +11,11 @@ import {
   type ProviderSettings,
   type ProviderSettingsInput,
 } from "./api";
+import { CollapseToggle } from "./CollapseToggle";
 import { Badge } from "./components/ui/badge";
 import { Button } from "./components/ui/button";
+import { cn } from "./lib/utils";
+import { useDirtySection } from "./settingsDirty";
 
 const linkedInWorkTypes = [
   { code: "1", label: "On-Site" },
@@ -1001,6 +1004,8 @@ function ProviderSection({
   const [draft, setDraft] = useState(initial);
   const dirty = !inputsEqual(base, draft);
   const source = settings.job_source;
+  const panelID = useId();
+  const [open, setOpen] = useState(false);
 
   const acceptStored = (stored: ProviderSettings) => {
     const next = toInput(stored);
@@ -1021,6 +1026,13 @@ function ProviderSection({
     onSuccess: acceptStored,
   });
   const pending = save.isPending || reset.isPending;
+  useDirtySection(
+    source,
+    dirty,
+    source,
+    () => save.mutate(cloneInput(draft)),
+    pending,
+  );
 
   const patch = (next: Partial<ProviderSettingsInput>) => {
     setDraft((current) => ({ ...current, ...next }));
@@ -1059,10 +1071,25 @@ function ProviderSection({
 
   return (
     <article className="surface mt-3 overflow-hidden">
-      <header className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-border/60 bg-muted/40 px-4 py-3">
-        <h3 className="text-sm font-semibold tracking-tight">{source} provider</h3>
+      <header
+        className={cn(
+          "flex flex-wrap items-center gap-x-3 gap-y-2 bg-muted/40 px-4 py-3",
+          open && "border-b border-border/60",
+        )}
+      >
+        <h3 className="min-w-0 flex-1 text-sm font-semibold tracking-tight">
+          <CollapseToggle open={open} controls={panelID} onToggle={() => setOpen((value) => !value)}>
+            {source} provider
+          </CollapseToggle>
+        </h3>
         {!implemented && <Badge variant="secondary">Not implemented</Badge>}
         {implemented && !configured && <Badge variant="secondary">Setup required</Badge>}
+        {!open && (
+          <span className="text-xs tabular-nums text-muted-foreground">
+            {draft.enabled ? "Enabled" : "Disabled"} · {draft.search_queries.length}{" "}
+            {draft.search_queries.length === 1 ? "query" : "queries"}
+          </span>
+        )}
         <div className="ml-auto flex items-center gap-2">
           {dirty && (
             <span className="text-xs font-medium text-accent-foreground">Unsaved changes</span>
@@ -1092,6 +1119,8 @@ function ProviderSection({
         </div>
       </header>
 
+      {open && (
+        <div id={panelID}>
       {configurationMessage && (
         <p className="border-b border-border/60 bg-muted/20 px-4 py-3 text-sm text-muted-foreground">
           {configurationMessage}
@@ -1268,6 +1297,8 @@ function ProviderSection({
         <p className="border-t border-border/60 px-4 py-3 text-sm text-destructive">
           {(save.error ?? reset.error)?.message}
         </p>
+      )}
+        </div>
       )}
     </article>
   );

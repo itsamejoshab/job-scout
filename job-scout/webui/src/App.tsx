@@ -50,6 +50,7 @@ import { Button } from "./components/ui/button";
 import { cn } from "./lib/utils";
 import { ProviderSettingsEditor } from "./ProviderSettingsEditor";
 import { SettingsSharePanel } from "./SettingsSharePanel";
+import { SettingsDirtyProvider, UnsavedSettingsBanner, useDirtySection } from "./settingsDirty";
 
 const pages = [
   { path: "/dashboard", label: "Dashboard" },
@@ -64,10 +65,6 @@ function Header() {
     queryKey: ["status"],
     queryFn: getStatus,
     refetchInterval: 2_000,
-  });
-  const dashboard = useQuery({
-    queryKey: ["dashboard-stats"],
-    queryFn: getDashboardStats,
   });
 
   const [activeWorkflow, setActiveWorkflow] = useState<WorkflowStart | null>(null);
@@ -119,30 +116,6 @@ function Header() {
     ]);
   }, [activeWorkflow, queryClient, workflow.data?.status]);
 
-  const reEvaluate = useMutation({
-    mutationFn: () => reEvaluateRejectedJobs(),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
-      void queryClient.invalidateQueries({ queryKey: ["jobs"] });
-    },
-  });
-
-  const rejectedCount = (dashboard.data?.providers ?? []).reduce(
-    (total, provider) => total + (provider.by_state.rejected ?? 0),
-    0,
-  );
-
-  const reEvaluateRejected = () => {
-    const confirmed = window.confirm(
-      `Send ${rejectedCount} currently rejected ${rejectedCount === 1 ? "job" : "jobs"} ` +
-        "back to pending for re-evaluation? The count can change before you confirm.",
-    );
-    if (!confirmed) {
-      return;
-    }
-    reEvaluate.mutate();
-  };
-
   const down = status.data
     ? [
         !status.data.database.ok && "Database",
@@ -157,7 +130,7 @@ function Header() {
   const temporalDown = status.data?.temporal.ok === false;
 
   return (
-    <header className="sticky top-0 z-20 border-b border-border/70 bg-background/80 backdrop-blur">
+    <header className="border-b border-border/70">
       <div className="flex w-full flex-wrap items-center gap-4 px-6 py-3 lg:px-10">
         <div className="flex items-center gap-2.5 text-base font-semibold tracking-tight">
           <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
@@ -201,36 +174,11 @@ function Header() {
           >
             Send Email
           </Button>
-          <Button
-            size="sm"
-            variant="action"
-            disabled={reEvaluate.isPending}
-            onClick={reEvaluateRejected}
-            title="Send rejected jobs back to pending so the next notify pass applies the current filters."
-          >
-            Re-Evaluate Rejected Jobs
-            {rejectedCount > 0 && (
-              <span className="rounded-full bg-primary/15 px-1.5 py-0.5 text-xs font-semibold tabular-nums text-accent-foreground">
-                {rejectedCount}
-              </span>
-            )}
-          </Button>
         </div>
         <div className="ml-auto flex flex-wrap items-center justify-end gap-4">
-          {(runMessage || reEvaluate.isPending || reEvaluate.isSuccess || reEvaluate.isError) && (
-            <p
-              role="status"
-              className={cn(
-                "text-sm",
-                reEvaluate.isError ? "text-destructive" : "text-muted-foreground",
-              )}
-            >
-              {reEvaluate.isPending && "Re-evaluating rejected jobs."}
-              {reEvaluate.isSuccess &&
-                `${reEvaluate.data.updated} ${reEvaluate.data.updated === 1 ? "job" : "jobs"} ` +
-                  "moved back to pending."}
-              {reEvaluate.isError && "Re-evaluation failed."}
-              {!reEvaluate.isPending && !reEvaluate.isSuccess && !reEvaluate.isError && runMessage}
+          {runMessage && (
+            <p role="status" className="text-sm text-muted-foreground">
+              {runMessage}
             </p>
           )}
           {activeWorkflow?.workflow_id && config.data?.temporal_ui_address && (
@@ -1245,6 +1193,78 @@ function FilterWordEditor({
   );
 }
 
+function ReEvaluateRejectedSection() {
+  const queryClient = useQueryClient();
+  const dashboard = useQuery({
+    queryKey: ["dashboard-stats"],
+    queryFn: getDashboardStats,
+  });
+  const reEvaluate = useMutation({
+    mutationFn: () => reEvaluateRejectedJobs(),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
+      void queryClient.invalidateQueries({ queryKey: ["jobs"] });
+    },
+  });
+  const rejectedCount = (dashboard.data?.providers ?? []).reduce(
+    (total, provider) => total + (provider.by_state.rejected ?? 0),
+    0,
+  );
+
+  const reEvaluateRejected = () => {
+    const confirmed = window.confirm(
+      `Send ${rejectedCount} currently rejected ${rejectedCount === 1 ? "job" : "jobs"} ` +
+        "back to pending for re-evaluation? The count can change before you confirm.",
+    );
+    if (!confirmed) {
+      return;
+    }
+    reEvaluate.mutate();
+  };
+
+  return (
+    <section className="surface mt-6 overflow-hidden">
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-3 px-4 py-3">
+        <div className="min-w-0 max-w-2xl">
+          <h2 className="text-base font-semibold tracking-tight">Re-evaluate rejected jobs</h2>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            Send rejected jobs back to pending. The next notify pass uses the current filters.
+          </p>
+        </div>
+        <Button
+          size="sm"
+          variant="action"
+          disabled={reEvaluate.isPending}
+          onClick={reEvaluateRejected}
+        >
+          Re-Evaluate Rejected Jobs
+          {rejectedCount > 0 && (
+            <span className="rounded-full bg-primary/15 px-1.5 py-0.5 text-xs font-semibold tabular-nums text-accent-foreground">
+              {rejectedCount}
+            </span>
+          )}
+        </Button>
+      </div>
+      {(reEvaluate.isPending || reEvaluate.isSuccess || reEvaluate.isError) && (
+        <p
+          role="status"
+          aria-label="Re-evaluation status"
+          className={cn(
+            "border-t border-border/60 px-4 py-2 text-sm",
+            reEvaluate.isError ? "text-destructive" : "text-muted-foreground",
+          )}
+        >
+          {reEvaluate.isPending && "Re-evaluating rejected jobs."}
+          {reEvaluate.isSuccess &&
+            `${reEvaluate.data.updated} ${reEvaluate.data.updated === 1 ? "job" : "jobs"} ` +
+              "moved back to pending."}
+          {reEvaluate.isError && "Re-evaluation failed."}
+        </p>
+      )}
+    </section>
+  );
+}
+
 function SettingsPage() {
   const queryClient = useQueryClient();
   const settings = useQuery({
@@ -1298,6 +1318,15 @@ function SettingsPage() {
 
   const dirty = draft !== null && base !== null && !settingsEqual(draft, base);
 
+  const saveFilterSettings = () => {
+    if (!draft) {
+      return;
+    }
+    save.mutate(cloneSettings(draft));
+  };
+
+  useDirtySection("filters", dirty, "Filter word lists", saveFilterSettings, save.isPending);
+
   const addEntry = (key: FilterKey, value: string) => {
     setDraft((current) => {
       if (!current) {
@@ -1320,13 +1349,6 @@ function SettingsPage() {
         [key]: current[key].filter((_, i) => i !== index),
       };
     });
-  };
-
-  const saveFilterSettings = () => {
-    if (!draft) {
-      return;
-    }
-    save.mutate(cloneSettings(draft));
   };
 
   const resetFilterSettings = () => {
@@ -1365,7 +1387,7 @@ function SettingsPage() {
         Edit universal filters and provider scrape settings.
       </p>
 
-      <SettingsSharePanel onImported={applyImportedSettings} />
+      <ReEvaluateRejectedSection />
 
       <section className="surface mt-6 overflow-hidden">
         <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b border-border/60 bg-muted/40 px-4 py-3">
@@ -1466,21 +1488,26 @@ function SettingsPage() {
         </p>
         <ProviderSettingsEditor key={providerEditorKey} />
       </section>
+
+      <SettingsSharePanel onImported={applyImportedSettings} />
     </main>
   );
 }
 
 function OperatorRoutes() {
   return (
-    <>
-      <Header />
+    <SettingsDirtyProvider>
+      <div className="sticky top-0 z-20 bg-background/80 backdrop-blur">
+        <Header />
+        <UnsavedSettingsBanner />
+      </div>
       <Routes>
         <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/jobs" element={<JobsPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>
-    </>
+    </SettingsDirtyProvider>
   );
 }
 
