@@ -1096,7 +1096,7 @@ const filterEditors: Array<{
     key: "onsite_keywords",
     heading: "Onsite keywords",
     noun: "onsite keyword",
-    hint: "Remote or hybrid searches reject a job when title, location, or description contains one of these words.",
+    hint: "Remote, hybrid, and remote-or-hybrid searches reject a job when title, location, or description contains one of these words.",
     tone: "exclude",
   },
   {
@@ -1110,7 +1110,7 @@ const filterEditors: Array<{
     key: "hybrid_keywords",
     heading: "Hybrid keywords",
     noun: "hybrid keyword",
-    hint: "A hybrid search requires one of these words in the title, location, or description.",
+    hint: "A hybrid search requires one of these words in the title, location, or description. Remote searches reject a job that contains one of these words.",
     tone: "include",
   },
 ];

@@ -124,23 +124,30 @@ func passTitleCompany(job Job, lists Lists) bool {
 	return passExclude(job.Company, lists.CompanyExclude)
 }
 
-// passWorkType checks remote/hybrid search intention against keyword lists.
-// Onsite intention skips this check. Empty lists disable that part of the rule.
+// passWorkType checks search intention against work-type keyword lists.
+// Onsite intention is forgiving: remote and hybrid postings still pass.
+// Empty lists disable that part of the rule.
 func passWorkType(job Job, lists Lists) bool {
 	intention := strings.TrimSpace(job.SearchIntention)
 	if intention == "" || intention == IntentionOnsite {
 		return true
 	}
 	haystack := job.Title + "\n" + job.Location + "\n" + job.Description
-	if containsAny(haystack, lists.OnsiteKeywords) {
-		return false
-	}
 	switch intention {
 	case IntentionRemote:
+		if !passExclude(haystack, lists.OnsiteKeywords) || !passExclude(haystack, lists.HybridKeywords) {
+			return false
+		}
 		return passInclude(haystack, lists.RemoteKeywords)
 	case IntentionHybrid:
+		if !passExclude(haystack, lists.OnsiteKeywords) {
+			return false
+		}
 		return passInclude(haystack, lists.HybridKeywords)
 	case IntentionRemoteHybrid:
+		if !passExclude(haystack, lists.OnsiteKeywords) {
+			return false
+		}
 		if len(lists.RemoteKeywords) == 0 && len(lists.HybridKeywords) == 0 {
 			return true
 		}
