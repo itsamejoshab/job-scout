@@ -169,8 +169,8 @@ func TestProcessPendingWorkflow_IdleSignalWakesThenContinuesAsNew(t *testing.T) 
 	if !isContinueAsNewTestError(env.GetWorkflowError()) {
 		t.Fatalf("dispatcher error = %v, want continue-as-new", env.GetWorkflowError())
 	}
-	if !containsDuration(*timers, 2*time.Minute) {
-		t.Errorf("timers = %v, want 2m idle timer", *timers)
+	if !containsDuration(*timers, time.Hour) {
+		t.Errorf("timers = %v, want 1h idle timer", *timers)
 	}
 	if elapsed := env.Now().Sub(startedAt); elapsed != 30*time.Second {
 		t.Errorf("signal idle wait elapsed = %s, want 30s", elapsed)
@@ -187,11 +187,11 @@ func TestProcessPendingWorkflow_IdleTimeoutContinuesAsNew(t *testing.T) {
 	if !isContinueAsNewTestError(env.GetWorkflowError()) {
 		t.Fatalf("dispatcher error = %v, want continue-as-new", env.GetWorkflowError())
 	}
-	if !containsDuration(*timers, 2*time.Minute) {
-		t.Errorf("timers = %v, want 2m idle timer", *timers)
+	if !containsDuration(*timers, time.Hour) {
+		t.Errorf("timers = %v, want 1h idle timer", *timers)
 	}
-	if elapsed := env.Now().Sub(startedAt); elapsed != 2*time.Minute {
-		t.Errorf("idle timeout elapsed = %s, want 2m", elapsed)
+	if elapsed := env.Now().Sub(startedAt); elapsed != time.Hour {
+		t.Errorf("idle timeout elapsed = %s, want 1h", elapsed)
 	}
 }
 
@@ -215,7 +215,7 @@ func assertThrottleTimers(t *testing.T, timers []time.Duration, want int) {
 			got++
 			continue
 		}
-		if d != 2*time.Minute {
+		if d != processPendingIdleWait {
 			t.Errorf("unexpected timer duration %s", d)
 		}
 	}
