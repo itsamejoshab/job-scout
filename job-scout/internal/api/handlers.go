@@ -269,6 +269,9 @@ type replaceSearchSettingsRequest struct {
 	TitleInclude     *[]string `json:"title_include"`
 	TitleExclude     *[]string `json:"title_exclude"`
 	CompanyExclude   *[]string `json:"company_exclude"`
+	OnsiteKeywords   *[]string `json:"onsite_keywords"`
+	RemoteKeywords   *[]string `json:"remote_keywords"`
+	HybridKeywords   *[]string `json:"hybrid_keywords"`
 }
 
 func (in replaceSearchSettingsRequest) validate() error {
@@ -278,6 +281,9 @@ func (in replaceSearchSettingsRequest) validate() error {
 		"title_include":      in.TitleInclude,
 		"title_exclude":      in.TitleExclude,
 		"company_exclude":    in.CompanyExclude,
+		"onsite_keywords":    in.OnsiteKeywords,
+		"remote_keywords":    in.RemoteKeywords,
+		"hybrid_keywords":    in.HybridKeywords,
 	}
 	for field, value := range required {
 		if value == nil {
@@ -311,6 +317,9 @@ func (h *Handler) ReplaceSearchSettings(w http.ResponseWriter, r *http.Request) 
 		TitleInclude:     cloneList(*in.TitleInclude),
 		TitleExclude:     cloneList(*in.TitleExclude),
 		CompanyExclude:   cloneList(*in.CompanyExclude),
+		OnsiteKeywords:   cloneList(*in.OnsiteKeywords),
+		RemoteKeywords:   cloneList(*in.RemoteKeywords),
+		HybridKeywords:   cloneList(*in.HybridKeywords),
 	})
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
@@ -1014,6 +1023,7 @@ type jobListItem struct {
 	State              string       `json:"state"`
 	RejectReason       *string      `json:"reject_reason"`
 	IsRemote           bool         `json:"is_remote"`
+	SearchIntention    string       `json:"search_intention"`
 	DetailAttempts     int          `json:"detail_attempts"`
 	StateChangedAt     time.Time    `json:"state_changed_at"`
 	NotifiedAt         *time.Time   `json:"notified_at"`
@@ -1043,6 +1053,7 @@ func newJobListItem(job db.Job) jobListItem {
 		UpdatedAt: job.UpdatedAt, New: job.New, Duplicate: job.Duplicate,
 		Relevant: job.Relevant, Promising: job.Promising, Notified: job.Notified,
 		State: job.State, RejectReason: job.RejectReason, IsRemote: job.IsRemote,
+		SearchIntention: job.SearchIntention,
 		DetailAttempts: job.DetailAttempts, StateChangedAt: job.StateChangedAt,
 		NotifiedAt: job.NotifiedAt,
 	}

@@ -36,5 +36,15 @@
   "company_exclude": [
     "ClickJobs.io", "Brooksource", "Jobs via Dice", "Franklin Fitch",
     "Westgate Resorts", "Sureguard LLC", "Panda Restaurant Group"
+  ],
+  "onsite_keywords": [
+    "on-site", "onsite", "in office", "in-office", "must report to",
+    "required to be onsite", "travel to office", "not remote"
+  ],
+  "remote_keywords": [
+    "remote", "work from home", "wfh", "fully remote", "100% remote"
+  ],
+  "hybrid_keywords": [
+    "hybrid", "flexible location", "part remote", "partially remote"
   ]
 }

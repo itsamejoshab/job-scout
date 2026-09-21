@@ -395,6 +395,77 @@ func TestFilterAfterDescription_EmptyParsedTextIsThirdFetchFailure(t *testing.T)
 	assertDecision(t, got, Decision{State: StateRejected, RejectReason: ReasonDetailFailed, DetailAttempts: 3})
 }
 
+func TestFilterAfterDescription_RemoteLie(t *testing.T) {
+	lists := Lists{
+		DescInclude:    []string{"computer"},
+		OnsiteKeywords: []string{"onsite", "in office"},
+		RemoteKeywords: []string{"remote", "work from home"},
+		HybridKeywords: []string{"hybrid"},
+	}
+	base := Job{
+		ID: 1, Title: "IT Help Desk", Company: "Acme", Location: "Port Orange, FL",
+		Description: "Support computers remotely from home.",
+	}
+
+	t.Run("onsite intention skips check", func(t *testing.T) {
+		job := base
+		job.SearchIntention = IntentionOnsite
+		job.Description = "Must be onsite. Support computers."
+		got := FilterAfterDescription(job, lists)
+		assertDecision(t, got, Decision{State: StateReady, Description: job.Description})
+	})
+
+	t.Run("remote rejects onsite keyword", func(t *testing.T) {
+		job := base
+		job.SearchIntention = IntentionRemote
+		job.Description = "Remote role but required to be onsite. Support computers."
+		got := FilterAfterDescription(job, lists)
+		assertDecision(t, got, Decision{
+			State: StateRejected, RejectReason: ReasonRemoteLie, Description: job.Description,
+		})
+	})
+
+	t.Run("remote requires remote keyword", func(t *testing.T) {
+		job := base
+		job.SearchIntention = IntentionRemote
+		job.Description = "Support computers in your area."
+		got := FilterAfterDescription(job, lists)
+		assertDecision(t, got, Decision{
+			State: StateRejected, RejectReason: ReasonRemoteLie, Description: job.Description,
+		})
+	})
+
+	t.Run("remote passes with remote keyword", func(t *testing.T) {
+		job := base
+		job.SearchIntention = IntentionRemote
+		job.Description = "Fully remote. Support computers."
+		got := FilterAfterDescription(job, lists)
+		assertDecision(t, got, Decision{State: StateReady, Description: job.Description})
+	})
+
+	t.Run("remote_hybrid accepts hybrid or remote", func(t *testing.T) {
+		job := base
+		job.SearchIntention = IntentionRemoteHybrid
+		job.Description = "Hybrid schedule. Support computers."
+		got := FilterAfterDescription(job, lists)
+		assertDecision(t, got, Decision{State: StateReady, Description: job.Description})
+	})
+
+	t.Run("remote_lie before description exclude", func(t *testing.T) {
+		job := base
+		job.SearchIntention = IntentionRemote
+		job.Description = "Support computers. security clearance required."
+		got := FilterAfterDescription(job, Lists{
+			DescInclude:    []string{"computer"},
+			DescExclude:    []string{"security clearance"},
+			RemoteKeywords: []string{"remote"},
+		})
+		assertDecision(t, got, Decision{
+			State: StateRejected, RejectReason: ReasonRemoteLie, Description: job.Description,
+		})
+	})
+}
+
 func TestOnDetailFetchFailure_ThreeFailuresReject(t *testing.T) {
 	job := Job{ID: 7, Title: "IT Help Desk", Company: "Acme", DetailAttempts: 0}
 	first := OnDetailFetchFailure(job)

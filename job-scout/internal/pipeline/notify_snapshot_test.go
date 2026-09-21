@@ -22,7 +22,8 @@ func LoadNotifySnapshot(ctx context.Context, database *sql.DB) (NotifySnapshot, 
 		lists = domain.Lists{
 			TitleInclude: settings.TitleInclude, TitleExclude: settings.TitleExclude,
 			CompanyExclude: settings.CompanyExclude, DescInclude: settings.DescIncludeWords,
-			DescExclude: settings.DescExcludeWords,
+			DescExclude: settings.DescExcludeWords, OnsiteKeywords: settings.OnsiteKeywords,
+			RemoteKeywords: settings.RemoteKeywords, HybridKeywords: settings.HybridKeywords,
 		}
 	}
 	rows, err := db.ListJobsForNotify(ctx, database)

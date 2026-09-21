@@ -18,6 +18,9 @@ type filterPayload struct {
 	TitleInclude     []string `json:"title_include"`
 	TitleExclude     []string `json:"title_exclude"`
 	CompanyExclude   []string `json:"company_exclude"`
+	OnsiteKeywords   []string `json:"onsite_keywords"`
+	RemoteKeywords   []string `json:"remote_keywords"`
+	HybridKeywords   []string `json:"hybrid_keywords"`
 }
 
 func TestSearchSettings_PutNormalizesAndEchoesStoredRow(t *testing.T) {
@@ -35,6 +38,9 @@ func TestSearchSettings_PutNormalizesAndEchoesStoredRow(t *testing.T) {
 		TitleInclude:     []string{" ", "IT", "it", "Help Desk"},
 		TitleExclude:     []string{"Sales", " sales ", "Manager"},
 		CompanyExclude:   []string{"Acme", " acme ", "Other"},
+		OnsiteKeywords:   []string{" onsite ", "ONSITE", "in office"},
+		RemoteKeywords:   []string{" Remote ", "remote", "wfh"},
+		HybridKeywords:   []string{" hybrid ", "HYBRID"},
 	}
 	body, err := json.Marshal(input)
 	if err != nil {
@@ -59,6 +65,9 @@ func TestSearchSettings_PutNormalizesAndEchoesStoredRow(t *testing.T) {
 		TitleInclude:     []string{"IT", "Help Desk"},
 		TitleExclude:     []string{"Sales", "Manager"},
 		CompanyExclude:   []string{"Acme", "Other"},
+		OnsiteKeywords:   []string{"onsite", "in office"},
+		RemoteKeywords:   []string{"Remote", "wfh"},
+		HybridKeywords:   []string{"hybrid"},
 	}
 	if !reflect.DeepEqual(got.DescIncludeWords, want.DescIncludeWords) {
 		t.Errorf("desc_include_words=%v want %v", got.DescIncludeWords, want.DescIncludeWords)
@@ -75,6 +84,15 @@ func TestSearchSettings_PutNormalizesAndEchoesStoredRow(t *testing.T) {
 	if !reflect.DeepEqual(got.CompanyExclude, want.CompanyExclude) {
 		t.Errorf("company_exclude=%v want %v", got.CompanyExclude, want.CompanyExclude)
 	}
+	if !reflect.DeepEqual(got.OnsiteKeywords, want.OnsiteKeywords) {
+		t.Errorf("onsite_keywords=%v want %v", got.OnsiteKeywords, want.OnsiteKeywords)
+	}
+	if !reflect.DeepEqual(got.RemoteKeywords, want.RemoteKeywords) {
+		t.Errorf("remote_keywords=%v want %v", got.RemoteKeywords, want.RemoteKeywords)
+	}
+	if !reflect.DeepEqual(got.HybridKeywords, want.HybridKeywords) {
+		t.Errorf("hybrid_keywords=%v want %v", got.HybridKeywords, want.HybridKeywords)
+	}
 
 	stored, err := db.GetSearchSettings(t.Context(), pool)
 	if err != nil || stored == nil {
@@ -87,7 +105,10 @@ func TestSearchSettings_PutNormalizesAndEchoesStoredRow(t *testing.T) {
 		!reflect.DeepEqual(got.DescExcludeWords, stored.DescExcludeWords) ||
 		!reflect.DeepEqual(got.TitleInclude, stored.TitleInclude) ||
 		!reflect.DeepEqual(got.TitleExclude, stored.TitleExclude) ||
-		!reflect.DeepEqual(got.CompanyExclude, stored.CompanyExclude) {
+		!reflect.DeepEqual(got.CompanyExclude, stored.CompanyExclude) ||
+		!reflect.DeepEqual(got.OnsiteKeywords, stored.OnsiteKeywords) ||
+		!reflect.DeepEqual(got.RemoteKeywords, stored.RemoteKeywords) ||
+		!reflect.DeepEqual(got.HybridKeywords, stored.HybridKeywords) {
 		t.Errorf("response row != stored row response=%#v stored=%#v", got, stored)
 	}
 }
@@ -106,6 +127,9 @@ func TestSearchSettings_PutAllowsEmptyLists(t *testing.T) {
 		TitleInclude:     []string{},
 		TitleExclude:     []string{},
 		CompanyExclude:   []string{},
+		OnsiteKeywords:   []string{},
+		RemoteKeywords:   []string{},
+		HybridKeywords:   []string{},
 	})
 	if err != nil {
 		t.Fatalf("marshal request: %v", err)
@@ -128,6 +152,9 @@ func TestSearchSettings_PutAllowsEmptyLists(t *testing.T) {
 		"title_include":      stored.TitleInclude,
 		"title_exclude":      stored.TitleExclude,
 		"company_exclude":    stored.CompanyExclude,
+		"onsite_keywords":    stored.OnsiteKeywords,
+		"remote_keywords":    stored.RemoteKeywords,
+		"hybrid_keywords":    stored.HybridKeywords,
 	} {
 		if len(values) != 0 {
 			t.Errorf("%s len=%d want 0", name, len(values))
@@ -202,73 +229,92 @@ func TestSearchSettings_ResetRestoresSeedAndDoesNotTouchProviders(t *testing.T) 
 	rec := httptest.NewRecorder()
 	NewServer("", &Handler{DB: pool}).Handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
-		t.Fatalf("POST /api/v0/search-settings/reset status=%d body=%s", rec.Code, rec.Body.String())
+		t.Fatalf("POST reset status=%d body=%s", rec.Code, rec.Body.String())
 	}
 	var got db.SearchSettings
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
-		t.Fatalf("decode response: %v", err)
+		t.Fatalf("decode reset: %v", err)
 	}
-	for name, values := range map[string][]string{
-		"desc_include_words": got.DescIncludeWords,
-		"desc_exclude_words": got.DescExcludeWords,
-		"title_include":      got.TitleInclude,
-		"title_exclude":      got.TitleExclude,
-		"company_exclude":    got.CompanyExclude,
+	for name, values := range map[string][2][]string{
+		"desc_include_words": {got.DescIncludeWords, seed.DescIncludeWords},
+		"desc_exclude_words": {got.DescExcludeWords, seed.DescExcludeWords},
+		"title_include":      {got.TitleInclude, seed.TitleInclude},
+		"title_exclude":      {got.TitleExclude, seed.TitleExclude},
+		"company_exclude":    {got.CompanyExclude, seed.CompanyExclude},
+		"onsite_keywords":    {got.OnsiteKeywords, seed.OnsiteKeywords},
+		"remote_keywords":    {got.RemoteKeywords, seed.RemoteKeywords},
+		"hybrid_keywords":    {got.HybridKeywords, seed.HybridKeywords},
 	} {
-		var want []string
-		switch name {
-		case "desc_include_words":
-			want = seed.DescIncludeWords
-		case "desc_exclude_words":
-			want = seed.DescExcludeWords
-		case "title_include":
-			want = seed.TitleInclude
-		case "title_exclude":
-			want = seed.TitleExclude
-		case "company_exclude":
-			want = seed.CompanyExclude
+		if !reflect.DeepEqual(values[0], values[1]) {
+			t.Errorf("%s=%v want seed %v", name, values[0], values[1])
 		}
-		if !reflect.DeepEqual(values, want) {
-			t.Errorf("%s=%v want %v", name, values, want)
-		}
-	}
-	stored, err := db.GetSearchSettings(t.Context(), pool)
-	if err != nil || stored == nil {
-		t.Fatalf("GetSearchSettings after reset: %v %#v", err, stored)
-	}
-	if got.ID != stored.ID || got.UpdatedAt != stored.UpdatedAt {
-		t.Errorf("reset response must echo stored row, response=%#v stored=%#v", got, stored)
-	}
-	if !reflect.DeepEqual(got.DescIncludeWords, stored.DescIncludeWords) ||
-		!reflect.DeepEqual(got.DescExcludeWords, stored.DescExcludeWords) ||
-		!reflect.DeepEqual(got.TitleInclude, stored.TitleInclude) ||
-		!reflect.DeepEqual(got.TitleExclude, stored.TitleExclude) ||
-		!reflect.DeepEqual(got.CompanyExclude, stored.CompanyExclude) {
-		t.Errorf("reset response row != stored row response=%#v stored=%#v", got, stored)
 	}
 
-	var pages int
-	var interval int
+	var linkedInPages, linkedInInterval, indeedPages, indeedInterval int
 	if err := pool.QueryRow(`
-		SELECT pages_to_scrape, scrape_interval_seconds
-		FROM scraper_settings
-		WHERE job_source = 'LINKEDIN'
-	`).Scan(&pages, &interval); err != nil {
-		t.Fatalf("select provider settings: %v", err)
+		SELECT pages_to_scrape, scrape_interval_seconds FROM scraper_settings WHERE job_source = 'LINKEDIN'
+	`).Scan(&linkedInPages, &linkedInInterval); err != nil {
+		t.Fatalf("linkedin scraper: %v", err)
 	}
-	if pages != 99 || interval != 777 {
-		t.Errorf("reset must not touch provider rows, got pages=%d interval=%d", pages, interval)
+	if linkedInPages != 99 || linkedInInterval != 777 {
+		t.Errorf("reset must not change LinkedIn scraper settings pages=%d interval=%d", linkedInPages, linkedInInterval)
 	}
-	var pagesIndeed int
-	var intervalIndeed int
 	if err := pool.QueryRow(`
-		SELECT pages_to_scrape, scrape_interval_seconds
-		FROM scraper_settings
-		WHERE job_source = 'INDEED'
-	`).Scan(&pagesIndeed, &intervalIndeed); err != nil {
-		t.Fatalf("select provider settings indeed: %v", err)
+		SELECT pages_to_scrape, scrape_interval_seconds FROM scraper_settings WHERE job_source = 'INDEED'
+	`).Scan(&indeedPages, &indeedInterval); err != nil {
+		t.Fatalf("indeed scraper: %v", err)
 	}
-	if pagesIndeed != 12 || intervalIndeed != 333 {
-		t.Errorf("reset must not touch provider rows, got INDEED pages=%d interval=%d", pagesIndeed, intervalIndeed)
+	if indeedPages != 12 || indeedInterval != 333 {
+		t.Errorf("reset must not change Indeed scraper settings pages=%d interval=%d", indeedPages, indeedInterval)
+	}
+}
+
+func TestSearchSettings_GetAfterPutReturnsCurrentRow(t *testing.T) {
+	pool := pgtest.Open(t)
+	if err := db.Migrate(pool); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	if err := db.SeedSettings(t.Context(), pool); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	body, err := json.Marshal(filterPayload{
+		DescIncludeWords: []string{"only"},
+		DescExcludeWords: []string{},
+		TitleInclude:     []string{"Help Desk"},
+		TitleExclude:     []string{},
+		CompanyExclude:   []string{},
+		OnsiteKeywords:   []string{"onsite"},
+		RemoteKeywords:   []string{"remote"},
+		HybridKeywords:   []string{},
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	put := httptest.NewRequest(http.MethodPut, "/api/v0/search-settings", bytes.NewReader(body))
+	put.Header.Set("Content-Type", "application/json")
+	putRec := httptest.NewRecorder()
+	NewServer("", &Handler{DB: pool}).Handler.ServeHTTP(putRec, put)
+	if putRec.Code != http.StatusOK {
+		t.Fatalf("PUT status=%d body=%s", putRec.Code, putRec.Body.String())
+	}
+
+	get := httptest.NewRequest(http.MethodGet, "/api/v0/search-settings", nil)
+	getRec := httptest.NewRecorder()
+	NewServer("", &Handler{DB: pool}).Handler.ServeHTTP(getRec, get)
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("GET status=%d body=%s", getRec.Code, getRec.Body.String())
+	}
+	var got db.SearchSettings
+	if err := json.Unmarshal(getRec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode GET: %v", err)
+	}
+	if !reflect.DeepEqual(got.DescIncludeWords, []string{"only"}) {
+		t.Errorf("desc_include_words=%v", got.DescIncludeWords)
+	}
+	if !reflect.DeepEqual(got.OnsiteKeywords, []string{"onsite"}) {
+		t.Errorf("onsite_keywords=%v", got.OnsiteKeywords)
+	}
+	if !reflect.DeepEqual(got.RemoteKeywords, []string{"remote"}) {
+		t.Errorf("remote_keywords=%v", got.RemoteKeywords)
 	}
 }

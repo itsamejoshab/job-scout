@@ -187,12 +187,14 @@ func (s *IndeedScraper) scrapeOnce(ctx context.Context, query map[string]string,
 	}
 	scrapedAt := s.client.now()
 	skipped := 0
+	intention := DeriveSearchIntention(db.SourceIndeed, query, remoteFilter)
 	for _, item := range items {
 		job, ok := MapIndeedItem(item, query["location"], scrapedAt)
 		if !ok {
 			skipped++
 			continue
 		}
+		job.SearchIntention = intention
 		jobs = append(jobs, job)
 	}
 	msg := fmt.Sprintf("mapped %d of %d dataset items (%d skipped)", len(jobs), len(items), skipped)

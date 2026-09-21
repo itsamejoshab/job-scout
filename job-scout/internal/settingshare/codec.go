@@ -46,6 +46,9 @@ type Search struct {
 	TitleInclude     []string `json:"title_include"`
 	TitleExclude     []string `json:"title_exclude"`
 	CompanyExclude   []string `json:"company_exclude"`
+	OnsiteKeywords   []string `json:"onsite_keywords"`
+	RemoteKeywords   []string `json:"remote_keywords"`
+	HybridKeywords   []string `json:"hybrid_keywords"`
 }
 
 // Provider is one provider's on-screen scrape configuration.
@@ -187,7 +190,8 @@ func (b Bundle) validate() error {
 	}
 	if b.Search.DescIncludeWords == nil || b.Search.DescExcludeWords == nil ||
 		b.Search.TitleInclude == nil || b.Search.TitleExclude == nil ||
-		b.Search.CompanyExclude == nil {
+		b.Search.CompanyExclude == nil || b.Search.OnsiteKeywords == nil ||
+		b.Search.RemoteKeywords == nil || b.Search.HybridKeywords == nil {
 		return errors.New("search lists must be present")
 	}
 	if b.Providers == nil {

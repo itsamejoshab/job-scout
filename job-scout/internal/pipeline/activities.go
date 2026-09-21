@@ -128,7 +128,8 @@ func (a *Activities) filter_pending_job(ctx context.Context, jobID int64) (Filte
 		lists = domain.Lists{
 			TitleInclude: settings.TitleInclude, TitleExclude: settings.TitleExclude,
 			CompanyExclude: settings.CompanyExclude, DescInclude: settings.DescIncludeWords,
-			DescExclude: settings.DescExcludeWords,
+			DescExclude: settings.DescExcludeWords, OnsiteKeywords: settings.OnsiteKeywords,
+			RemoteKeywords: settings.RemoteKeywords, HybridKeywords: settings.HybridKeywords,
 		}
 	}
 
@@ -174,7 +175,8 @@ func (a *Activities) load_filter_lists(ctx context.Context) (domain.Lists, error
 	return domain.Lists{
 		TitleInclude: settings.TitleInclude, TitleExclude: settings.TitleExclude,
 		CompanyExclude: settings.CompanyExclude, DescInclude: settings.DescIncludeWords,
-		DescExclude: settings.DescExcludeWords,
+		DescExclude: settings.DescExcludeWords, OnsiteKeywords: settings.OnsiteKeywords,
+		RemoteKeywords: settings.RemoteKeywords, HybridKeywords: settings.HybridKeywords,
 	}, nil
 }
 
@@ -307,7 +309,8 @@ func persistDescription(d domain.Decision) bool {
 		return true
 	}
 	return d.State == domain.StateReady ||
-		d.RejectReason == domain.ReasonDescription
+		d.RejectReason == domain.ReasonDescription ||
+		d.RejectReason == domain.ReasonRemoteLie
 }
 
 func processJobFromDB(row db.Job) ProcessJob {
@@ -324,8 +327,9 @@ func domainJobFromDB(row db.Job) domain.Job {
 		description = *row.Description
 	}
 	return domain.Job{
-		ID: row.ID, Title: row.Title, Company: row.Company,
+		ID: row.ID, Title: row.Title, Company: row.Company, Location: row.Location,
 		Description: description, JobURL: row.JobURL,
 		CreatedAt: row.CreatedAt, DetailAttempts: row.DetailAttempts,
+		SearchIntention: row.SearchIntention,
 	}
 }

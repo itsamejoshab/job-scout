@@ -225,7 +225,14 @@ function Header() {
 }
 
 const stateOrder = ["pending", "rejected", "needs_detail", "ready", "applied", "dismissed"];
-const rejectReasonOrder = ["duplicate", "title_company", "description", "detail_failed", "unsupported_source"];
+const rejectReasonOrder = [
+  "duplicate",
+  "title_company",
+  "description",
+  "detail_failed",
+  "unsupported_source",
+  "remote_lie",
+];
 
 const palette = {
   yale: "#16425b",
@@ -257,6 +264,7 @@ const skippedDonutColors: Record<string, string> = {
   description: palette.cerulean,
   detail_failed: palette.mid,
   unsupported_source: palette.sky,
+  remote_lie: "#8b5a2b",
   dismissed: palette.alabaster,
   none: "#b8bcb4",
 };
@@ -332,6 +340,8 @@ function rejectReasonLabel(reason: string) {
       return "Detail fetch failed";
     case "unsupported_source":
       return "Unsupported source";
+    case "remote_lie":
+      return "Lying about Remote";
     case "dismissed":
       return "Dismissed by you";
     case "none":
@@ -1081,6 +1091,27 @@ const filterEditors: Array<{
     hint: "A job is rejected when its company name contains one of these words.",
     tone: "exclude",
   },
+  {
+    key: "onsite_keywords",
+    heading: "Onsite keywords",
+    noun: "onsite keyword",
+    hint: "Remote or hybrid searches reject a job when title, location, or description contains one of these words.",
+    tone: "exclude",
+  },
+  {
+    key: "remote_keywords",
+    heading: "Remote keywords",
+    noun: "remote keyword",
+    hint: "A remote search requires one of these words in the title, location, or description.",
+    tone: "include",
+  },
+  {
+    key: "hybrid_keywords",
+    heading: "Hybrid keywords",
+    noun: "hybrid keyword",
+    hint: "A hybrid search requires one of these words in the title, location, or description.",
+    tone: "include",
+  },
 ];
 
 function listValuesEqual(left: string[], right: string[]) {
@@ -1098,6 +1129,9 @@ function cloneSettings(input: SearchSettingsInput): SearchSettingsInput {
     title_include: [...input.title_include],
     title_exclude: [...input.title_exclude],
     company_exclude: [...input.company_exclude],
+    onsite_keywords: [...input.onsite_keywords],
+    remote_keywords: [...input.remote_keywords],
+    hybrid_keywords: [...input.hybrid_keywords],
   };
 }
 

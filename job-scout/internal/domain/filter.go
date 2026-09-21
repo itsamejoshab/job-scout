@@ -16,19 +16,27 @@ const (
 	ReasonDescription       = "description"
 	ReasonDetailFailed      = "detail_failed"
 	ReasonUnsupportedSource = "unsupported_source"
+	ReasonRemoteLie         = "remote_lie"
+
+	IntentionOnsite       = "onsite"
+	IntentionRemote       = "remote"
+	IntentionHybrid       = "hybrid"
+	IntentionRemoteHybrid = "remote_hybrid"
 
 	MaxDetailAttempts = 3
 )
 
 // Job is one posting for notify filters. It is not a database row type.
 type Job struct {
-	ID             int64
-	Title          string
-	Company        string
-	Description    string
-	JobURL         string
-	CreatedAt      time.Time
-	DetailAttempts int
+	ID              int64
+	Title           string
+	Company         string
+	Location        string
+	Description     string
+	JobURL          string
+	CreatedAt       time.Time
+	DetailAttempts  int
+	SearchIntention string
 }
 
 // Lists is the notify word lists loaded from search_settings.
@@ -38,6 +46,9 @@ type Lists struct {
 	CompanyExclude []string
 	DescInclude    []string
 	DescExclude    []string
+	OnsiteKeywords []string
+	RemoteKeywords []string
+	HybridKeywords []string
 }
 
 // Decision is the next persist for one pending job.
@@ -74,12 +85,17 @@ func FilterPending(job Job, all []Job, lists Lists) Decision {
 	return FilterAfterDescription(job, lists)
 }
 
-// FilterAfterDescription applies description include/exclude checks.
+// FilterAfterDescription applies work-type then description include/exclude checks.
 func FilterAfterDescription(job Job, lists Lists) Decision {
 	if strings.TrimSpace(job.Description) == "" {
 		return OnDetailFetchFailure(job)
 	}
 	d := Decision{Description: job.Description, DetailAttempts: job.DetailAttempts}
+	if !passWorkType(job, lists) {
+		d.State = StateRejected
+		d.RejectReason = ReasonRemoteLie
+		return d
+	}
 	if !passInclude(job.Description, lists.DescInclude) || !passExclude(job.Description, lists.DescExclude) {
 		d.State = StateRejected
 		d.RejectReason = ReasonDescription
@@ -106,6 +122,32 @@ func passTitleCompany(job Job, lists Lists) bool {
 		return false
 	}
 	return passExclude(job.Company, lists.CompanyExclude)
+}
+
+// passWorkType checks remote/hybrid search intention against keyword lists.
+// Onsite intention skips this check. Empty lists disable that part of the rule.
+func passWorkType(job Job, lists Lists) bool {
+	intention := strings.TrimSpace(job.SearchIntention)
+	if intention == "" || intention == IntentionOnsite {
+		return true
+	}
+	haystack := job.Title + "\n" + job.Location + "\n" + job.Description
+	if containsAny(haystack, lists.OnsiteKeywords) {
+		return false
+	}
+	switch intention {
+	case IntentionRemote:
+		return passInclude(haystack, lists.RemoteKeywords)
+	case IntentionHybrid:
+		return passInclude(haystack, lists.HybridKeywords)
+	case IntentionRemoteHybrid:
+		if len(lists.RemoteKeywords) == 0 && len(lists.HybridKeywords) == 0 {
+			return true
+		}
+		return containsAny(haystack, lists.RemoteKeywords) || containsAny(haystack, lists.HybridKeywords)
+	default:
+		return true
+	}
 }
 
 func passInclude(haystack string, needles []string) bool {

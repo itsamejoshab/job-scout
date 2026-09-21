@@ -17,8 +17,9 @@ type JobData struct {
 	Description   string
 	Date          time.Time
 	Source        db.JobSource
-	IsRemote      bool
-	SearchContext string
+	IsRemote         bool
+	SearchContext    string
+	SearchIntention  string
 }
 
 // Provider is implemented by each job-site scraper.
