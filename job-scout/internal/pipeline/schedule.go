@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	_ "time/tzdata" // keep IANA time zones available in the Alpine runtime image
 
 	"github.com/jobscout/jobscout/internal/config"
 	"github.com/jobscout/jobscout/internal/scraper"
