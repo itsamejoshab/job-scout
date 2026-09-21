@@ -407,10 +407,18 @@ func TestFilterAfterDescription_RemoteLie(t *testing.T) {
 		Description: "Support computers remotely from home.",
 	}
 
-	t.Run("onsite intention skips check", func(t *testing.T) {
+	t.Run("onsite accepts remote and hybrid language", func(t *testing.T) {
 		job := base
 		job.SearchIntention = IntentionOnsite
-		job.Description = "Must be onsite. Support computers."
+		job.Description = "Hybrid schedule with remote days. Support computers."
+		got := FilterAfterDescription(job, lists)
+		assertDecision(t, got, Decision{State: StateReady, Description: job.Description})
+	})
+
+	t.Run("empty intention follows onsite rules", func(t *testing.T) {
+		job := base
+		job.SearchIntention = ""
+		job.Description = "Fully remote. Support computers."
 		got := FilterAfterDescription(job, lists)
 		assertDecision(t, got, Decision{State: StateReady, Description: job.Description})
 	})
@@ -420,6 +428,31 @@ func TestFilterAfterDescription_RemoteLie(t *testing.T) {
 		job.SearchIntention = IntentionRemote
 		job.Description = "Remote role but required to be onsite. Support computers."
 		got := FilterAfterDescription(job, lists)
+		assertDecision(t, got, Decision{
+			State: StateRejected, RejectReason: ReasonRemoteLie, Description: job.Description,
+		})
+	})
+
+	t.Run("remote rejects hybrid keyword", func(t *testing.T) {
+		job := base
+		job.SearchIntention = IntentionRemote
+		job.Description = "Remote hybrid schedule. Support computers."
+		got := FilterAfterDescription(job, lists)
+		assertDecision(t, got, Decision{
+			State: StateRejected, RejectReason: ReasonRemoteLie, Description: job.Description,
+		})
+	})
+
+	t.Run("remote rejects days onsite hybrid phrasing", func(t *testing.T) {
+		job := base
+		job.SearchIntention = IntentionRemote
+		job.Description = "This role is 4 days onsite and one remote. Support computers."
+		got := FilterAfterDescription(job, Lists{
+			DescInclude:    lists.DescInclude,
+			OnsiteKeywords: []string{"is onsite", "not remote"},
+			RemoteKeywords: []string{"remote"},
+			HybridKeywords: []string{"hybrid", "days onsite"},
+		})
 		assertDecision(t, got, Decision{
 			State: StateRejected, RejectReason: ReasonRemoteLie, Description: job.Description,
 		})
