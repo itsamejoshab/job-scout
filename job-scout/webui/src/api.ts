@@ -20,10 +20,26 @@ export interface NotificationSettings {
   configured: boolean;
   active: boolean;
   reason?: string;
+  timezone: string;
+  schedule: NotificationSchedule;
+}
+
+export interface SilentPeriod {
+  days: number[];
+  start: string;
+  end: string;
+}
+
+export interface NotificationSchedule {
+  mode: "interval" | "cron";
+  interval_minutes: number;
+  cron_pattern: string;
+  silent_periods: SilentPeriod[];
 }
 
 export interface NotificationSettingsInput {
   enabled: boolean;
+  schedule?: NotificationSchedule;
 }
 
 export type ApifyBudgetReason =
