@@ -3,12 +3,16 @@ import { Check, Copy, Download, Upload } from "lucide-react";
 import { useId, useState } from "react";
 
 import { exportSettings, importSettings } from "./api";
+import { CollapseToggle } from "./CollapseToggle";
 import { Button } from "./components/ui/button";
+import { cn } from "./lib/utils";
 
 export function SettingsSharePanel({ onImported }: { onImported: () => Promise<void> | void }) {
   const shareID = useId();
   const jsonID = useId();
   const importID = useId();
+  const panelID = useId();
+  const [open, setOpen] = useState(false);
   const exported = useQuery({
     queryKey: ["settings-export"],
     queryFn: exportSettings,
@@ -66,14 +70,26 @@ export function SettingsSharePanel({ onImported }: { onImported: () => Promise<v
 
   return (
     <section className="surface mt-6 overflow-hidden">
-      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b border-border/60 bg-muted/40 px-4 py-3">
-        <div>
-          <h2 className="text-base font-semibold tracking-tight">Share settings</h2>
+      <div
+        className={cn(
+          "flex flex-wrap items-center justify-between gap-x-3 gap-y-2 bg-muted/40 px-4 py-3",
+          open && "border-b border-border/60",
+        )}
+      >
+        <div className="min-w-0 flex-1">
+          <h2 className="text-base font-semibold tracking-tight">
+            <CollapseToggle open={open} controls={panelID} onToggle={() => setOpen((value) => !value)}>
+              Share settings
+            </CollapseToggle>
+          </h2>
           <p className="text-xs text-muted-foreground">
             Copy a share code or JSON. The file has the settings on this page only. It does not include API tokens, webhooks, or scrape times.
           </p>
         </div>
       </div>
+
+      {open && (
+        <div id={panelID}>
 
       {exported.isPending && (
         <p className="px-4 py-3 text-sm text-muted-foreground">Loading share code.</p>
@@ -161,6 +177,8 @@ export function SettingsSharePanel({ onImported }: { onImported: () => Promise<v
           Import settings
         </Button>
       </div>
+        </div>
+      )}
     </section>
   );
 }
