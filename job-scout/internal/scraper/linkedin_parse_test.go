@@ -22,9 +22,12 @@ func TestLinkedIn_ParseSearchCardFixture(t *testing.T) {
 	}
 
 	s := NewLinkedIn(db.ScraperSettings{})
-	jobs := s.transformJobCards(doc)
+	jobs, cards := s.transformJobCards(doc)
 	if len(jobs) != 2 {
 		t.Fatalf("parsed jobs = %d, want 2 (skip cards with no entity URN)", len(jobs))
+	}
+	if cards != 3 {
+		t.Errorf("cards = %d, want 3 including the no-URN card", cards)
 	}
 
 	if jobs[0].Title != "IT Help Desk" {
@@ -64,7 +67,7 @@ func TestLinkedIn_GuestSearchURLUsesSeeMoreAPIAndGeoId(t *testing.T) {
 		"keywords": "IT Help Desk",
 		"location": "101076143",
 		"f_WT":     "2",
-	})
+	}, 0)
 	if !strings.Contains(got, "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?") {
 		t.Errorf("search URL must keep the guest see-more API, got %q", got)
 	}
@@ -86,6 +89,17 @@ func TestLinkedIn_GuestSearchURLUsesSeeMoreAPIAndGeoId(t *testing.T) {
 	if !strings.Contains(got, "f_TPR=r84600") {
 		t.Errorf("search URL must keep timespan f_TPR, got %q", got)
 	}
+	if !strings.Contains(got, "start=0") {
+		t.Errorf("first page search URL must send start=0, got %q", got)
+	}
+	later := s.buildSearchURL(map[string]string{
+		"keywords": "IT Help Desk",
+		"location": "101076143",
+		"f_WT":     "2",
+	}, 20)
+	if !strings.Contains(later, "start=20") {
+		t.Errorf("next page must use the observed card count as start, got %q", later)
+	}
 }
 
 func TestLinkedIn_GuestSearchURLCombinesWorkTypesInKeywords(t *testing.T) {
@@ -94,7 +108,7 @@ func TestLinkedIn_GuestSearchURLCombinesWorkTypesInKeywords(t *testing.T) {
 		"keywords": "IT Help Desk",
 		"location": "105135351",
 		"f_WT":     "3,2",
-	})
+	}, 0)
 	if !strings.Contains(got, "keywords=Remote+or+Hybrid+IT+Help+Desk") &&
 		!strings.Contains(got, "keywords=Remote%20or%20Hybrid%20IT%20Help%20Desk") {
 		t.Errorf("search URL must combine selected work types into keywords, got %q", got)
@@ -107,7 +121,7 @@ func TestLinkedIn_GuestSearchURLCombinesWorkTypesInKeywords(t *testing.T) {
 		"keywords": "IT Help Desk",
 		"location": "101076143",
 		"f_WT":     "",
-	})
+	}, 0)
 	if !strings.Contains(unrestricted, "keywords=IT+Help+Desk") &&
 		!strings.Contains(unrestricted, "keywords=IT%20Help%20Desk") {
 		t.Errorf("empty f_WT must leave keywords unchanged, got %q", unrestricted)
@@ -118,7 +132,7 @@ func TestLinkedIn_GuestSearchURLOmitsGeoIdForGlobalSearches(t *testing.T) {
 	s := NewLinkedIn(db.ScraperSettings{TimespanCode: "r84600"})
 	got := s.buildSearchURL(map[string]string{
 		"keywords": "help desk or IT support jobs that are onsite near port orange, FL or hybrid if more than 10 miles, remote only if more than 40 miles",
-	})
+	}, 0)
 	if !strings.Contains(got, "keywords=") {
 		t.Errorf("global search must send natural-language keywords, got %q", got)
 	}

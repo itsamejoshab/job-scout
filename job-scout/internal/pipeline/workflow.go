@@ -371,7 +371,7 @@ func ProcessJobWorkflow(ctx workflow.Context, jobID int64) (ProcessJobResult, er
 		},
 	})
 	getCtx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
-		StartToCloseTimeout: 60 * time.Second,
+		StartToCloseTimeout: 3 * time.Minute,
 		RetryPolicy: &temporal.RetryPolicy{
 			MaximumAttempts: 1,
 		},

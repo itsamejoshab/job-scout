@@ -383,6 +383,33 @@ func TestProcessJobWorkflow_GETActivityDoesNotRetryErrors(t *testing.T) {
 	}
 }
 
+func TestProcessJobWorkflow_DetailGETAllowsThreeMinutes(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+	job := domainJobNeedingDescription()
+	probe := &activityProbe{
+		processJob:    ProcessJob{Job: job, State: domain.StateNeedsDetail, JobSource: "LINKEDIN"},
+		filterLists:   domain.Lists{TitleInclude: []string{"help desk"}},
+		detailResults: []DetailFetchResult{{Description: "computer troubleshooting"}},
+	}
+	registerProbeActivities(env, probe)
+	var timeout time.Duration
+	env.SetOnActivityStartedListener(func(info *activity.Info, _ context.Context, _ converter.EncodedValues) {
+		if info.ActivityType.Name == ActivityGetJobDescription {
+			timeout = info.StartToCloseTimeout
+		}
+	})
+
+	env.ExecuteWorkflow(ProcessJobWorkflow, job.ID)
+
+	if err := env.GetWorkflowError(); err != nil {
+		t.Fatalf("ProcessJobWorkflow error: %v", err)
+	}
+	if timeout != 3*time.Minute {
+		t.Errorf("detail GET StartToCloseTimeout = %s, want 3m for 429 retries", timeout)
+	}
+}
+
 func TestProcessJobWorkflow_ThirdDetailFailureRejects(t *testing.T) {
 	env, _, probe := newWorkflowEnv()
 	job := domainJobNeedingDescription()

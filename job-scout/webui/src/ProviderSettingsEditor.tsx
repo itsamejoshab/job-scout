@@ -1177,7 +1177,7 @@ function ProviderSection({
           </SettingRow>
         )}
         {source !== "INDEED" && (
-          <SettingRow label="Pages to scrape" hint="Result pages to read for each search.">
+          <SettingRow label="Pages to scrape" hint="Max result pages per search. Next start follows cards already returned; stops when a later page is shorter.">
             <input
               type="number"
               min={1}

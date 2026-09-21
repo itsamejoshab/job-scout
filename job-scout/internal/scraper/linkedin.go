@@ -3,9 +3,11 @@ package scraper
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -17,7 +19,16 @@ const linkedInUserAgent = "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.
 
 const linkedInBaseURL = "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search"
 
-var linkedInPagePause = 2 * time.Second
+var linkedInPagePause = 5 * time.Second
+
+// LinkedIn guest search 429s after enough paging; retry the same GET in-place
+// instead of failing the whole scrape. Temporal does not retry the activity.
+var (
+	linkedInRetryAttempts  = 5
+	linkedInRetryInitial   = 4 * time.Second
+	linkedInRetryMaxWait   = 60 * time.Second
+	linkedInRetryHeartbeat = 30 * time.Second
+)
 
 // linkedInWorkTypeOrder is the natural-language order for work-type phrases.
 // LinkedIn ignores f_WT URL filters; selected types are prepended to keywords.
@@ -36,6 +47,7 @@ type LinkedInScraper struct {
 	timespanCode  string
 	pagesToScrape int
 	client        *http.Client
+	sleep         func(context.Context, time.Duration) error
 }
 
 func NewLinkedIn(settings db.ScraperSettings) *LinkedInScraper {
@@ -171,7 +183,7 @@ func combineLinkedInSearchQueries(queries []map[string]string) []map[string]stri
 	return out
 }
 
-func (s *LinkedInScraper) buildSearchURL(query map[string]string) string {
+func (s *LinkedInScraper) buildSearchURL(query map[string]string, start int) string {
 	params := []string{}
 	if kw := query["keywords"]; kw != "" {
 		params = append(params, "keywords="+url.QueryEscape(effectiveLinkedInKeywords(kw, query["f_WT"])))
@@ -180,7 +192,7 @@ func (s *LinkedInScraper) buildSearchURL(query map[string]string) string {
 		params = append(params, "geoId="+loc)
 	}
 	// f_WT is settings-only; LinkedIn guest search ignores it as a URL filter.
-	params = append(params, "f_TPR="+s.timespanCode, "start=0")
+	params = append(params, "f_TPR="+s.timespanCode, fmt.Sprintf("start=%d", start))
 	return linkedInBaseURL + "?" + strings.Join(params, "&")
 }
 
@@ -190,6 +202,8 @@ func (s *LinkedInScraper) ScrapeJobs(ctx context.Context, query map[string]strin
 	}
 
 	var jobs []JobData
+	start := 0
+	firstCards := 0
 	for page := 0; page < s.pagesToScrape; page++ {
 		ReportProgress(ctx, Progress{
 			Phase:         "page",
@@ -201,19 +215,25 @@ func (s *LinkedInScraper) ScrapeJobs(ctx context.Context, query map[string]strin
 			JobsCollected: len(jobs),
 			Message:       fmt.Sprintf("linkedin page %d/%d", page+1, s.pagesToScrape),
 		})
-		slog.Info("scraping linkedin page", "page", page+1, "of", s.pagesToScrape)
-		pageURL := strings.Replace(s.buildSearchURL(query), "start=0", fmt.Sprintf("start=%d", 25*page), 1)
-
-		pageJobs, err := s.scrapePage(ctx, pageURL)
+		slog.Info("scraping linkedin page", "page", page+1, "of", s.pagesToScrape, "start", start)
+		pageJobs, cards, err := s.scrapePage(ctx, s.buildSearchURL(query, start))
 		if err != nil {
 			return jobs, err
 		}
 		jobs = append(jobs, pageJobs...)
-		if len(pageJobs) == 0 {
+		if cards == 0 {
+			break
+		}
+		start += cards
+		if page == 0 {
+			firstCards = cards
+		} else if cards < firstCards {
+			slog.Info("linkedin page short, stopping pagination",
+				"page", page+1, "cards", cards, "first_page_cards", firstCards)
 			break
 		}
 		if page < s.pagesToScrape-1 {
-			if err := sleep(ctx, linkedInPagePause); err != nil {
+			if err := s.pause(ctx, linkedInPagePause); err != nil {
 				return jobs, err
 			}
 		}
@@ -222,33 +242,25 @@ func (s *LinkedInScraper) ScrapeJobs(ctx context.Context, query map[string]strin
 	return jobs, nil
 }
 
-func (s *LinkedInScraper) scrapePage(ctx context.Context, pageURL string) ([]JobData, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, pageURL, nil)
+func (s *LinkedInScraper) scrapePage(ctx context.Context, pageURL string) ([]JobData, int, error) {
+	resp, err := s.doGet(ctx, pageURL, "linkedin")
 	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("User-Agent", linkedInUserAgent)
-
-	resp, err := s.client.Do(req)
-	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("linkedin returned status %d", resp.StatusCode)
-	}
-
 	doc, err := html.Parse(resp.Body)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	return s.transformJobCards(doc), nil
+	jobs, cards := s.transformJobCards(doc)
+	return jobs, cards, nil
 }
 
-func (s *LinkedInScraper) transformJobCards(doc *html.Node) []JobData {
+func (s *LinkedInScraper) transformJobCards(doc *html.Node) ([]JobData, int) {
 	var jobs []JobData
-	for _, item := range findAll(doc, "div", "base-search-card__info") {
+	items := findAll(doc, "div", "base-search-card__info")
+	for _, item := range items {
 		title := text(findFirst(item, "h3", ""))
 		if title == "" {
 			title = "Unknown Title"
@@ -294,7 +306,7 @@ func (s *LinkedInScraper) transformJobCards(doc *html.Node) []JobData {
 			Source:   db.SourceLinkedIn,
 		})
 	}
-	return jobs
+	return jobs, len(items)
 }
 
 // ParseJobDescription extracts the posting body from LinkedIn job-detail HTML.
@@ -305,27 +317,132 @@ func ParseJobDescription(doc *html.Node) string {
 
 // FetchJobDescription GETs job detail HTML and returns parsed text.
 func (s *LinkedInScraper) FetchJobDescription(ctx context.Context, jobURL string) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, jobURL, nil)
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("User-Agent", linkedInUserAgent)
-
-	resp, err := s.client.Do(req)
+	resp, err := s.doGet(ctx, jobURL, "linkedin detail")
 	if err != nil {
 		return "", err
 	}
 	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("linkedin detail returned status %d", resp.StatusCode)
-	}
 
 	doc, err := html.Parse(resp.Body)
 	if err != nil {
 		return "", err
 	}
 	return ParseJobDescription(doc), nil
+}
+
+func (s *LinkedInScraper) doGet(ctx context.Context, rawURL, errPrefix string) (*http.Response, error) {
+	attempts := linkedInRetryAttempts
+	if attempts < 1 {
+		attempts = 1
+	}
+	backoff := linkedInRetryInitial
+	for attempt := 1; attempt <= attempts; attempt++ {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("User-Agent", linkedInUserAgent)
+
+		resp, err := s.client.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		if resp.StatusCode == http.StatusOK {
+			return resp, nil
+		}
+
+		status := resp.StatusCode
+		header := resp.Header.Clone()
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+
+		if !linkedInRetryable(status) || attempt == attempts {
+			return nil, fmt.Errorf("%s returned status %d", errPrefix, status)
+		}
+
+		wait := linkedInRetryWait(header, backoff)
+		slog.Warn("linkedin rate limited, retrying",
+			"status", status,
+			"attempt", attempt,
+			"of", attempts,
+			"wait", wait,
+		)
+		if err := s.pauseHeartbeat(ctx, wait, Progress{
+			Phase:   "rate_limit",
+			Source:  string(db.SourceLinkedIn),
+			Message: fmt.Sprintf("linkedin %d, retry %d/%d in %s", status, attempt, attempts, wait),
+		}); err != nil {
+			return nil, err
+		}
+		if backoff > 0 {
+			backoff *= 2
+			if linkedInRetryMaxWait > 0 && backoff > linkedInRetryMaxWait {
+				backoff = linkedInRetryMaxWait
+			}
+		}
+	}
+	return nil, fmt.Errorf("%s returned status 429", errPrefix)
+}
+
+func linkedInRetryable(status int) bool {
+	return status == http.StatusTooManyRequests || status == http.StatusServiceUnavailable
+}
+
+func linkedInRetryWait(header http.Header, backoff time.Duration) time.Duration {
+	wait := backoff
+	raw := strings.TrimSpace(header.Get("Retry-After"))
+	if raw != "" {
+		if secs, err := strconv.Atoi(raw); err == nil && secs > 0 {
+			wait = time.Duration(secs) * time.Second
+		} else if at, err := http.ParseTime(raw); err == nil {
+			if until := time.Until(at); until > 0 {
+				wait = until
+			}
+		}
+	}
+	if linkedInRetryMaxWait > 0 && wait > linkedInRetryMaxWait {
+		wait = linkedInRetryMaxWait
+	}
+	if wait < 0 {
+		return 0
+	}
+	return wait
+}
+
+func (s *LinkedInScraper) pause(ctx context.Context, d time.Duration) error {
+	if d <= 0 {
+		return nil
+	}
+	if s.sleep != nil {
+		return s.sleep(ctx, d)
+	}
+	return sleep(ctx, d)
+}
+
+func (s *LinkedInScraper) pauseHeartbeat(ctx context.Context, d time.Duration, progress Progress) error {
+	if d <= 0 {
+		return nil
+	}
+	ReportProgress(ctx, progress)
+	chunk := linkedInRetryHeartbeat
+	if chunk <= 0 {
+		chunk = d
+	}
+	remaining := d
+	for remaining > 0 {
+		wait := remaining
+		if wait > chunk {
+			wait = chunk
+		}
+		if err := s.pause(ctx, wait); err != nil {
+			return err
+		}
+		remaining -= wait
+		if remaining > 0 {
+			ReportProgress(ctx, progress)
+		}
+	}
+	return nil
 }
 
 func sleep(ctx context.Context, d time.Duration) error {
