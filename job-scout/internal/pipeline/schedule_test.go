@@ -65,6 +65,91 @@ func TestEnsureSchedules_CreatesEasternSchedulesWhenTimezoneUnset(t *testing.T) 
 	assertScheduledActions(t, byID["jobscout-scrape"], byID["jobscout-notify"])
 }
 
+func TestEnsureNotificationSchedule_IntervalWithOvernightSilentPeriod(t *testing.T) {
+	fake := newFakeSchedules()
+	settings := NotificationSchedule{
+		Mode:            NotificationScheduleInterval,
+		IntervalMinutes: 5,
+		CronPattern:     "0 8 * * *",
+		SilentPeriods: []SilentPeriod{{
+			Days:  []int{1},
+			Start: "22:30",
+			End:   "07:00",
+		}},
+	}
+
+	if err := EnsureNotificationSchedule(
+		context.Background(),
+		fake,
+		config.Config{ReportingTimezone: "America/Chicago"},
+		settings,
+	); err != nil {
+		t.Fatalf("EnsureNotificationSchedule: %v", err)
+	}
+	if len(fake.creates) != 1 {
+		t.Fatalf("creates=%d, want one notification schedule", len(fake.creates))
+	}
+	got := fake.creates[0]
+	assertIntervalSchedule(t, got, 5*time.Minute, 0, "America/Chicago")
+	if len(got.Spec.Skip) != 3 {
+		t.Fatalf("overnight skip calendars=%d, want 3", len(got.Spec.Skip))
+	}
+	if got.Spec.Skip[0].DayOfWeek[0].Start != 1 ||
+		got.Spec.Skip[0].Hour[0].Start != 22 ||
+		got.Spec.Skip[0].Minute[0].Start != 30 {
+		t.Errorf("first Monday skip = %+v", got.Spec.Skip[0])
+	}
+	if got.Spec.Skip[2].DayOfWeek[0].Start != 2 ||
+		got.Spec.Skip[2].Hour[0].Start != 0 ||
+		got.Spec.Skip[2].Hour[0].End != 6 {
+		t.Errorf("Tuesday morning skip = %+v", got.Spec.Skip[2])
+	}
+}
+
+func TestEnsureNotificationSchedule_RejectsInvalidCronBeforeCreate(t *testing.T) {
+	fake := newFakeSchedules()
+	err := EnsureNotificationSchedule(
+		context.Background(),
+		fake,
+		config.Config{},
+		NotificationSchedule{
+			Mode:            NotificationScheduleCron,
+			IntervalMinutes: 15,
+			CronPattern:     "not a cron",
+		},
+	)
+	if err == nil {
+		t.Fatal("invalid cron must fail")
+	}
+	if len(fake.creates) != 0 {
+		t.Fatalf("invalid cron created %d schedules", len(fake.creates))
+	}
+}
+
+func TestNormalizeNotificationSchedule_NormalizesSilentPeriod(t *testing.T) {
+	got, err := NormalizeNotificationSchedule(NotificationSchedule{
+		Mode:            " INTERVAL ",
+		IntervalMinutes: 10,
+		SilentPeriods: []SilentPeriod{{
+			Days:  []int{5, 1, 5},
+			Start: " 09:05 ",
+			End:   "17:30",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("NormalizeNotificationSchedule: %v", err)
+	}
+	if got.Mode != NotificationScheduleInterval {
+		t.Errorf("mode=%q, want interval", got.Mode)
+	}
+	if !reflect.DeepEqual(got.SilentPeriods[0].Days, []int{1, 5}) {
+		t.Errorf("days=%v, want [1 5]", got.SilentPeriods[0].Days)
+	}
+	if got.SilentPeriods[0].Start != "09:05" {
+		t.Errorf("start=%q, want 09:05", got.SilentPeriods[0].Start)
+	}
+}
+
 func TestEnsureSchedules_UpdatesExistingSchedulesIdempotently(t *testing.T) {
 	fake := newFakeSchedules()
 	first := config.Config{ScrapeScheduleSeconds: 60, NotifyCron: "0 8 * * *"}

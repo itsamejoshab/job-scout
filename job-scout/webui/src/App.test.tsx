@@ -234,6 +234,13 @@ const notificationSeed = {
   enabled: true,
   configured: true,
   active: true,
+  timezone: "America/New_York",
+  schedule: {
+    mode: "cron" as const,
+    interval_minutes: 15,
+    cron_pattern: "39 7,17,20 * * *",
+    silent_periods: [],
+  },
 };
 
 type RenderOptions = {
@@ -356,11 +363,16 @@ function renderPath(path: string, options: RenderOptions = {}) {
       });
     }
     if (url === "/api/v0/notification-settings" && method === "PUT") {
-      const payload = JSON.parse(String(init?.body ?? "{}")) as { enabled: boolean };
+      const payload = JSON.parse(String(init?.body ?? "{}")) as {
+        enabled: boolean;
+        schedule?: typeof notificationSeed.schedule;
+      };
       currentNotifications = {
         enabled: payload.enabled,
         configured: currentNotifications.configured,
         active: payload.enabled && currentNotifications.configured,
+        timezone: currentNotifications.timezone,
+        schedule: payload.schedule ?? currentNotifications.schedule,
         ...(payload.enabled && currentNotifications.configured
           ? {}
           : {
@@ -516,8 +528,8 @@ function renderPath(path: string, options: RenderOptions = {}) {
       }
       if (incoming.notifications?.enabled !== undefined) {
         currentNotifications = {
+          ...currentNotifications,
           enabled: incoming.notifications.enabled,
-          configured: currentNotifications.configured,
           active: incoming.notifications.enabled && currentNotifications.configured,
         };
       }
@@ -979,6 +991,44 @@ describe("operator shell", () => {
       );
     });
     expect(await screen.findByText("Notifications are turned off in Settings.")).toBeInTheDocument();
+  });
+
+  it("saves an interval notification schedule with a silent period", async () => {
+    const user = userEvent.setup();
+    renderPath("/settings");
+
+    await user.click(await screen.findByRole("radio", { name: "Every N minutes" }));
+    const minutes = screen.getByRole("spinbutton", { name: "Minutes between notifications" });
+    await user.clear(minutes);
+    await user.type(minutes, "5");
+    await user.click(screen.getByRole("button", { name: "Add silent period" }));
+
+    const save = screen.getByRole("button", { name: "Save notification schedule" });
+    expect(save).toBeEnabled();
+    await user.click(save);
+
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/v0/notification-settings",
+        expect.objectContaining({
+          method: "PUT",
+          body: JSON.stringify({
+            enabled: true,
+            schedule: {
+              mode: "interval",
+              interval_minutes: 5,
+              cron_pattern: "39 7,17,20 * * *",
+              silent_periods: [{
+                days: [0, 1, 2, 3, 4, 5, 6],
+                start: "22:00",
+                end: "07:00",
+              }],
+            },
+          }),
+        }),
+      );
+      expect(save).toBeDisabled();
+    });
   });
 
   it("clears dirty state from echoed stored row after save", async () => {

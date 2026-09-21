@@ -46,7 +46,11 @@ type Handler struct {
 
 // InstallSchedules creates or updates scrape and notify Temporal schedules.
 func (h *Handler) InstallSchedules(ctx context.Context) error {
-	return pipeline.EnsureSchedules(ctx, h.Schedules, h.Cfg)
+	notification, err := h.notificationSchedule(ctx)
+	if err != nil {
+		return err
+	}
+	return pipeline.EnsureSchedulesWithNotification(ctx, h.Schedules, h.Cfg, notification)
 }
 
 // StartDispatchers terminates the legacy process-pending singleton, then
@@ -326,10 +330,12 @@ func (h *Handler) ResetSearchSettings(w http.ResponseWriter, r *http.Request) {
 }
 
 type notificationSettingsView struct {
-	Enabled    bool   `json:"enabled"`
-	Configured bool   `json:"configured"`
-	Active     bool   `json:"active"`
-	Reason     string `json:"reason,omitempty"`
+	Enabled    bool                          `json:"enabled"`
+	Configured bool                          `json:"configured"`
+	Active     bool                          `json:"active"`
+	Reason     string                        `json:"reason,omitempty"`
+	TimeZone   string                        `json:"timezone"`
+	Schedule   pipeline.NotificationSchedule `json:"schedule"`
 }
 
 func (h *Handler) notificationStatus(ctx context.Context) (pipeline.NotificationStatus, error) {
@@ -344,12 +350,80 @@ func (h *Handler) notificationStatus(ctx context.Context) (pipeline.Notification
 	return pipeline.ResolveNotificationStatus(enabled, h.Cfg.NotificationsConfigured()), nil
 }
 
-func (h *Handler) writeNotificationSettings(w http.ResponseWriter, status pipeline.NotificationStatus) {
+func (h *Handler) notificationSchedule(ctx context.Context) (pipeline.NotificationSchedule, error) {
+	fallback := pipeline.DefaultNotificationSchedule(h.Cfg)
+	if h.DB == nil {
+		return fallback, nil
+	}
+	stored, err := db.GetNotificationScheduleSettings(ctx, h.DB)
+	if err != nil {
+		return pipeline.NotificationSchedule{}, err
+	}
+	if stored == nil {
+		return fallback, nil
+	}
+	periods := make([]pipeline.SilentPeriod, len(stored.SilentPeriods))
+	for i, period := range stored.SilentPeriods {
+		periods[i] = pipeline.SilentPeriod{
+			Days:  append([]int(nil), period.Days...),
+			Start: period.Start,
+			End:   period.End,
+		}
+	}
+	return pipeline.NotificationSchedule{
+		Mode:            stored.Mode,
+		IntervalMinutes: stored.IntervalMinutes,
+		CronPattern:     stored.CronPattern,
+		SilentPeriods:   periods,
+	}, nil
+}
+
+func storeNotificationSchedule(
+	ctx context.Context,
+	database *sql.DB,
+	settings pipeline.NotificationSchedule,
+) error {
+	periods := make([]db.SilentPeriod, len(settings.SilentPeriods))
+	for i, period := range settings.SilentPeriods {
+		periods[i] = db.SilentPeriod{
+			Days:  append([]int(nil), period.Days...),
+			Start: period.Start,
+			End:   period.End,
+		}
+	}
+	_, err := db.ReplaceNotificationScheduleSettings(ctx, database, db.NotificationScheduleSettings{
+		Mode:            settings.Mode,
+		IntervalMinutes: settings.IntervalMinutes,
+		CronPattern:     settings.CronPattern,
+		SilentPeriods:   periods,
+	})
+	return err
+}
+
+func notificationTimeZone(cfg config.Config) string {
+	if cfg.ReportingTimezone != "" {
+		return cfg.ReportingTimezone
+	}
+	return "America/New_York"
+}
+
+func (h *Handler) writeNotificationSettings(
+	ctx context.Context,
+	w http.ResponseWriter,
+	status pipeline.NotificationStatus,
+) {
+	schedule, err := h.notificationSchedule(ctx)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	writeJSON(w, http.StatusOK, notificationSettingsView{
 		Enabled:    status.Enabled,
 		Configured: status.Configured,
 		Active:     status.Active,
 		Reason:     status.Reason,
+		TimeZone:   notificationTimeZone(h.Cfg),
+		Schedule:   schedule,
 	})
 }
 
@@ -360,11 +434,12 @@ func (h *Handler) NotificationSettings(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	h.writeNotificationSettings(w, status)
+	h.writeNotificationSettings(r.Context(), w, status)
 }
 
 type replaceNotificationSettingsRequest struct {
-	Enabled *bool `json:"enabled"`
+	Enabled  *bool                          `json:"enabled"`
+	Schedule *pipeline.NotificationSchedule `json:"schedule"`
 }
 
 // PUT /api/v0/notification-settings
@@ -380,6 +455,26 @@ func (h *Handler) ReplaceNotificationSettings(w http.ResponseWriter, r *http.Req
 		writeErr(w, http.StatusBadRequest, "missing required field: enabled")
 		return
 	}
+	if in.Schedule != nil {
+		normalized, err := pipeline.NormalizeNotificationSchedule(*in.Schedule)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if err := pipeline.EnsureNotificationSchedule(
+			r.Context(),
+			h.Schedules,
+			h.Cfg,
+			normalized,
+		); err != nil {
+			writeErr(w, http.StatusInternalServerError, "update notification schedule: "+err.Error())
+			return
+		}
+		if err := storeNotificationSchedule(r.Context(), h.DB, normalized); err != nil {
+			writeErr(w, http.StatusInternalServerError, "store notification schedule: "+err.Error())
+			return
+		}
+	}
 	if _, err := db.SetNotificationsEnabled(r.Context(), h.DB, *in.Enabled); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -389,7 +484,7 @@ func (h *Handler) ReplaceNotificationSettings(w http.ResponseWriter, r *http.Req
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	h.writeNotificationSettings(w, status)
+	h.writeNotificationSettings(r.Context(), w, status)
 }
 
 // GET /api/v0/scraper-settings

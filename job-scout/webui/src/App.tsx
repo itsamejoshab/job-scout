@@ -40,6 +40,7 @@ import {
   startNotify,
   startScrape,
   type ApifyBudget,
+  type NotificationSettingsInput,
   type ReviewAction,
   type SearchSettings,
   type SearchSettingsInput,
@@ -48,6 +49,7 @@ import {
 import { Badge } from "./components/ui/badge";
 import { Button } from "./components/ui/button";
 import { cn } from "./lib/utils";
+import { NotificationScheduleEditor } from "./NotificationScheduleEditor";
 import { ProviderSettingsEditor } from "./ProviderSettingsEditor";
 import { SettingsSharePanel } from "./SettingsSharePanel";
 import { SettingsDirtyProvider, UnsavedSettingsBanner, useDirtySection } from "./settingsDirty";
@@ -1310,7 +1312,7 @@ function SettingsPage() {
   });
 
   const saveNotifications = useMutation({
-    mutationFn: (enabled: boolean) => replaceNotificationSettings({ enabled }),
+    mutationFn: (input: NotificationSettingsInput) => replaceNotificationSettings(input),
     onSuccess: (stored) => {
       queryClient.setQueryData(["notification-settings"], stored);
     },
@@ -1412,7 +1414,9 @@ function SettingsPage() {
                 className="h-4 w-4 rounded border-border"
                 checked={notifications.data.enabled}
                 disabled={saveNotifications.isPending}
-                onChange={(event) => saveNotifications.mutate(event.target.checked)}
+                onChange={(event) =>
+                  saveNotifications.mutate({ enabled: event.target.checked })
+                }
               />
               Enable notifications
             </label>
@@ -1420,6 +1424,20 @@ function SettingsPage() {
               {notificationStatusText}
             </p>
           </div>
+        )}
+        {notifications.data && (
+          <NotificationScheduleEditor
+            schedule={notifications.data.schedule}
+            timezone={notifications.data.timezone}
+            saving={saveNotifications.isPending}
+            saveError={saveNotifications.isError}
+            onSave={(schedule) =>
+              saveNotifications.mutate({
+                enabled: notifications.data.enabled,
+                schedule,
+              })
+            }
+          />
         )}
       </section>
 
