@@ -181,8 +181,8 @@ function toDiceMatrix(searchQueries: ProviderSettings["search_queries"]): DiceMa
     if (!queries.includes(query.keywords)) {
       queries.push(query.keywords);
     }
-    const key = query.location;
     const includeRemote = remoteFlag(query.include_remote);
+    const key = `${query.location}\0${includeRemote ? "1" : "0"}`;
     const existing = seen.get(key);
     if (existing === undefined) {
       seen.set(key, locations.length);
@@ -199,11 +199,12 @@ function fromDiceMatrix(matrix: DiceMatrix): ProviderSettingsInput["search_queri
   const locations: DiceLocation[] = [];
   const seen = new Map<string, number>();
   for (const location of matrix.locations) {
-    const key = location.location.trim();
-    if (key === "") {
+    const city = location.location.trim();
+    if (city === "") {
       locations.push(location);
       continue;
     }
+    const key = `${city}\0${location.includeRemote ? "1" : "0"}`;
     const existing = seen.get(key);
     if (existing === undefined) {
       seen.set(key, locations.length);
@@ -225,6 +226,10 @@ function flagValue(value: ProviderSettings["search_queries"][number]["include_re
   return value === true || value === "true";
 }
 
+function indeedLocationKey(location: string, includeRemote: boolean, includeHybrid: boolean) {
+  return `${location}\0${includeRemote ? "1" : "0"}\0${includeHybrid ? "1" : "0"}`;
+}
+
 function toIndeedMatrix(
   searchQueries: ProviderSettings["search_queries"],
   fallbackRadius = defaultIndeedRadius,
@@ -237,12 +242,12 @@ function toIndeedMatrix(
     if (!queries.includes(query.keywords)) {
       queries.push(query.keywords);
     }
-    const key = query.location;
     const includeRemote = flagValue(query.include_remote);
     const includeHybrid = flagValue(query.include_hybrid);
     const radius = typeof query.radius === "string" && query.radius
       ? query.radius
       : fallbackRadius;
+    const key = indeedLocationKey(query.location, includeRemote, includeHybrid);
     const existing = seen.get(key);
     if (existing === undefined) {
       seen.set(key, locations.length);
@@ -259,11 +264,12 @@ function fromIndeedMatrix(matrix: IndeedMatrix): ProviderSettingsInput["search_q
   const locations: IndeedLocation[] = [];
   const seen = new Map<string, number>();
   for (const location of matrix.locations) {
-    const key = location.location.trim();
-    if (key === "") {
+    const city = location.location.trim();
+    if (city === "") {
       locations.push(location);
       continue;
     }
+    const key = indeedLocationKey(city, location.includeRemote, location.includeHybrid);
     const existing = seen.get(key);
     if (existing === undefined) {
       seen.set(key, locations.length);
@@ -604,7 +610,7 @@ function DiceSearchEditor({
 
       <SettingsGroup
         title="Locations"
-        hint="Free-text city and state. Include remote is stored per location."
+        hint="Free-text city and state. Include remote is stored per location. Add the same city twice when you want both onsite and remote searches."
         count={`${matrix.locations.length} locations`}
       >
         {matrix.locations.length === 0 ? (
@@ -814,7 +820,7 @@ function IndeedSearchEditor({
 
       <SettingsGroup
         title="Locations"
-        hint="Free-text city and state. Radius, remote, and hybrid are stored per location."
+        hint="Free-text city and state. Radius, remote, and hybrid are stored per location. Add the same city twice when you want both onsite and remote searches."
         count={`${matrix.locations.length} locations`}
       >
         {matrix.locations.length === 0 ? (

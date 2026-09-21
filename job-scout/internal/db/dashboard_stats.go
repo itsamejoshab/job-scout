@@ -12,6 +12,7 @@ var dashboardRejectReasons = []string{
 	"description",
 	"detail_failed",
 	"unsupported_source",
+	"remote_lie",
 }
 
 // DashboardProviderStats is one provider row in the aggregate dashboard view.
@@ -85,7 +86,8 @@ func loadDashboardProviders(ctx context.Context, database *sql.DB) ([]DashboardP
 			COUNT(*) FILTER (WHERE j.reject_reason = 'title_company') AS title_company_count,
 			COUNT(*) FILTER (WHERE j.reject_reason = 'description') AS description_count,
 			COUNT(*) FILTER (WHERE j.reject_reason = 'detail_failed') AS detail_failed_count,
-			COUNT(*) FILTER (WHERE j.reject_reason = 'unsupported_source') AS unsupported_source_count
+			COUNT(*) FILTER (WHERE j.reject_reason = 'unsupported_source') AS unsupported_source_count,
+			COUNT(*) FILTER (WHERE j.reject_reason = 'remote_lie') AS remote_lie_count
 		FROM scraper_settings AS s
 		LEFT JOIN jobs AS j ON j.job_source = s.job_source
 		GROUP BY
@@ -110,6 +112,7 @@ func loadDashboardProviders(ctx context.Context, database *sql.DB) ([]DashboardP
 			applied, dismissed                                          int
 			duplicateCount, titleCompanyCount                           int
 			descriptionCount, detailFailedCount, unsupportedSourceCount int
+			remoteLieCount                                              int
 		)
 		if err := rows.Scan(
 			&p.JobSource,
@@ -129,6 +132,7 @@ func loadDashboardProviders(ctx context.Context, database *sql.DB) ([]DashboardP
 			&descriptionCount,
 			&detailFailedCount,
 			&unsupportedSourceCount,
+			&remoteLieCount,
 		); err != nil {
 			return nil, err
 		}
@@ -156,6 +160,7 @@ func loadDashboardProviders(ctx context.Context, database *sql.DB) ([]DashboardP
 			dashboardRejectReasons[2]: descriptionCount,
 			dashboardRejectReasons[3]: detailFailedCount,
 			dashboardRejectReasons[4]: unsupportedSourceCount,
+			dashboardRejectReasons[5]: remoteLieCount,
 		}
 		out = append(out, p)
 	}

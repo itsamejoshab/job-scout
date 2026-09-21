@@ -121,6 +121,7 @@ export interface JobListItem {
   state: string;
   reject_reason: string | null;
   is_remote: boolean;
+  search_intention: string;
   notified_at: string | null;
 }
 
@@ -153,6 +154,9 @@ export interface SearchSettings {
   title_include: string[];
   title_exclude: string[];
   company_exclude: string[];
+  onsite_keywords: string[];
+  remote_keywords: string[];
+  hybrid_keywords: string[];
   created_at: string;
   updated_at: string;
 }
@@ -163,6 +167,9 @@ export interface SearchSettingsInput {
   title_include: string[];
   title_exclude: string[];
   company_exclude: string[];
+  onsite_keywords: string[];
+  remote_keywords: string[];
+  hybrid_keywords: string[];
 }
 
 export interface ProviderSearchQuery {

@@ -323,6 +323,7 @@ queryLoop:
 				jobs, err := provider.ScrapeJobs(ctx, query)
 				searchContext := globalSearchContext(keywords)
 				stampSearchContext(jobs, searchContext)
+				stampSearchIntention(jobs, db.SearchIntentionOnsite)
 				slog.Debug("search completed", "source", source, "round", round+1, "search_context", searchContext, "matches", len(jobs))
 				all = append(all, jobs...)
 				if err != nil {
@@ -370,6 +371,9 @@ queryLoop:
 			jobs, err := provider.ScrapeJobs(ctx, query)
 			searchContext := querySearchContext(source, query)
 			stampSearchContext(jobs, searchContext)
+			if source != db.SourceIndeed {
+				stampSearchIntention(jobs, DeriveSearchIntention(source, query, ""))
+			}
 			slog.Debug("search completed", "source", source, "round", round+1, "search_context", searchContext, "matches", len(jobs))
 			all = append(all, jobs...)
 			if err != nil {
@@ -517,15 +521,16 @@ func (s *Service) saveJobs(ctx context.Context, jobs []JobData) (int, error) {
 			desc = &d
 		}
 		inserted, err := db.InsertJobIfNew(ctx, s.db, db.Job{
-			JobSource:     j.Source,
-			Title:         j.Title,
-			Company:       j.Company,
-			Description:   desc,
-			Location:      j.Location,
-			Date:          j.Date,
-			JobURL:        j.JobURL,
-			IsRemote:      j.IsRemote,
-			SearchContext: j.SearchContext,
+			JobSource:       j.Source,
+			Title:           j.Title,
+			Company:         j.Company,
+			Description:     desc,
+			Location:        j.Location,
+			Date:            j.Date,
+			JobURL:          j.JobURL,
+			IsRemote:        j.IsRemote,
+			SearchContext:   j.SearchContext,
+			SearchIntention: j.SearchIntention,
 		})
 		if err != nil {
 			slog.Error("saving job failed", "title", j.Title, "err", err)
@@ -596,6 +601,12 @@ func CombineResults(results []Result) Result {
 func stampSearchContext(jobs []JobData, searchContext string) {
 	for i := range jobs {
 		jobs[i].SearchContext = searchContext
+	}
+}
+
+func stampSearchIntention(jobs []JobData, intention string) {
+	for i := range jobs {
+		jobs[i].SearchIntention = intention
 	}
 }
 

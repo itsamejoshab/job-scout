@@ -39,6 +39,7 @@ const dashboardStats = {
         description: 0,
         detail_failed: 0,
         unsupported_source: 0,
+        remote_lie: 0,
       },
     },
     {
@@ -67,6 +68,7 @@ const dashboardStats = {
         description: 0,
         detail_failed: 0,
         unsupported_source: 0,
+        remote_lie: 0,
       },
       apify_budget: {
         period_start: "2026-09-21T00:00:00Z",
@@ -104,6 +106,7 @@ const dashboardStats = {
         description: 0,
         detail_failed: 0,
         unsupported_source: 0,
+        remote_lie: 0,
       },
       apify_budget: {
         period_start: "2026-09-21T00:00:00Z",
@@ -138,6 +141,7 @@ const jobsPage = {
       has_description: true,
       description_preview: "A short job description preview.",
       is_remote: true,
+      search_intention: "remote",
     },
   ],
   total: 51,
@@ -151,6 +155,9 @@ const filterSeed = {
   title_include: ["IT"],
   title_exclude: ["manager"],
   company_exclude: ["Bad Co"],
+  onsite_keywords: ["onsite"],
+  remote_keywords: ["remote"],
+  hybrid_keywords: ["hybrid"],
   created_at: "2026-09-18T20:00:00Z",
   updated_at: "2026-09-18T20:00:00Z",
 };
@@ -393,6 +400,9 @@ function renderPath(path: string, options: RenderOptions = {}) {
         title_include: string[];
         title_exclude: string[];
         company_exclude: string[];
+        onsite_keywords: string[];
+        remote_keywords: string[];
+        hybrid_keywords: string[];
       };
       currentSettings = {
         ...currentSettings,
@@ -401,6 +411,9 @@ function renderPath(path: string, options: RenderOptions = {}) {
         title_include: normalizeWords(payload.title_include ?? []),
         title_exclude: normalizeWords(payload.title_exclude ?? []),
         company_exclude: normalizeWords(payload.company_exclude ?? []),
+        onsite_keywords: normalizeWords(payload.onsite_keywords ?? []),
+        remote_keywords: normalizeWords(payload.remote_keywords ?? []),
+        hybrid_keywords: normalizeWords(payload.hybrid_keywords ?? []),
         updated_at: "2026-09-18T20:05:00Z",
       };
       return new Response(JSON.stringify(currentSettings), {
@@ -479,6 +492,9 @@ function renderPath(path: string, options: RenderOptions = {}) {
         title_include: currentSettings.title_include,
         title_exclude: currentSettings.title_exclude,
         company_exclude: currentSettings.company_exclude,
+        onsite_keywords: currentSettings.onsite_keywords,
+        remote_keywords: currentSettings.remote_keywords,
+        hybrid_keywords: currentSettings.hybrid_keywords,
       },
       providers: Object.fromEntries(
         Object.entries(currentProviders).map(([source, provider]) => [
@@ -1344,7 +1360,7 @@ describe("operator shell", () => {
     expect(screen.getByLabelText("Dice location 2 include remote")).not.toBeChecked();
   });
 
-  it("collapses duplicate Dice locations to the last remote checkbox", async () => {
+  it("keeps the same Dice city twice when remote flags differ", async () => {
     const user = userEvent.setup();
     renderPath("/settings");
     await expandProvider(user, "DICE");
@@ -1371,7 +1387,53 @@ describe("operator shell", () => {
       {
         keywords: "Desktop or Endpoint or Application Support",
         location: "Port Orange, FL",
+        include_remote: true,
+      },
+      {
+        keywords: "Desktop or Endpoint or Application Support",
+        location: "Port Orange, FL",
         include_remote: false,
+      },
+    ]);
+  });
+
+  it("keeps the same Indeed city twice when remote flags differ", async () => {
+    const user = userEvent.setup();
+    renderPath("/settings");
+    await expandProvider(user, "INDEED");
+
+    const save = await screen.findByRole("button", { name: "Save INDEED settings" });
+    await user.click(screen.getByRole("button", { name: "Add Indeed location" }));
+    await user.clear(screen.getByLabelText("Indeed location 2"));
+    await user.type(screen.getByLabelText("Indeed location 2"), "Port Orange, FL");
+    await user.click(screen.getByLabelText("Indeed location 2 remote"));
+    await user.click(save);
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/v0/scraper-settings/INDEED",
+        expect.objectContaining({ method: "PUT" }),
+      );
+    });
+    const putCall = (fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls.find(
+      ([input, init]) =>
+        String(input) === "/api/v0/scraper-settings/INDEED" &&
+        (init as RequestInit | undefined)?.method === "PUT",
+    );
+    const payload = JSON.parse(String((putCall?.[1] as RequestInit | undefined)?.body));
+    expect(payload.search_queries).toEqual([
+      {
+        keywords: "Desktop or Endpoint or Application Support",
+        location: "Port Orange, FL",
+        radius: "15",
+        include_remote: false,
+        include_hybrid: false,
+      },
+      {
+        keywords: "Desktop or Endpoint or Application Support",
+        location: "Port Orange, FL",
+        radius: "15",
+        include_remote: true,
+        include_hybrid: false,
       },
     ]);
   });
@@ -1495,6 +1557,9 @@ describe("operator shell", () => {
             title_include: ["Imported Role"],
             title_exclude: ["manager"],
             company_exclude: ["Bad Co"],
+            onsite_keywords: ["onsite"],
+            remote_keywords: ["remote"],
+            hybrid_keywords: ["hybrid"],
           },
           providers: {},
         }),

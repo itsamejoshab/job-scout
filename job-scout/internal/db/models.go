@@ -58,11 +58,20 @@ type Job struct {
 	RejectReason    *string    `json:"reject_reason"`
 	IsRemote        bool       `json:"is_remote"`
 	SearchContext   string     `json:"search_context"`
+	SearchIntention string     `json:"search_intention"`
 	DetailAttempts  int        `json:"detail_attempts"`
 	StateChangedAt  time.Time  `json:"state_changed_at"`
 	NotifiedAt      *time.Time `json:"notified_at"`
 	NotifyClaimedAt *time.Time `json:"-"`
 }
+
+// Search intention values stamped from the scrape that first introduced a job.
+const (
+	SearchIntentionOnsite       = "onsite"
+	SearchIntentionRemote       = "remote"
+	SearchIntentionHybrid       = "hybrid"
+	SearchIntentionRemoteHybrid = "remote_hybrid"
+)
 
 // SearchSettings mirrors the universal `search_settings` table.
 type SearchSettings struct {
@@ -72,6 +81,9 @@ type SearchSettings struct {
 	TitleInclude         []string  `json:"title_include"`
 	TitleExclude         []string  `json:"title_exclude"`
 	CompanyExclude       []string  `json:"company_exclude"`
+	OnsiteKeywords       []string  `json:"onsite_keywords"`
+	RemoteKeywords       []string  `json:"remote_keywords"`
+	HybridKeywords       []string  `json:"hybrid_keywords"`
 	NotificationsEnabled bool      `json:"notifications_enabled"`
 	CreatedAt            time.Time `json:"created_at"`
 	UpdatedAt            time.Time `json:"updated_at"`

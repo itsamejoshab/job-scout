@@ -17,6 +17,9 @@ func sampleBundle() Bundle {
 			TitleInclude:     []string{"IT"},
 			TitleExclude:     []string{"manager"},
 			CompanyExclude:   []string{"Bad Co"},
+			OnsiteKeywords:   []string{"onsite"},
+			RemoteKeywords:   []string{"remote"},
+			HybridKeywords:   []string{"hybrid"},
 		},
 		Providers: map[string]Provider{
 			"LINKEDIN": {

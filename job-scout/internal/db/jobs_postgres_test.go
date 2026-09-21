@@ -97,6 +97,9 @@ func TestJobs_SchemaIdentityStateAndRemoteColumns(t *testing.T) {
 	if !hasColumn(t, pool, "is_remote") {
 		t.Error("jobs.is_remote column is required")
 	}
+	if !hasColumn(t, pool, "search_intention") {
+		t.Error("jobs.search_intention column is required")
+	}
 	if !hasColumn(t, pool, "detail_attempts") {
 		t.Error("jobs.detail_attempts column is required")
 	}
@@ -449,13 +452,60 @@ func applyNamedMigration(t *testing.T, pool *sql.DB, name string) {
 	}
 }
 
+func TestInsertJobIfNew_OnsiteIntentionWinsOverRemote(t *testing.T) {
+	pool := migratedPool(t)
+	ctx := context.Background()
+	url := "https://www.dice.com/job-detail/intention-win"
+
+	first := sampleJob(url)
+	first.JobSource = SourceDice
+	first.SearchIntention = SearchIntentionRemote
+	if _, err := InsertJobIfNew(ctx, pool, first); err != nil {
+		t.Fatalf("insert remote: %v", err)
+	}
+	var intention string
+	if err := pool.QueryRow(`SELECT search_intention FROM jobs WHERE job_url = $1`, url).Scan(&intention); err != nil {
+		t.Fatalf("select intention: %v", err)
+	}
+	if intention != SearchIntentionRemote {
+		t.Fatalf("first stamp = %q, want remote", intention)
+	}
+
+	second := sampleJob(url)
+	second.JobSource = SourceDice
+	second.SearchIntention = SearchIntentionOnsite
+	if _, err := InsertJobIfNew(ctx, pool, second); err != nil {
+		t.Fatalf("insert onsite: %v", err)
+	}
+	if err := pool.QueryRow(`SELECT search_intention FROM jobs WHERE job_url = $1`, url).Scan(&intention); err != nil {
+		t.Fatalf("select after onsite: %v", err)
+	}
+	if intention != SearchIntentionOnsite {
+		t.Errorf("onsite must overwrite remote, got %q", intention)
+	}
+
+	third := sampleJob(url)
+	third.JobSource = SourceDice
+	third.SearchIntention = SearchIntentionRemote
+	if _, err := InsertJobIfNew(ctx, pool, third); err != nil {
+		t.Fatalf("insert remote again: %v", err)
+	}
+	if err := pool.QueryRow(`SELECT search_intention FROM jobs WHERE job_url = $1`, url).Scan(&intention); err != nil {
+		t.Fatalf("select after remote again: %v", err)
+	}
+	if intention != SearchIntentionOnsite {
+		t.Errorf("later remote must not overwrite onsite, got %q", intention)
+	}
+}
+
 func sampleJob(url string) Job {
 	return Job{
-		JobSource: SourceLinkedIn,
-		Title:     "IT Help Desk",
-		Company:   "Acme",
-		Location:  "Remote",
-		JobURL:    url,
+		JobSource:       SourceLinkedIn,
+		Title:           "IT Help Desk",
+		Company:         "Acme",
+		Location:        "Remote",
+		JobURL:          url,
+		SearchIntention: SearchIntentionOnsite,
 	}
 }
 

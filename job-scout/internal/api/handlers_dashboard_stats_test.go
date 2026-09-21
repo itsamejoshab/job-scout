@@ -158,7 +158,7 @@ func TestDashboardStats_AggregatesProvidersAndDailySeries(t *testing.T) {
 		"pending": 1, "rejected": 1, "needs_detail": 0, "ready": 1, "applied": 0, "dismissed": 0,
 	})
 	assertReasonCounts(t, linked.ByRejectReason, map[string]int{
-		"duplicate": 0, "title_company": 1, "description": 0, "detail_failed": 0, "unsupported_source": 0,
+		"duplicate": 0, "title_company": 1, "description": 0, "detail_failed": 0, "unsupported_source": 0, "remote_lie": 0,
 	})
 
 	indeed, ok := providers["INDEED"]
@@ -189,7 +189,7 @@ func TestDashboardStats_AggregatesProvidersAndDailySeries(t *testing.T) {
 		"pending": 0, "rejected": 0, "needs_detail": 0, "ready": 0, "applied": 0, "dismissed": 0,
 	})
 	assertReasonCounts(t, indeed.ByRejectReason, map[string]int{
-		"duplicate": 0, "title_company": 0, "description": 0, "detail_failed": 0, "unsupported_source": 0,
+		"duplicate": 0, "title_company": 0, "description": 0, "detail_failed": 0, "unsupported_source": 0, "remote_lie": 0,
 	})
 
 	expectedDays := make([]string, 0, 14)

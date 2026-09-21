@@ -18,16 +18,17 @@ var seedFS embed.FS
 // none exists yet.
 func GetSearchSettings(ctx context.Context, db *sql.DB) (*SearchSettings, error) {
 	var (
-		s                                     SearchSettings
+		s SearchSettings
 		inc, exc, titleIn, titleEx, companyEx []byte
+		onsite, remote, hybrid                []byte
 	)
 	err := db.QueryRowContext(ctx, `
 		SELECT id, desc_include_words, desc_exclude_words, title_include,
-		       title_exclude, company_exclude, notifications_enabled,
-		       created_at, updated_at
+		       title_exclude, company_exclude, onsite_keywords, remote_keywords,
+		       hybrid_keywords, notifications_enabled, created_at, updated_at
 		FROM search_settings ORDER BY id LIMIT 1
 	`).Scan(&s.ID, &inc, &exc, &titleIn, &titleEx, &companyEx,
-		&s.NotificationsEnabled, &s.CreatedAt, &s.UpdatedAt)
+		&onsite, &remote, &hybrid, &s.NotificationsEnabled, &s.CreatedAt, &s.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -37,6 +38,7 @@ func GetSearchSettings(ctx context.Context, db *sql.DB) (*SearchSettings, error)
 	for raw, dst := range map[*[]byte]*[]string{
 		&inc: &s.DescIncludeWords, &exc: &s.DescExcludeWords, &titleIn: &s.TitleInclude,
 		&titleEx: &s.TitleExclude, &companyEx: &s.CompanyExclude,
+		&onsite: &s.OnsiteKeywords, &remote: &s.RemoteKeywords, &hybrid: &s.HybridKeywords,
 	} {
 		if err := json.Unmarshal(*raw, dst); err != nil {
 			return nil, err
@@ -72,11 +74,13 @@ func SetNotificationsEnabled(ctx context.Context, database *sql.DB, enabled bool
 		}
 		if _, err := database.ExecContext(ctx, `
 			INSERT INTO search_settings (desc_include_words, desc_exclude_words, title_include,
-			                             title_exclude, company_exclude, notifications_enabled)
-			VALUES ($1::json, $2::json, $3::json, $4::json, $5::json, $6)
+			                             title_exclude, company_exclude, onsite_keywords,
+			                             remote_keywords, hybrid_keywords, notifications_enabled)
+			VALUES ($1::json, $2::json, $3::json, $4::json, $5::json, $6::json, $7::json, $8::json, $9)
 		`, mustJSON(seed.DescIncludeWords), mustJSON(seed.DescExcludeWords),
 			mustJSON(seed.TitleInclude), mustJSON(seed.TitleExclude),
-			mustJSON(seed.CompanyExclude), enabled); err != nil {
+			mustJSON(seed.CompanyExclude), mustJSON(seed.OnsiteKeywords),
+			mustJSON(seed.RemoteKeywords), mustJSON(seed.HybridKeywords), enabled); err != nil {
 			return false, err
 		}
 		return GetNotificationsEnabled(ctx, database)
@@ -91,7 +95,7 @@ func SetNotificationsEnabled(ctx context.Context, database *sql.DB, enabled bool
 	return GetNotificationsEnabled(ctx, database)
 }
 
-// ReplaceSearchSettings rewrites all five filter lists and returns the stored row.
+// ReplaceSearchSettings rewrites all filter lists and returns the stored row.
 func ReplaceSearchSettings(ctx context.Context, db *sql.DB, in SearchSettings) (*SearchSettings, error) {
 	normalized := normalizeSearchSettings(in)
 	existing, err := GetSearchSettings(ctx, db)
@@ -101,11 +105,13 @@ func ReplaceSearchSettings(ctx context.Context, db *sql.DB, in SearchSettings) (
 	if existing == nil {
 		if _, err := db.ExecContext(ctx, `
 			INSERT INTO search_settings (desc_include_words, desc_exclude_words, title_include,
-			                             title_exclude, company_exclude)
-			VALUES ($1::json, $2::json, $3::json, $4::json, $5::json)
+			                             title_exclude, company_exclude, onsite_keywords,
+			                             remote_keywords, hybrid_keywords)
+			VALUES ($1::json, $2::json, $3::json, $4::json, $5::json, $6::json, $7::json, $8::json)
 		`, mustJSON(normalized.DescIncludeWords), mustJSON(normalized.DescExcludeWords),
 			mustJSON(normalized.TitleInclude), mustJSON(normalized.TitleExclude),
-			mustJSON(normalized.CompanyExclude)); err != nil {
+			mustJSON(normalized.CompanyExclude), mustJSON(normalized.OnsiteKeywords),
+			mustJSON(normalized.RemoteKeywords), mustJSON(normalized.HybridKeywords)); err != nil {
 			return nil, err
 		}
 		return GetSearchSettings(ctx, db)
@@ -117,11 +123,16 @@ func ReplaceSearchSettings(ctx context.Context, db *sql.DB, in SearchSettings) (
 		    title_include = $3::json,
 		    title_exclude = $4::json,
 		    company_exclude = $5::json,
+		    onsite_keywords = $6::json,
+		    remote_keywords = $7::json,
+		    hybrid_keywords = $8::json,
 		    updated_at = now()
-		WHERE id = $6
+		WHERE id = $9
 	`, mustJSON(normalized.DescIncludeWords), mustJSON(normalized.DescExcludeWords),
 		mustJSON(normalized.TitleInclude), mustJSON(normalized.TitleExclude),
-		mustJSON(normalized.CompanyExclude), existing.ID); err != nil {
+		mustJSON(normalized.CompanyExclude), mustJSON(normalized.OnsiteKeywords),
+		mustJSON(normalized.RemoteKeywords), mustJSON(normalized.HybridKeywords),
+		existing.ID); err != nil {
 		return nil, err
 	}
 	return GetSearchSettings(ctx, db)
@@ -143,6 +154,9 @@ func normalizeSearchSettings(in SearchSettings) SearchSettings {
 		TitleInclude:     normalizeWordList(in.TitleInclude),
 		TitleExclude:     normalizeWordList(in.TitleExclude),
 		CompanyExclude:   normalizeWordList(in.CompanyExclude),
+		OnsiteKeywords:   normalizeWordList(in.OnsiteKeywords),
+		RemoteKeywords:   normalizeWordList(in.RemoteKeywords),
+		HybridKeywords:   normalizeWordList(in.HybridKeywords),
 	}
 }
 
@@ -306,10 +320,12 @@ func seedSearchSettings(ctx context.Context, db *sql.DB) error {
 
 	_, err = db.ExecContext(ctx, `
 		INSERT INTO search_settings (desc_include_words, desc_exclude_words, title_include,
-		                             title_exclude, company_exclude)
-		VALUES ($1::json, $2::json, $3::json, $4::json, $5::json)
+		                             title_exclude, company_exclude, onsite_keywords,
+		                             remote_keywords, hybrid_keywords)
+		VALUES ($1::json, $2::json, $3::json, $4::json, $5::json, $6::json, $7::json, $8::json)
 	`, mustJSON(s.DescIncludeWords), mustJSON(s.DescExcludeWords), mustJSON(s.TitleInclude),
-		mustJSON(s.TitleExclude), mustJSON(s.CompanyExclude))
+		mustJSON(s.TitleExclude), mustJSON(s.CompanyExclude), mustJSON(s.OnsiteKeywords),
+		mustJSON(s.RemoteKeywords), mustJSON(s.HybridKeywords))
 	if err != nil {
 		return err
 	}

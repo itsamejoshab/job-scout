@@ -17,12 +17,17 @@ const (
 )
 
 // InsertJobIfNew inserts a job unless one with the same trimmed job_url already
-// exists. On conflict it ORs is_remote and leaves state unchanged.
+// exists. On conflict it ORs is_remote, keeps the first search_context, and lets
+// an onsite search_intention overwrite a remote/hybrid stamp.
 func InsertJobIfNew(ctx context.Context, db *sql.DB, j Job) (bool, error) {
 	if j.Date.IsZero() {
 		j.Date = time.Now()
 	}
 	url := strings.TrimSpace(j.JobURL)
+	intention := strings.TrimSpace(j.SearchIntention)
+	if intention == "" {
+		intention = SearchIntentionOnsite
+	}
 
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
@@ -32,11 +37,12 @@ func InsertJobIfNew(ctx context.Context, db *sql.DB, j Job) (bool, error) {
 
 	res, err := tx.ExecContext(ctx, `
 		INSERT INTO jobs (job_source, title, company, description, location, date, job_url,
-		                  new, duplicate, relevant, promising, notified, is_remote, search_context)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, TRUE, FALSE, FALSE, FALSE, FALSE, $8, $9)
+		                  new, duplicate, relevant, promising, notified, is_remote,
+		                  search_context, search_intention)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, TRUE, FALSE, FALSE, FALSE, FALSE, $8, $9, $10)
 		ON CONFLICT (job_url) DO NOTHING
 	`, j.JobSource, truncate(j.Title, 100), truncate(j.Company, 100), j.Description,
-		truncate(j.Location, 100), j.Date, url, j.IsRemote, j.SearchContext)
+		truncate(j.Location, 100), j.Date, url, j.IsRemote, j.SearchContext, intention)
 	if err != nil {
 		return false, err
 	}
@@ -48,9 +54,14 @@ func InsertJobIfNew(ctx context.Context, db *sql.DB, j Job) (bool, error) {
 			search_context = CASE
 				WHEN search_context = '' THEN $2
 				ELSE search_context
+			END,
+			search_intention = CASE
+				WHEN $3 = 'onsite' AND search_intention <> 'onsite' THEN $3
+				WHEN search_intention = '' OR search_intention IS NULL THEN $3
+				ELSE search_intention
 			END
-		WHERE job_url = $3
-	`, j.IsRemote, j.SearchContext, url); err != nil {
+		WHERE job_url = $4
+	`, j.IsRemote, j.SearchContext, intention, url); err != nil {
 		return false, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -62,10 +73,7 @@ func InsertJobIfNew(ctx context.Context, db *sql.DB, j Job) (bool, error) {
 // ListJobs returns jobs with pagination.
 func ListJobs(ctx context.Context, db *sql.DB, limit, offset int) ([]Job, error) {
 	rows, err := db.QueryContext(ctx, `
-		SELECT id, job_source, title, company, description, location, date, job_url,
-		       created_at, updated_at, new, duplicate, relevant, promising, notified,
-		       state, reject_reason, is_remote, search_context, detail_attempts, state_changed_at,
-		       notified_at, notify_claimed_at
+		SELECT`+jobSelectColumns+`
 		FROM jobs ORDER BY id LIMIT $1 OFFSET $2
 	`, limit, offset)
 	if err != nil {
@@ -76,13 +84,7 @@ func ListJobs(ctx context.Context, db *sql.DB, limit, offset int) ([]Job, error)
 	jobs := []Job{}
 	for rows.Next() {
 		var j Job
-		if err := rows.Scan(
-			&j.ID, &j.JobSource, &j.Title, &j.Company, &j.Description, &j.Location,
-			&j.Date, &j.JobURL, &j.CreatedAt, &j.UpdatedAt, &j.New, &j.Duplicate,
-			&j.Relevant, &j.Promising, &j.Notified, &j.State, &j.RejectReason,
-			&j.IsRemote, &j.SearchContext, &j.DetailAttempts, &j.StateChangedAt,
-			&j.NotifiedAt, &j.NotifyClaimedAt,
-		); err != nil {
+		if err := scanJob(rows, &j); err != nil {
 			return nil, err
 		}
 		jobs = append(jobs, j)
@@ -271,10 +273,7 @@ func truncate(s string, max int) string {
 // ListJobsForNotify returns every job for duplicate checks and pending filtering.
 func ListJobsForNotify(ctx context.Context, db *sql.DB) ([]Job, error) {
 	rows, err := db.QueryContext(ctx, `
-		SELECT id, job_source, title, company, description, location, date, job_url,
-		       created_at, updated_at, new, duplicate, relevant, promising, notified,
-		       state, reject_reason, is_remote, search_context, detail_attempts, state_changed_at,
-		       notified_at, notify_claimed_at
+		SELECT`+jobSelectColumns+`
 		FROM jobs ORDER BY created_at, id
 	`)
 	if err != nil {
@@ -285,13 +284,7 @@ func ListJobsForNotify(ctx context.Context, db *sql.DB) ([]Job, error) {
 	jobs := []Job{}
 	for rows.Next() {
 		var j Job
-		if err := rows.Scan(
-			&j.ID, &j.JobSource, &j.Title, &j.Company, &j.Description, &j.Location,
-			&j.Date, &j.JobURL, &j.CreatedAt, &j.UpdatedAt, &j.New, &j.Duplicate,
-			&j.Relevant, &j.Promising, &j.Notified, &j.State, &j.RejectReason,
-			&j.IsRemote, &j.SearchContext, &j.DetailAttempts, &j.StateChangedAt,
-			&j.NotifiedAt, &j.NotifyClaimedAt,
-		); err != nil {
+		if err := scanJob(rows, &j); err != nil {
 			return nil, err
 		}
 		jobs = append(jobs, j)
@@ -336,16 +329,16 @@ func ReEvaluateRejectedJobs(ctx context.Context, database *sql.DB) (int64, error
 const jobSelectColumns = `
 		id, job_source, title, company, description, location, date, job_url,
 		created_at, updated_at, new, duplicate, relevant, promising, notified,
-		state, reject_reason, is_remote, search_context, detail_attempts, state_changed_at,
-		notified_at, notify_claimed_at`
+		state, reject_reason, is_remote, search_context, search_intention,
+		detail_attempts, state_changed_at, notified_at, notify_claimed_at`
 
 func scanJob(sc interface{ Scan(...any) error }, j *Job) error {
 	return sc.Scan(
 		&j.ID, &j.JobSource, &j.Title, &j.Company, &j.Description, &j.Location,
 		&j.Date, &j.JobURL, &j.CreatedAt, &j.UpdatedAt, &j.New, &j.Duplicate,
 		&j.Relevant, &j.Promising, &j.Notified, &j.State, &j.RejectReason,
-		&j.IsRemote, &j.SearchContext, &j.DetailAttempts, &j.StateChangedAt,
-		&j.NotifiedAt, &j.NotifyClaimedAt,
+		&j.IsRemote, &j.SearchContext, &j.SearchIntention, &j.DetailAttempts,
+		&j.StateChangedAt, &j.NotifiedAt, &j.NotifyClaimedAt,
 	)
 }
 
