@@ -333,3 +333,39 @@ export function resetProviderSettings(source: string) {
     { method: "POST" },
   );
 }
+
+export interface SharedProviderSettings {
+  enabled: boolean;
+  scrape_interval_seconds: number;
+  timespan_code: string;
+  pages_to_scrape: number;
+  rounds: number;
+  search_queries: ProviderSearchQuery[];
+  global_searches: string[];
+  provider_options?: IndeedProviderOptions | Record<string, unknown>;
+}
+
+export interface SharedSettings {
+  format: "jobscout-settings";
+  version: number;
+  notifications: { enabled: boolean };
+  search: SearchSettingsInput;
+  providers: Record<string, SharedProviderSettings>;
+}
+
+export interface SettingsExport {
+  share_code: string;
+  settings: SharedSettings;
+}
+
+export function exportSettings() {
+  return requestJSON<SettingsExport>("/api/v0/settings/export");
+}
+
+export function importSettings(payload: string | SharedSettings) {
+  return requestJSON<SettingsExport>("/api/v0/settings/import", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ payload }),
+  });
+}

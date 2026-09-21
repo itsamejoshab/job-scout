@@ -41,6 +41,7 @@ import {
   startScrape,
   type ApifyBudget,
   type ReviewAction,
+  type SearchSettings,
   type SearchSettingsInput,
   type WorkflowStart,
 } from "./api";
@@ -48,6 +49,7 @@ import { Badge } from "./components/ui/badge";
 import { Button } from "./components/ui/button";
 import { cn } from "./lib/utils";
 import { ProviderSettingsEditor } from "./ProviderSettingsEditor";
+import { SettingsSharePanel } from "./SettingsSharePanel";
 
 const pages = [
   { path: "/dashboard", label: "Dashboard" },
@@ -1256,6 +1258,7 @@ function SettingsPage() {
 
   const [base, setBase] = useState<SearchSettingsInput | null>(null);
   const [draft, setDraft] = useState<SearchSettingsInput | null>(null);
+  const [providerEditorKey, setProviderEditorKey] = useState(0);
 
   useEffect(() => {
     if (!settings.data || draft !== null) {
@@ -1333,6 +1336,22 @@ function SettingsPage() {
     reset.mutate();
   };
 
+  const applyImportedSettings = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["search-settings"] }),
+      queryClient.invalidateQueries({ queryKey: ["notification-settings"] }),
+      queryClient.invalidateQueries({ queryKey: ["provider-settings"] }),
+      queryClient.invalidateQueries({ queryKey: ["settings-export"] }),
+    ]);
+    const stored = queryClient.getQueryData<SearchSettings>(["search-settings"]);
+    if (stored) {
+      const next = toFilterLists(stored);
+      setBase(next);
+      setDraft(next);
+    }
+    setProviderEditorKey((value) => value + 1);
+  };
+
   const notificationStatusText = notifications.data
     ? notifications.data.active
       ? "Notifications are on. Ready jobs can be sent."
@@ -1345,6 +1364,8 @@ function SettingsPage() {
       <p className="mt-1 text-sm text-muted-foreground">
         Edit universal filters and provider scrape settings.
       </p>
+
+      <SettingsSharePanel onImported={applyImportedSettings} />
 
       <section className="surface mt-6 overflow-hidden">
         <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b border-border/60 bg-muted/40 px-4 py-3">
@@ -1443,7 +1464,7 @@ function SettingsPage() {
         <p className="text-xs text-muted-foreground">
           Each provider keeps its own schedule and search queries.
         </p>
-        <ProviderSettingsEditor />
+        <ProviderSettingsEditor key={providerEditorKey} />
       </section>
     </main>
   );
