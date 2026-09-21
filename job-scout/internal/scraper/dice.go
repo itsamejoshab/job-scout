@@ -91,16 +91,36 @@ func (s *DiceScraper) ScrapeJobs(ctx context.Context, query map[string]string) (
 
 	items, err := s.client.datasetItems(ctx, polled.DefaultDatasetID)
 	if err != nil {
+		RecordAPIContract(ctx, APIContract{
+			Phase:     "apify_dataset",
+			DatasetID: polled.DefaultDatasetID,
+			ErrorBody: truncateProgressString(err.Error(), progressErrorLimit),
+			Message:   "apify dataset fetch failed",
+		})
 		return nil, err
 	}
 	scrapedAt := s.client.now()
+	skipped := 0
 	for _, item := range items {
 		job, ok := MapDiceItem(item, query["location"], scrapedAt)
 		if !ok {
+			skipped++
 			continue
 		}
 		jobs = append(jobs, job)
 	}
+	msg := fmt.Sprintf("mapped %d of %d dataset items (%d skipped)", len(jobs), len(items), skipped)
+	RecordAPIContract(ctx, datasetMapContract(polled.DefaultDatasetID, items, len(jobs), skipped, msg))
+	ReportProgress(ctx, Progress{
+		Phase:         "apify_dataset",
+		Source:        string(db.SourceDice),
+		ApifyRunID:    polled.ID,
+		ApifyStatus:   polled.Status,
+		Keywords:      query["keywords"],
+		Location:      query["location"],
+		JobsCollected: len(jobs),
+		Message:       msg,
+	})
 	if _, waitErr := s.client.waitUsage(ctx, run.ID); waitErr != nil {
 		return jobs, waitErr
 	}

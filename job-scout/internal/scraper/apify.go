@@ -18,9 +18,11 @@ import (
 )
 
 const (
+	ApifyLockRetryDelay     = 500 * time.Millisecond
 	ApifyLockKey            = "APIFY"
 	ApifyDefaultBaseURL     = "https://api.apify.com"
 	ApifyDiceActorID        = "shahidirfan~Dice-Job-Scraper"
+	ApifyIndeedActorID      = "borderline~indeed-scraper"
 	ApifyPollInterval       = 2 * time.Second
 	ApifyPollTimeout        = 12 * time.Minute
 	ApifyUsageWait          = 15 * time.Second
@@ -329,12 +331,19 @@ func (c *ApifyClient) sumPeriodUsage(ctx context.Context, start, end time.Time) 
 	return used, nil
 }
 
-func (c *ApifyClient) startRun(ctx context.Context, actorID string, chargeCents int, input diceActorInput) (apifyRun, error) {
-	u := c.base() + "/v2/acts/" + actorID + "/runs?maxTotalChargeUsd=" + url.QueryEscape(FormatUSDFromCents(chargeCents))
+func (c *ApifyClient) startRun(ctx context.Context, actorID string, chargeCents int, input any) (apifyRun, error) {
+	path := "/v2/acts/" + actorID + "/runs"
+	chargeUSD := FormatUSDFromCents(chargeCents)
+	u := c.base() + path + "?maxTotalChargeUsd=" + url.QueryEscape(chargeUSD)
 	raw, err := json.Marshal(input)
 	if err != nil {
 		return apifyRun{}, err
 	}
+	reqBody := anyToProgressMap(input)
+	ReportProgress(ctx, Progress{
+		Phase:   "apify_start",
+		Message: "starting apify actor run",
+	})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(raw))
 	if err != nil {
 		return apifyRun{}, err
@@ -343,23 +352,89 @@ func (c *ApifyClient) startRun(ctx context.Context, actorID string, chargeCents 
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := c.http().Do(req)
 	if err != nil {
+		RecordAPIContract(ctx, APIContract{
+			Phase:     "apify_start",
+			Method:    http.MethodPost,
+			Path:      path,
+			ActorID:   actorID,
+			ChargeUSD: chargeUSD,
+			Request:   reqBody,
+			ErrorBody: truncateProgressString(err.Error(), progressErrorLimit),
+			Message:   "apify start request failed",
+		})
 		return apifyRun{}, err
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		errBody := truncateProgressString(string(body), progressErrorLimit)
+		RecordAPIContract(ctx, APIContract{
+			Phase:      "apify_start",
+			Method:     http.MethodPost,
+			Path:       path,
+			StatusCode: resp.StatusCode,
+			ActorID:    actorID,
+			ChargeUSD:  chargeUSD,
+			Request:    reqBody,
+			ErrorBody:  errBody,
+			Message:    "apify start rejected",
+		})
 		return apifyRun{}, fmt.Errorf("apify start status %d", resp.StatusCode)
 	}
 	var payload struct {
 		Data apifyRunJSON `json:"data"`
 	}
 	if err := json.Unmarshal(body, &payload); err != nil {
+		RecordAPIContract(ctx, APIContract{
+			Phase:      "apify_start",
+			Method:     http.MethodPost,
+			Path:       path,
+			StatusCode: resp.StatusCode,
+			ActorID:    actorID,
+			ChargeUSD:  chargeUSD,
+			Request:    reqBody,
+			ErrorBody:  truncateProgressString(string(body), progressErrorLimit),
+			Message:    "apify start response decode failed",
+		})
 		return apifyRun{}, err
 	}
 	run := payload.Data.run()
 	if run.ID == "" {
+		RecordAPIContract(ctx, APIContract{
+			Phase:      "apify_start",
+			Method:     http.MethodPost,
+			Path:       path,
+			StatusCode: resp.StatusCode,
+			ActorID:    actorID,
+			ChargeUSD:  chargeUSD,
+			Request:    reqBody,
+			ErrorBody:  truncateProgressString(string(body), progressErrorLimit),
+			Message:    "apify start returned no run id",
+		})
 		return apifyRun{}, fmt.Errorf("apify start returned no run id")
 	}
+	RecordAPIContract(ctx, APIContract{
+		Phase:      "apify_start",
+		Method:     http.MethodPost,
+		Path:       path,
+		StatusCode: resp.StatusCode,
+		ActorID:    actorID,
+		ChargeUSD:  chargeUSD,
+		Request:    reqBody,
+		Response: map[string]any{
+			"id":               run.ID,
+			"status":           run.Status,
+			"defaultDatasetId": run.DefaultDatasetID,
+		},
+		DatasetID: run.DefaultDatasetID,
+		Message:   "apify actor run started",
+	})
+	ReportProgress(ctx, Progress{
+		Phase:       "apify_start",
+		ApifyRunID:  run.ID,
+		ApifyStatus: run.Status,
+		Message:     "apify actor run started",
+	})
 	return run, nil
 }
 
@@ -383,6 +458,12 @@ func (c *ApifyClient) pollRun(ctx context.Context, id string) (apifyRun, error) 
 			}
 			return run, err
 		}
+		ReportProgress(ctx, Progress{
+			Phase:       "apify_poll",
+			ApifyRunID:  id,
+			ApifyStatus: run.Status,
+			Message:     "waiting for apify actor run",
+		})
 		if isTerminalSuccess(run.Status) || isTerminalFailure(run.Status) {
 			return run, nil
 		}
@@ -405,6 +486,12 @@ func (c *ApifyClient) waitUsage(ctx context.Context, id string) (apifyRun, error
 		if err != nil {
 			return run, err
 		}
+		ReportProgress(ctx, Progress{
+			Phase:       "apify_usage",
+			ApifyRunID:  id,
+			ApifyStatus: run.Status,
+			Message:     "waiting for apify usageTotalUsd",
+		})
 		if run.UsageTotalUsd != nil {
 			return run, nil
 		}

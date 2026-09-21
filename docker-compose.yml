@@ -88,7 +88,7 @@ services:
   # --- orchestration ---
   temporal:
     container_name: temporal
-    image: temporalio/auto-setup:latest
+    image: temporalio/auto-setup:${TEMPORAL_VERSION:-1.29.2}
     restart: unless-stopped
     environment:
       - DB=postgres12
@@ -123,7 +123,7 @@ services:
 
   temporal-ui:
     container_name: temporal-ui
-    image: temporalio/ui:2.21.3
+    image: temporalio/ui:${TEMPORAL_UI_VERSION:-2.42.1}
     restart: unless-stopped
     environment:
       - TEMPORAL_ADDRESS=temporal:7233
