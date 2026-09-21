@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -292,6 +292,10 @@ function renderPath(path: string, options: RenderOptions = {}) {
   let workflowStatusIndex = 0;
 
   window.history.replaceState({}, "", path);
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: { writeText: vi.fn().mockResolvedValue(undefined) },
+  });
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     const method = (init?.method ?? "GET").toUpperCase();
@@ -449,6 +453,91 @@ function renderPath(path: string, options: RenderOptions = {}) {
       const source = providerMatch[1] as keyof typeof currentProviders;
       currentProviders[source] = structuredClone(providerSeed[source]);
       return new Response(JSON.stringify(currentProviders[source]), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    const sharedSettings = () => ({
+      format: "jobscout-settings",
+      version: 1,
+      notifications: { enabled: currentNotifications.enabled },
+      search: {
+        desc_include_words: currentSettings.desc_include_words,
+        desc_exclude_words: currentSettings.desc_exclude_words,
+        title_include: currentSettings.title_include,
+        title_exclude: currentSettings.title_exclude,
+        company_exclude: currentSettings.company_exclude,
+      },
+      providers: Object.fromEntries(
+        Object.entries(currentProviders).map(([source, provider]) => [
+          source,
+          {
+            enabled: provider.enabled,
+            scrape_interval_seconds: provider.scrape_interval_seconds,
+            timespan_code: provider.timespan_code,
+            pages_to_scrape: provider.pages_to_scrape,
+            rounds: provider.rounds,
+            search_queries: provider.search_queries,
+            global_searches: provider.global_searches,
+            ...(provider.provider_options ? { provider_options: provider.provider_options } : {}),
+          },
+        ]),
+      ),
+    });
+    if (url === "/api/v0/settings/export" && method === "GET") {
+      return new Response(JSON.stringify({
+        share_code: "!JS:1!abcdefghijklmnopqrstuvwxyz012345",
+        settings: sharedSettings(),
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    if (url === "/api/v0/settings/import" && method === "POST") {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { payload?: unknown };
+      let bundle = body.payload;
+      if (typeof bundle === "string") {
+        const trimmed = bundle.trim();
+        bundle = trimmed.startsWith("!JS:1!")
+          ? sharedSettings()
+          : JSON.parse(trimmed);
+      }
+      const incoming = bundle as {
+        notifications?: { enabled?: boolean };
+        search?: typeof filterSeed;
+        providers?: Record<string, Partial<(typeof currentProviders)["LINKEDIN"]>>;
+      };
+      if (incoming.search) {
+        currentSettings = {
+          ...currentSettings,
+          ...incoming.search,
+          updated_at: "2026-09-18T20:10:00Z",
+        };
+      }
+      if (incoming.notifications?.enabled !== undefined) {
+        currentNotifications = {
+          enabled: incoming.notifications.enabled,
+          configured: currentNotifications.configured,
+          active: incoming.notifications.enabled && currentNotifications.configured,
+        };
+      }
+      if (incoming.providers) {
+        for (const [source, provider] of Object.entries(incoming.providers)) {
+          const key = source as keyof typeof currentProviders;
+          if (!currentProviders[key]) {
+            continue;
+          }
+          currentProviders[key] = {
+            ...currentProviders[key],
+            ...provider,
+            updated_at: "2026-09-18T20:10:00Z",
+          };
+        }
+      }
+      return new Response(JSON.stringify({
+        share_code: "!JS:1!abcdefghijklmnopqrstuvwxyz012345",
+        settings: sharedSettings(),
+      }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       });
@@ -1276,5 +1365,50 @@ describe("operator shell", () => {
         expect.objectContaining({ method: "POST" }),
       );
     });
+  });
+
+  it("copies a settings share code and imports JSON", async () => {
+    const user = userEvent.setup();
+    const confirm = vi.spyOn(window, "confirm");
+    renderPath("/settings");
+
+    expect(await screen.findByRole("heading", { name: "Share settings" })).toBeInTheDocument();
+    const share = await screen.findByLabelText("Share code");
+    expect(share).toHaveValue("!JS:1!abcdefghijklmnopqrstuvwxyz012345");
+    const json = screen.getByLabelText("JSON") as HTMLTextAreaElement;
+    expect(json.value).toContain('"format": "jobscout-settings"');
+    expect(json.value).not.toContain("last_scraped_at");
+
+    await user.click(screen.getByRole("button", { name: "Copy share code" }));
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith("!JS:1!abcdefghijklmnopqrstuvwxyz012345");
+
+    confirm.mockReturnValueOnce(true);
+    const importBox = screen.getByLabelText("Import");
+    fireEvent.change(importBox, {
+      target: {
+        value: JSON.stringify({
+          format: "jobscout-settings",
+          version: 1,
+          notifications: { enabled: true },
+          search: {
+            desc_include_words: ["computer"],
+            desc_exclude_words: ["travel"],
+            title_include: ["Imported Role"],
+            title_exclude: ["manager"],
+            company_exclude: ["Bad Co"],
+          },
+          providers: {},
+        }),
+      },
+    });
+    await user.click(screen.getByRole("button", { name: "Import settings" }));
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/v0/settings/import",
+        expect.objectContaining({ method: "POST" }),
+      );
+    });
+    expect(await screen.findByText("Settings imported.")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /remove Imported Role/i })).toBeInTheDocument();
   });
 });

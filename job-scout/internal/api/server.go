@@ -28,6 +28,8 @@ func NewServer(addr string, h *Handler) *http.Server {
 	mux.HandleFunc("GET /api/v0/scraper-settings/all", h.AllScraperSettings)
 	mux.HandleFunc("PUT /api/v0/scraper-settings/{job_source}", h.ReplaceScraperSettings)
 	mux.HandleFunc("POST /api/v0/scraper-settings/{job_source}/reset", h.ResetScraperSettings)
+	mux.HandleFunc("GET /api/v0/settings/export", h.ExportSettings)
+	mux.HandleFunc("POST /api/v0/settings/import", h.ImportSettings)
 	mux.HandleFunc("GET /api/v0/jobs", h.Jobs)
 	mux.HandleFunc("GET /api/v0/jobs/stats", h.JobStats)
 	mux.HandleFunc("POST /api/v0/jobs/re-evaluate", h.ReEvaluateJobs)
